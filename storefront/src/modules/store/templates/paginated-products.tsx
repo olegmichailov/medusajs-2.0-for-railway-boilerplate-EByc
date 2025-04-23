@@ -1,6 +1,8 @@
+// storefront/src/modules/products/components/paginated-products.tsx
+
 "use client"
 
-import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
@@ -10,15 +12,6 @@ const PRODUCT_LIMIT = 12
 
 const columnOptionsMobile = [1, 2]
 const columnOptionsDesktop = [1, 2, 3, 4]
-
-type PaginatedProductsParams = {
-  limit: number
-  offset?: number
-  collection_id?: string[]
-  category_id?: string[]
-  id?: string[]
-  order?: string
-}
 
 export default function PaginatedProducts({
   sortBy,
@@ -33,7 +26,7 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number>(1)
+  const [columns, setColumns] = useState<number>(typeof window !== "undefined" && window.innerWidth < 640 ? 1 : 2)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
@@ -44,21 +37,20 @@ export default function PaginatedProducts({
     ? columnOptionsMobile
     : columnOptionsDesktop
 
-  useLayoutEffect(() => {
-    const isMobile = window.innerWidth < 640
-    setColumns(isMobile ? 1 : 2)
-  }, [])
-
   useEffect(() => {
     const fetchInitial = async () => {
       const regionData = await getRegion(countryCode)
       if (!regionData) return
       setRegion(regionData)
+      setOffset(0)
+      setProducts([])
+      setHasMore(true)
 
-      const queryParams: PaginatedProductsParams = {
+      const queryParams: any = {
         limit: PRODUCT_LIMIT,
         offset: 0,
       }
+
       if (collectionId) queryParams["collection_id"] = [collectionId]
       if (categoryId) queryParams["category_id"] = [categoryId]
       if (productsIds) queryParams["id"] = productsIds
@@ -76,10 +68,11 @@ export default function PaginatedProducts({
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
   const fetchMore = useCallback(async () => {
-    const queryParams: PaginatedProductsParams = {
+    const queryParams: any = {
       limit: PRODUCT_LIMIT,
       offset,
     }
+
     if (collectionId) queryParams["collection_id"] = [collectionId]
     if (categoryId) queryParams["category_id"] = [categoryId]
     if (productsIds) queryParams["id"] = productsIds
@@ -96,6 +89,7 @@ export default function PaginatedProducts({
 
   useEffect(() => {
     if (!region || !hasMore) return
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) fetchMore()
@@ -119,7 +113,7 @@ export default function PaginatedProducts({
 
   return (
     <>
-      <div className="px-4 sm:px-6 pt-4 pb-2 flex items-center justify-between">
+      <div className="px-0 sm:px-6 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
@@ -139,11 +133,11 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-4 sm:px-0`}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
-          <li key={`${p.id}-${i}`}>
+          <li key={`${p.id}-${columns}`}>
             <ProductPreview product={p} region={region} index={i} />
           </li>
         ))}
