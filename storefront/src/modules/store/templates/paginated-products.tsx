@@ -33,7 +33,7 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number>(2)
+  const [columns, setColumns] = useState<number>(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
@@ -44,8 +44,12 @@ export default function PaginatedProducts({
   const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
 
   useLayoutEffect(() => {
-    setColumns(isMobile ? 1 : 2)
-  }, [isMobile])
+    if (isMobile) {
+      setColumns(1)
+    } else {
+      setColumns(2)
+    }
+  }, [])
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -94,18 +98,11 @@ export default function PaginatedProducts({
     }
   }, [fetchMore, region, hasMore])
 
-  const gridColsClass =
-    columns === 1
-      ? "grid-cols-1"
-      : columns === 2
-      ? "grid-cols-2"
-      : columns === 3
-      ? "grid-cols-3"
-      : "grid-cols-4"
+  const gridColsClass = `grid-cols-${columns}`
 
   return (
     <>
-      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
+      <div className="px-0 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
