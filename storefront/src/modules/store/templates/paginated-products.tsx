@@ -1,18 +1,15 @@
 "use client"
 
-import {
-  useLayoutEffect,
-  useState,
-  useRef,
-  useCallback,
-  useEffect,
-} from "react"
+import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
 const PRODUCT_LIMIT = 12
+
+const columnOptionsMobile = [1, 2]
+const columnOptionsDesktop = [1, 2, 3, 4]
 
 type PaginatedProductsParams = {
   limit: number
@@ -36,7 +33,7 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState(1) // 1 по умолчанию для мобилки
+  const [columns, setColumns] = useState<number>(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
@@ -44,10 +41,11 @@ export default function PaginatedProducts({
   const [initialLoaded, setInitialLoaded] = useState(false)
   const loader = useRef(null)
 
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640
+
   useLayoutEffect(() => {
-    const isMobile = window.innerWidth < 640
     setColumns(isMobile ? 1 : 2)
-  }, [])
+  }, [isMobile])
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -68,18 +66,14 @@ export default function PaginatedProducts({
 
       const {
         response: { products: newProducts },
-      } = await getProductsListWithSort({
-        page: 1,
-        queryParams,
-        sortBy,
-        countryCode,
-      })
+      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
 
       setProducts(newProducts)
       setOffset(PRODUCT_LIMIT)
       setHasMore(newProducts.length >= PRODUCT_LIMIT)
       setInitialLoaded(true)
     }
+
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
@@ -96,20 +90,15 @@ export default function PaginatedProducts({
 
     const {
       response: { products: newProducts },
-    } = await getProductsListWithSort({
-      page: 1,
-      queryParams,
-      sortBy,
-      countryCode,
-    })
+    } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
 
     if (newProducts.length < PRODUCT_LIMIT) setHasMore(false)
 
     setProducts((prev) => {
       const ids = new Set(prev.map((p) => p.id))
-      const filtered = newProducts.filter((p) => !ids.has(p.id))
-      return [...prev, ...filtered]
+      return [...prev, ...newProducts.filter((p) => !ids.has(p.id))]
     })
+
     setOffset((prev) => prev + PRODUCT_LIMIT)
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
 
@@ -122,6 +111,7 @@ export default function PaginatedProducts({
       },
       { threshold: 1.0 }
     )
+
     if (loader.current) observer.observe(loader.current)
     return () => {
       if (loader.current) observer.unobserve(loader.current)
@@ -137,12 +127,14 @@ export default function PaginatedProducts({
       ? "grid-cols-3"
       : "grid-cols-4"
 
+  const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
+
   return (
     <>
-      <div className="px-4 sm:px-6 pt-4 pb-2 flex items-center justify-between">
+      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
         <div className="flex gap-1 ml-auto">
-          {[1, 2, 3, 4].map((col) => (
+          {columnOptions.map((col) => (
             <button
               key={col}
               onClick={() => setColumns(col)}
