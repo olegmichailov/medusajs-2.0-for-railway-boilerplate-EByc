@@ -1,89 +1,88 @@
+"use client"
 
-'use client'
-
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
+
 import ProductPreview from "@modules/products/components/product-preview"
-import Button from "@modules/common/components/button"
-import SkeletonProductPreview from "@modules/skeletons/components/skeleton-product-preview"
-import { getProductsList } from "@lib/data/products"
-import { ProductPreviewType } from "types/global"
-import { useParams } from "next/navigation"
+import type { ProductPreviewType } from "types/global"
+import { Button } from "@components/ui/button"
 
 type PaginatedProductsProps = {
-  sortBy?: string
-  category?: string
-  collection?: string
+  page?: number
+  totalPages: number
+  products: ProductPreviewType[]
+  title?: string
 }
 
 const PaginatedProducts = ({
-  sortBy,
-  category,
-  collection,
+  page = 1,
+  totalPages,
+  products,
+  title,
 }: PaginatedProductsProps) => {
-  const [products, setProducts] = useState<ProductPreviewType[]>([])
-  const [offset, setOffset] = useState(0)
-  const [isLoading, setIsLoading] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const router = useRouter()
 
-  const countryCode = useParams()?.countryCode as string
+  const [currentPage, setCurrentPage] = useState(page)
 
-  const limit = 12
+  const handleNext = () => {
+    const nextPage = currentPage + 1
+    updatePage(nextPage)
+  }
 
-  const fetchProducts = async () => {
-    setIsLoading(true)
-    const { response } = await getProductsList({
-      countryCode,
-      limit,
-      offset,
-      sortBy,
-      category,
-      collection,
-    })
+  const handlePrev = () => {
+    const prevPage = currentPage - 1
+    updatePage(prevPage)
+  }
 
-    if (!response?.products?.length || response.products.length < limit) {
-      setHasMore(false)
-    }
-
-    setProducts((prev) => [...prev, ...response.products])
-    setIsLoading(false)
+  const updatePage = (newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", newPage.toString())
+    router.push(`${pathname}?${params.toString()}`)
+    setCurrentPage(newPage)
   }
 
   useEffect(() => {
-    setProducts([])
-    setOffset(0)
-    setHasMore(true)
-  }, [countryCode, sortBy, category, collection])
-
-  useEffect(() => {
-    fetchProducts()
-  }, [offset, countryCode, sortBy, category, collection])
+    const pageParam = searchParams.get("page")
+    if (pageParam) {
+      setCurrentPage(parseInt(pageParam))
+    }
+  }, [searchParams])
 
   return (
-    <div className="flex flex-col items-center justify-center">
-      <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-8 w-full px-0">
+    <div className="flex flex-col gap-y-8">
+      {title && (
+        <h1 className="text-2xl uppercase font-semibold tracking-wide">
+          {title}
+        </h1>
+      )}
+
+      <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-8 px-0">
         {products.map((product) => (
           <li key={product.id}>
             <ProductPreview {...product} />
           </li>
         ))}
-
-        {isLoading &&
-          Array.from(Array(limit).keys()).map((i) => (
-            <li key={i}>
-              <SkeletonProductPreview />
-            </li>
-          ))}
       </ul>
-      {hasMore && (
-        <div className="mt-8">
-          <Button
-            onClick={() => setOffset((prev) => prev + limit)}
-            className="w-48"
-          >
-            Load more
-          </Button>
-        </div>
-      )}
+
+      <div className="flex justify-center gap-x-4 pt-4">
+        <button
+          onClick={handlePrev}
+          disabled={currentPage <= 1}
+          className="px-4 py-2 border rounded disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <span className="px-2 py-2">{`Page ${currentPage} of ${totalPages}`}</span>
+        <button
+          onClick={handleNext}
+          disabled={currentPage >= totalPages}
+          className="px-4 py-2 border rounded disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
     </div>
   )
 }
