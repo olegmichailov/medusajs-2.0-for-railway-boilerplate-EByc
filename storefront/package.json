@@ -8,8 +8,9 @@
   "scripts": {
     "wait": "await-backend",
     "launcher": "launch-storefront",
-    "dev": "npm run wait && npm run launcher dev",
-    "build": "npm run wait && npm run launcher build",
+    "sync:images": "node scripts/sync-images-to-public.js",
+    "dev": "npm run wait && npm run sync:images && npm run launcher dev",
+    "build": "npm run wait && npm run sync:images && npm run launcher build",
     "build:next": "next build",
     "start": "npm run launcher start",
     "lint": "next lint",
@@ -55,7 +56,9 @@
     "konva": "^9.3.3",
     "react-konva": "^18.2.10",
     "use-image": "^1.0.1",
-    "sharp": "^0.32.6"
+    "sharp": "^0.32.6",
+    "node-fetch": "^3.3.2",
+    "mkdirp": "^1.0.4"
   },
   "devDependencies": {
     "@babel/core": "^7.17.5",
