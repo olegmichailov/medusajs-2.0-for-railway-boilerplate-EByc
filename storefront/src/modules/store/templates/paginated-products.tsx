@@ -9,7 +9,7 @@ import { SortOptions } from "@modules/store/components/refinement-list/sort-prod
 const PRODUCT_LIMIT = 12
 
 const columnOptionsMobile = [1, 2]
-const columnOptionsDesktop = [1, 2]
+const columnOptionsDesktop = [1, 2, 3, 4]
 
 type PaginatedProductsParams = {
   limit: number
@@ -33,21 +33,19 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number | null>(null)
+  const [columns, setColumns] = useState<number>(2)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const loader = useRef(null)
 
-  const columnOptions = typeof window !== "undefined" && window.innerWidth < 640
-    ? columnOptionsMobile
-    : columnOptionsDesktop
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640
+  const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
 
   useLayoutEffect(() => {
-    const isMobile = window.innerWidth < 640
     setColumns(isMobile ? 1 : 2)
-  }, [])
+  }, [isMobile])
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -96,8 +94,6 @@ export default function PaginatedProducts({
     }
   }, [fetchMore, region, hasMore])
 
-  if (columns === null) return null
-
   const gridColsClass =
     columns === 1
       ? "grid-cols-1"
@@ -109,7 +105,7 @@ export default function PaginatedProducts({
 
   return (
     <>
-      <div className="px-0 pt-4 pb-2 flex items-center justify-between">
+      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
@@ -129,7 +125,7 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0`}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
