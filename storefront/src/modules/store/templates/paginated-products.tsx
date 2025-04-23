@@ -154,7 +154,7 @@ export default function PaginatedProducts({
       >
         {products.map((p, i) => (
           <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} />
+            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
           </li>
         ))}
       </ul>
