@@ -22,7 +22,14 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   "data-testid": dataTestid,
   index = 0,
 }) => {
-  const initialImage = thumbnail || images?.[0]?.url
+  const imageUrl = thumbnail || images?.[0]?.url
+
+  // 👉 локальный путь (ожидаем, что в /public/products/... лежат те же имена файлов)
+  const localPath = imageUrl?.includes("products/")
+    ? `/${imageUrl.split("products/")[1]}`
+    : undefined
+
+  const useLocal = localPath ? true : false
 
   return (
     <Container
@@ -37,7 +44,7 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
       )}
       data-testid={dataTestid}
     >
-      <ImageOrPlaceholder image={initialImage} size={size} index={index} />
+      <ImageOrPlaceholder image={useLocal ? localPath : imageUrl} size={size} index={index} />
     </Container>
   )
 }
@@ -55,8 +62,8 @@ const ImageOrPlaceholder = ({
       draggable={false}
       loading={index < 4 ? "eager" : "lazy"}
       placeholder="blur"
-      blurDataURL="/placeholder.png" // 🔽 заглушка (нужно добавить в public)
-      quality={65} // 🔽 понижение до 65 для AVIF даст прирост
+      blurDataURL="/placeholder.png"
+      quality={70}
       priority={index < 4}
       sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
       fill
