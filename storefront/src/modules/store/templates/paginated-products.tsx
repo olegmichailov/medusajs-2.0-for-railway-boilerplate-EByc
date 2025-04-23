@@ -44,12 +44,8 @@ export default function PaginatedProducts({
   const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
 
   useLayoutEffect(() => {
-    if (isMobile) {
-      setColumns(1)
-    } else {
-      setColumns(2)
-    }
-  }, [])
+    setColumns(isMobile ? 1 : 2)
+  }, [isMobile])
 
   useEffect(() => {
     const fetchInitial = async () => {
