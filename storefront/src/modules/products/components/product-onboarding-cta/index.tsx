@@ -1,26 +1,31 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import { Button, Container, Text } from "@medusajs/ui"
-import { cookies } from "next/headers"
 
 const ProductOnboardingCta = () => {
-  const isOnboarding = cookies().get("_medusa_onboarding")?.value === "true"
+  const [isOnboarding, setIsOnboarding] = useState(false)
 
-  if (!isOnboarding) {
-    return null
-  }
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      const cookie = document.cookie
+      const match = cookie.match(/_medusa_onboarding=true/)
+      if (match) {
+        setIsOnboarding(true)
+      }
+    }
+  }, [])
+
+  if (!isOnboarding) return null
 
   return (
-    <Container className="max-w-4xl h-full bg-ui-bg-subtle w-full p-8">
-      <div className="flex flex-col gap-y-4 center">
-        <Text className="text-ui-fg-base text-xl">
-          Your demo product was successfully created! 🎉
-        </Text>
-        <Text className="text-ui-fg-subtle text-small-regular">
-          You can now continue setting up your store in the admin.
-        </Text>
-        <a href="http://localhost:7001/a/orders?onboarding_step=create_order_nextjs">
-          <Button className="w-full">Continue setup in admin</Button>
-        </a>
-      </div>
+    <Container className="border border-gray-200 p-4 rounded-sm bg-gray-50">
+      <Text className="mb-2 text-sm">
+        Welcome to your Medusa Store! Start customizing your product pages.
+      </Text>
+      <Button variant="secondary" onClick={() => alert("Go to onboarding flow")}>
+        Customize Store
+      </Button>
     </Container>
   )
 }
