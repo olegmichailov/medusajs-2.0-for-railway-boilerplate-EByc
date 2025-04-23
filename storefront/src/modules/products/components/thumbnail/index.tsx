@@ -1,5 +1,3 @@
-// storefront/src/modules/products/components/thumbnail.tsx
-
 import { Container, clx } from "@medusajs/ui"
 import Image from "next/image"
 import React from "react"
@@ -12,7 +10,7 @@ type ThumbnailProps = {
   isFeatured?: boolean
   className?: string
   "data-testid"?: string
-  index?: number // для приоритета загрузки
+  index?: number
 }
 
 const Thumbnail: React.FC<ThumbnailProps> = ({
@@ -55,12 +53,13 @@ const ImageOrPlaceholder = ({
       alt="Thumbnail"
       className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
       draggable={false}
-      quality={75} // сниженное качество для быстрой загрузки
-      loading={index < 4 ? "eager" : "lazy"} // приоритет только для первых картинок
-      placeholder="empty"
-      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+      loading={index < 4 ? "eager" : "lazy"}
+      placeholder="blur"
+      blurDataURL="/placeholder.png" // 🔽 заглушка (нужно добавить в public)
+      quality={65} // 🔽 понижение до 65 для AVIF даст прирост
+      priority={index < 4}
+      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
       fill
-      priority={index < 4} // важно для скорости первого экрана
     />
   ) : (
     <div className="w-full h-full absolute inset-0 flex items-center justify-center">
