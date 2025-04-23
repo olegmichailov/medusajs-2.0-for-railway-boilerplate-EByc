@@ -33,19 +33,21 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number>(1)
+  const [columns, setColumns] = useState<number | null>(null)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const loader = useRef(null)
 
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 640
-  const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
+  const columnOptions = typeof window !== "undefined" && window.innerWidth < 640
+    ? columnOptionsMobile
+    : columnOptionsDesktop
 
   useLayoutEffect(() => {
+    const isMobile = window.innerWidth < 640
     setColumns(isMobile ? 1 : 2)
-  }, [isMobile])
+  }, [])
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -55,24 +57,6 @@ export default function PaginatedProducts({
       setOffset(0)
       setProducts([])
       setHasMore(true)
-
-      const queryParams: PaginatedProductsParams = {
-        limit: PRODUCT_LIMIT,
-        offset: 0,
-      }
-
-      if (collectionId) queryParams["collection_id"] = [collectionId]
-      if (categoryId) queryParams["category_id"] = [categoryId]
-      if (productsIds) queryParams["id"] = productsIds
-      if (sortBy === "created_at") queryParams["order"] = "created_at"
-
-      const {
-        response: { products: newProducts },
-      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
-
-      setProducts(newProducts)
-      setOffset(PRODUCT_LIMIT)
-      setHasMore(newProducts.length >= PRODUCT_LIMIT)
     }
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
@@ -111,6 +95,8 @@ export default function PaginatedProducts({
       if (loader.current) observer.unobserve(loader.current)
     }
   }, [fetchMore, region, hasMore])
+
+  if (columns === null) return null
 
   const gridColsClass =
     columns === 1
