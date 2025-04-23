@@ -1,3 +1,5 @@
+"use client"
+
 import React, { Suspense } from "react"
 
 import ImageGallery from "@modules/products/components/image-gallery"
@@ -32,13 +34,18 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
+        {/* Левая колонка — инфо */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <ProductInfo product={product} />
           <ProductTabs product={product} />
         </div>
+
+        {/* Галерея изображений с приоритетом на первое изображение */}
         <div className="block w-full relative">
-          <ImageGallery images={product?.images || []} />
+          <ImageGallery images={product?.images || []} preloadFirst />
         </div>
+
+        {/* Правая колонка — CTA и Add to Cart */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
           <Suspense
@@ -54,6 +61,8 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           </Suspense>
         </div>
       </div>
+
+      {/* Похожие товары */}
       <div
         className="content-container my-16 small:my-32"
         data-testid="related-products-container"
