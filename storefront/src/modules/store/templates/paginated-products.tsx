@@ -33,7 +33,7 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number | null>(null)
+  const [columns, setColumns] = useState<number>(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
@@ -54,9 +54,23 @@ export default function PaginatedProducts({
       const regionData = await getRegion(countryCode)
       if (!regionData) return
       setRegion(regionData)
-      setOffset(0)
-      setProducts([])
-      setHasMore(true)
+
+      const queryParams: PaginatedProductsParams = {
+        limit: PRODUCT_LIMIT,
+        offset: 0,
+      }
+      if (collectionId) queryParams["collection_id"] = [collectionId]
+      if (categoryId) queryParams["category_id"] = [categoryId]
+      if (productsIds) queryParams["id"] = productsIds
+      if (sortBy === "created_at") queryParams["order"] = "created_at"
+
+      const {
+        response: { products: newProducts },
+      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
+
+      setProducts(newProducts)
+      setOffset(PRODUCT_LIMIT)
+      setHasMore(newProducts.length >= PRODUCT_LIMIT)
     }
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
@@ -66,7 +80,6 @@ export default function PaginatedProducts({
       limit: PRODUCT_LIMIT,
       offset,
     }
-
     if (collectionId) queryParams["collection_id"] = [collectionId]
     if (categoryId) queryParams["category_id"] = [categoryId]
     if (productsIds) queryParams["id"] = productsIds
@@ -83,7 +96,6 @@ export default function PaginatedProducts({
 
   useEffect(() => {
     if (!region || !hasMore) return
-
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) fetchMore()
@@ -95,8 +107,6 @@ export default function PaginatedProducts({
       if (loader.current) observer.unobserve(loader.current)
     }
   }, [fetchMore, region, hasMore])
-
-  if (columns === null) return null
 
   const gridColsClass =
     columns === 1
@@ -133,7 +143,7 @@ export default function PaginatedProducts({
         data-testid="products-list"
       >
         {products.map((p, i) => (
-          <li key={p.id}>
+          <li key={`${p.id}-${i}`}>
             <ProductPreview product={p} region={region} index={i} />
           </li>
         ))}
