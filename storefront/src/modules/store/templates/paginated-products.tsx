@@ -97,9 +97,9 @@ export default function PaginatedProducts({
     if (newProducts.length < PRODUCT_LIMIT) setHasMore(false)
 
     setProducts((prev) => {
-      const ids = new Set(prev.map(p => p.id))
-      const filtered = newProducts.filter(p => !ids.has(p.id))
-      return [...prev, ...filtered]
+      const existingIds = new Set(prev.map((p) => p.id))
+      const uniqueNew = newProducts.filter((p) => !existingIds.has(p.id))
+      return [...prev, ...uniqueNew]
     })
     setOffset((prev) => prev + PRODUCT_LIMIT)
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
