@@ -1,15 +1,12 @@
 "use client"
 
-import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
 const PRODUCT_LIMIT = 12
-
-const columnOptionsMobile = [1, 2]
-const columnOptionsDesktop = [1, 2, 3, 4]
 
 type PaginatedProductsParams = {
   limit: number
@@ -33,19 +30,22 @@ export default function PaginatedProducts({
   productsIds?: string[]
   countryCode: string
 }) {
-  const [columns, setColumns] = useState<number>(1)
+  const [columns, setColumns] = useState(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [initialLoaded, setInitialLoaded] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const loader = useRef(null)
 
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 640
+  useEffect(() => {
+    const mobile = window.innerWidth < 640
+    setIsMobile(mobile)
+    setColumns(mobile ? 1 : 2)
+  }, [])
 
-  useLayoutEffect(() => {
-    setColumns(isMobile ? 1 : 2)
-  }, [isMobile])
+  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -126,8 +126,6 @@ export default function PaginatedProducts({
       : columns === 3
       ? "grid-cols-3"
       : "grid-cols-4"
-
-  const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
 
   return (
     <>
