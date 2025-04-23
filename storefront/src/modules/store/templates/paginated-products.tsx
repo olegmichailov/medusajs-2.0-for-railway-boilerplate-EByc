@@ -44,8 +44,12 @@ export default function PaginatedProducts({
   const columnOptions = isMobile ? columnOptionsMobile : columnOptionsDesktop
 
   useLayoutEffect(() => {
-    setColumns(isMobile ? 1 : 2)
-  }, [isMobile])
+    if (isMobile) {
+      setColumns(1)
+    } else {
+      setColumns(2)
+    }
+  }, [])
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -55,6 +59,24 @@ export default function PaginatedProducts({
       setOffset(0)
       setProducts([])
       setHasMore(true)
+
+      const queryParams: PaginatedProductsParams = {
+        limit: PRODUCT_LIMIT,
+        offset: 0,
+      }
+
+      if (collectionId) queryParams["collection_id"] = [collectionId]
+      if (categoryId) queryParams["category_id"] = [categoryId]
+      if (productsIds) queryParams["id"] = productsIds
+      if (sortBy === "created_at") queryParams["order"] = "created_at"
+
+      const {
+        response: { products: newProducts },
+      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
+
+      setProducts(newProducts)
+      setOffset(PRODUCT_LIMIT)
+      setHasMore(newProducts.length >= PRODUCT_LIMIT)
     }
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
@@ -125,7 +147,7 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-4 sm:px-0`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
