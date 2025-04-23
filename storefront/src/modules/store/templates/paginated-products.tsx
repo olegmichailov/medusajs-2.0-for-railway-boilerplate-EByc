@@ -1,5 +1,6 @@
 "use client"
 
+import Head from "next/head"
 import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
@@ -10,15 +11,6 @@ const PRODUCT_LIMIT = 12
 
 const columnOptionsMobile = [1, 2]
 const columnOptionsDesktop = [1, 2, 3, 4]
-
-type PaginatedProductsParams = {
-  limit: number
-  offset?: number
-  collection_id?: string[]
-  category_id?: string[]
-  id?: string[]
-  order?: string
-}
 
 export default function PaginatedProducts({
   sortBy,
@@ -46,7 +38,7 @@ export default function PaginatedProducts({
 
   useLayoutEffect(() => {
     const isMobile = window.innerWidth < 640
-    setColumns(isMobile ? 1 : 2)
+    setColumns(isMobile ? 2 : 3)
   }, [])
 
   useEffect(() => {
@@ -57,12 +49,30 @@ export default function PaginatedProducts({
       setOffset(0)
       setProducts([])
       setHasMore(true)
+
+      const queryParams: any = {
+        limit: PRODUCT_LIMIT,
+        offset: 0,
+      }
+
+      if (collectionId) queryParams["collection_id"] = [collectionId]
+      if (categoryId) queryParams["category_id"] = [categoryId]
+      if (productsIds) queryParams["id"] = productsIds
+      if (sortBy === "created_at") queryParams["order"] = "created_at"
+
+      const {
+        response: { products: newProducts },
+      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
+
+      setProducts(newProducts)
+      setOffset(PRODUCT_LIMIT)
+      setHasMore(newProducts.length >= PRODUCT_LIMIT)
     }
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
   const fetchMore = useCallback(async () => {
-    const queryParams: PaginatedProductsParams = {
+    const queryParams: any = {
       limit: PRODUCT_LIMIT,
       offset,
     }
@@ -107,8 +117,15 @@ export default function PaginatedProducts({
       ? "grid-cols-3"
       : "grid-cols-4"
 
+  const preloadImages = products.slice(0, 4).map((p) => p.thumbnail || p.images?.[0]?.url).filter(Boolean)
+
   return (
     <>
+      <Head>
+        {preloadImages.map((src, i) => (
+          <link key={i} rel="preload" as="image" href={src} />
+        ))}
+      </Head>
       <div className="px-4 sm:px-6 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
         <div className="flex gap-1 ml-auto">
@@ -129,7 +146,7 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-4 sm:px-0`}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-4 sm:px-6`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
