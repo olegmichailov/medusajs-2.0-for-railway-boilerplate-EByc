@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 const path = require('path');
 
 const MEDUSA_SERVER_PATH = path.join(process.cwd(), '.medusa', 'server');
@@ -29,4 +29,18 @@ console.log('Installing dependencies in .medusa/server...');
 execSync('pnpm i --prod --frozen-lockfile', { 
   cwd: MEDUSA_SERVER_PATH,
   stdio: 'inherit'
+});
+
+// Run image migration
+console.log('› Running image migration script...');
+exec('node scripts/migrate-images.js', (error, stdout, stderr) => {
+  if (error) {
+    console.error(`Migration error: ${error.message}`);
+    return;
+  }
+  if (stderr) {
+    console.error(`Migration stderr: ${stderr}`);
+    return;
+  }
+  console.log(`Migration stdout:\n${stdout}`);
 });
