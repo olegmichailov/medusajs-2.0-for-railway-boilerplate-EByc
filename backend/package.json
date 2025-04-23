@@ -19,7 +19,8 @@
     "start": "npm run db:diagnostic && init-backend && cd .medusa/server && medusa start --verbose",
     "dev": "medusa develop",
     "email:dev": "email dev --dir=./src/modules/email-notifications/templates --port=3002",
-    "db:diagnostic": "node src/scripts/db-diagnostic.js"
+    "db:diagnostic": "node src/scripts/db-diagnostic.js",
+    "migrate:images": "node scripts/migrate-images.js"
   },
   "dependencies": {
     "@medusajs/admin-sdk": "latest",
@@ -45,7 +46,10 @@
     "medusajs-launch-utils": "^0.0.10",
     "pg": "^8.13.1",
     "resend": "4.0.1",
-    "ulid": "^2.3.0"
+    "ulid": "^2.3.0",
+    "node-fetch": "^3.3.2",
+    "mkdirp": "^1.0.4",
+    "form-data": "^4.0.0"
   },
   "devDependencies": {
     "@medusajs/test-utils": "latest",
