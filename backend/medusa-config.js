@@ -47,6 +47,7 @@ const medusaConfig = {
       key: Modules.FILE,
       resolve: '@medusajs/file',
       options: {
+        upload_url: "https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev/medusa-media/", // ✅ важно
         providers: [
           {
             resolve: '@medusajs/file-s3',
