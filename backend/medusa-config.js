@@ -16,10 +16,12 @@ import {
   STRIPE_API_KEY,
   STRIPE_WEBHOOK_SECRET,
   WORKER_MODE,
+  MINIO_ENDPOINT,
+  MINIO_ACCESS_KEY,
+  MINIO_SECRET_KEY,
+  MINIO_BUCKET,
   MEILISEARCH_HOST,
-  MEILISEARCH_API_KEY,
-  CLOUDFLARE_R2_ACCESS_KEY,
-  CLOUDFLARE_R2_SECRET_KEY
+  MEILISEARCH_API_KEY
 } from 'lib/constants';
 
 loadEnv(process.env.NODE_ENV, process.cwd());
@@ -47,19 +49,24 @@ const medusaConfig = {
       key: Modules.FILE,
       resolve: '@medusajs/file',
       options: {
-        upload_url: "https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev/medusa-media/", // ✅ Важно
         providers: [
-          {
-            resolve: '@medusajs/file-s3',
-            id: 'r2',
+          ...(MINIO_ENDPOINT && MINIO_ACCESS_KEY && MINIO_SECRET_KEY ? [{
+            resolve: './src/modules/minio-file',
+            id: 'minio',
             options: {
-              endpoint: 'https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev',
-              accessKeyId: CLOUDFLARE_R2_ACCESS_KEY,
-              secretAccessKey: CLOUDFLARE_R2_SECRET_KEY,
-              bucket: 'gmorklstrage',
-              s3ForcePathStyle: true
+              endPoint: MINIO_ENDPOINT,
+              accessKey: MINIO_ACCESS_KEY,
+              secretKey: MINIO_SECRET_KEY,
+              bucket: MINIO_BUCKET // Optional, default: medusa-media
             }
-          }
+          }] : [{
+            resolve: '@medusajs/file-local',
+            id: 'local',
+            options: {
+              upload_dir: 'static',
+              backend_url: `${BACKEND_URL}/static`
+            }
+          }])
         ]
       }
     },
@@ -69,7 +76,8 @@ const medusaConfig = {
       options: {
         redisUrl: REDIS_URL
       }
-    }, {
+    },
+    {
       key: Modules.WORKFLOW_ENGINE,
       resolve: '@medusajs/workflow-engine-redis',
       options: {
@@ -142,4 +150,5 @@ const medusaConfig = {
   plugins: []
 };
 
+console.log(JSON.stringify(medusaConfig, null, 2));
 export default defineConfig(medusaConfig);
