@@ -1,4 +1,4 @@
-import { loadEnv, Modules, defineConfig } from '@medusajs/utils'
+import { loadEnv, Modules, defineConfig } from '@medusajs/utils';
 import {
   ADMIN_CORS,
   AUTH_CORS,
@@ -16,15 +16,13 @@ import {
   STRIPE_API_KEY,
   STRIPE_WEBHOOK_SECRET,
   WORKER_MODE,
-  MINIO_ENDPOINT,
-  MINIO_ACCESS_KEY,
-  MINIO_SECRET_KEY,
-  MINIO_BUCKET,
   MEILISEARCH_HOST,
   MEILISEARCH_API_KEY,
-} from 'lib/constants'
+  CLOUDFLARE_R2_ACCESS_KEY,
+  CLOUDFLARE_R2_SECRET_KEY
+} from 'lib/constants';
 
-loadEnv(process.env.NODE_ENV, process.cwd())
+loadEnv(process.env.NODE_ENV, process.cwd());
 
 const medusaConfig = {
   projectConfig: {
@@ -37,8 +35,8 @@ const medusaConfig = {
       authCors: AUTH_CORS,
       storeCors: STORE_CORS,
       jwtSecret: JWT_SECRET,
-      cookieSecret: COOKIE_SECRET,
-    },
+      cookieSecret: COOKIE_SECRET
+    }
   },
   admin: {
     backendUrl: BACKEND_URL,
@@ -50,136 +48,97 @@ const medusaConfig = {
       resolve: '@medusajs/file',
       options: {
         providers: [
-          ...(MINIO_ENDPOINT && MINIO_ACCESS_KEY && MINIO_SECRET_KEY
-            ? [
-                {
-                  resolve: '@medusajs/file-s3',
-                  id: 'r2',
-                  options: {
-                    endpoint: `https://${MINIO_ENDPOINT}`,
-                    accessKeyId: MINIO_ACCESS_KEY,
-                    secretAccessKey: MINIO_SECRET_KEY,
-                    bucket: MINIO_BUCKET,
-                    s3ForcePathStyle: true,
-                  },
-                },
-              ]
-            : [
-                {
-                  resolve: '@medusajs/file-local',
-                  id: 'local',
-                  options: {
-                    upload_dir: 'static',
-                    backend_url: `${BACKEND_URL}/static`,
-                  },
-                },
-              ]),
+          {
+            resolve: '@medusajs/file-s3',
+            id: 'r2',
+            options: {
+              endpoint: 'https://07a4e4a5bc7906ff13bb7b90ab146baf.r2.cloudflarestorage.com',
+              accessKeyId: CLOUDFLARE_R2_ACCESS_KEY,
+              secretAccessKey: CLOUDFLARE_R2_SECRET_KEY,
+              bucket: 'gmorklstrage',
+              s3ForcePathStyle: true
+            }
+          }
+        ]
+      }
+    },
+    ...(REDIS_URL ? [{
+      key: Modules.EVENT_BUS,
+      resolve: '@medusajs/event-bus-redis',
+      options: {
+        redisUrl: REDIS_URL
+      }
+    }, {
+      key: Modules.WORKFLOW_ENGINE,
+      resolve: '@medusajs/workflow-engine-redis',
+      options: {
+        redis: {
+          url: REDIS_URL,
+        }
+      }
+    }] : []),
+    ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
+      key: Modules.NOTIFICATION,
+      resolve: '@medusajs/notification',
+      options: {
+        providers: [
+          ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL ? [{
+            resolve: '@medusajs/notification-sendgrid',
+            id: 'sendgrid',
+            options: {
+              channels: ['email'],
+              api_key: SENDGRID_API_KEY,
+              from: SENDGRID_FROM_EMAIL,
+            }
+          }] : []),
+          ...(RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
+            resolve: './src/modules/email-notifications',
+            id: 'resend',
+            options: {
+              channels: ['email'],
+              api_key: RESEND_API_KEY,
+              from: RESEND_FROM_EMAIL,
+            },
+          }] : []),
+        ]
+      }
+    }] : []),
+    ...(STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
+      key: Modules.PAYMENT,
+      resolve: '@medusajs/payment',
+      options: {
+        providers: [
+          {
+            resolve: '@medusajs/payment-stripe',
+            id: 'stripe',
+            options: {
+              apiKey: STRIPE_API_KEY,
+              webhookSecret: STRIPE_WEBHOOK_SECRET,
+            },
+          },
         ],
       },
-    },
-    ...(REDIS_URL
-      ? [
-          {
-            key: Modules.EVENT_BUS,
-            resolve: '@medusajs/event-bus-redis',
-            options: {
-              redisUrl: REDIS_URL,
+    }] : []),
+    ...(MEILISEARCH_HOST && MEILISEARCH_API_KEY ? [{
+      resolve: '@rokmohar/medusa-plugin-meilisearch',
+      options: {
+        config: {
+          host: MEILISEARCH_HOST,
+          apiKey: MEILISEARCH_API_KEY
+        },
+        settings: {
+          products: {
+            indexSettings: {
+              searchableAttributes: ['title', 'description', 'variant_sku'],
+              displayedAttributes: ['title', 'description', 'variant_sku', 'thumbnail', 'handle']
             },
-          },
-          {
-            key: Modules.WORKFLOW_ENGINE,
-            resolve: '@medusajs/workflow-engine-redis',
-            options: {
-              redis: {
-                url: REDIS_URL,
-              },
-            },
-          },
-        ]
-      : []),
-    ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL
-      ? [
-          {
-            key: Modules.NOTIFICATION,
-            resolve: '@medusajs/notification',
-            options: {
-              providers: [
-                ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL
-                  ? [
-                      {
-                        resolve: '@medusajs/notification-sendgrid',
-                        id: 'sendgrid',
-                        options: {
-                          channels: ['email'],
-                          api_key: SENDGRID_API_KEY,
-                          from: SENDGRID_FROM_EMAIL,
-                        },
-                      },
-                    ]
-                  : []),
-                ...(RESEND_API_KEY && RESEND_FROM_EMAIL
-                  ? [
-                      {
-                        resolve: './src/modules/email-notifications',
-                        id: 'resend',
-                        options: {
-                          channels: ['email'],
-                          api_key: RESEND_API_KEY,
-                          from: RESEND_FROM_EMAIL,
-                        },
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          },
-        ]
-      : []),
-    ...(STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET
-      ? [
-          {
-            key: Modules.PAYMENT,
-            resolve: '@medusajs/payment',
-            options: {
-              providers: [
-                {
-                  resolve: '@medusajs/payment-stripe',
-                  id: 'stripe',
-                  options: {
-                    apiKey: STRIPE_API_KEY,
-                    webhookSecret: STRIPE_WEBHOOK_SECRET,
-                  },
-                },
-              ],
-            },
-          },
-        ]
-      : []),
-    ...(MEILISEARCH_HOST && MEILISEARCH_API_KEY
-      ? [
-          {
-            resolve: '@rokmohar/medusa-plugin-meilisearch',
-            options: {
-              config: {
-                host: MEILISEARCH_HOST,
-                apiKey: MEILISEARCH_API_KEY,
-              },
-              settings: {
-                products: {
-                  indexSettings: {
-                    searchableAttributes: ['title', 'description', 'variant_sku'],
-                    displayedAttributes: ['title', 'description', 'variant_sku', 'thumbnail', 'handle'],
-                  },
-                  primaryKey: 'id',
-                },
-              },
-            },
-          },
-        ]
-      : []),
+            primaryKey: 'id'
+          }
+        }
+      }
+    }] : [])
   ],
-  plugins: [],
-}
+  plugins: []
+};
 
-console.log(JSON.stringify(medusaConfig, null, 2))
-export default defineConfig(medusaConfig)
+export default defineConfig(medusaConfig);
