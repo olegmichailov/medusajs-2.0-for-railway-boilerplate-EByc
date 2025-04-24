@@ -13,8 +13,8 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    loader: "default", // ⬅️ ОБЯЗАТЕЛЬНО! используем встроенный оптимизатор (sharp)
-    formats: ["image/avif", "image/webp"], // современные форматы
+    loader: "default",
+    formats: ["image/avif", "image/webp"],
     remotePatterns: [
       {
         protocol: "http",
@@ -44,9 +44,17 @@ const nextConfig = {
             },
           ]
         : []),
+      {
+        protocol: "https",
+        hostname: "pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev",
+      },
+      {
+        protocol: "https",
+        hostname: "cdn.gmorkl.de", // опционально — если подключишь CNAME к Cloudflare
+      },
     ],
-    minimumCacheTTL: 60, // 🔁 кэш на 60 сек, можно поднять до 600+
-    deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920], // ⚙️ адаптивные размеры
+    minimumCacheTTL: 60,
+    deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
   },
   serverRuntimeConfig: {
     port: process.env.PORT || 3000,
@@ -55,7 +63,7 @@ const nextConfig = {
     if (isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
-        canvas: false, // отключаем canvas, если не нужен
+        canvas: false,
       };
     }
     return config;
