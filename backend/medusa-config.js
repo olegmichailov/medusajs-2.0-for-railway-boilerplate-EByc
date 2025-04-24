@@ -52,7 +52,7 @@ const medusaConfig = {
             resolve: '@medusajs/file-s3',
             id: 'r2',
             options: {
-              endpoint: 'https://07a4e4a5bc7906ff13bb7b90ab146baf.r2.cloudflarestorage.com',
+              endpoint: 'https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev',
               accessKeyId: CLOUDFLARE_R2_ACCESS_KEY,
               secretAccessKey: CLOUDFLARE_R2_SECRET_KEY,
               bucket: 'gmorklstrage',
