@@ -47,17 +47,17 @@ const medusaConfig = {
       key: Modules.FILE,
       resolve: '@medusajs/file',
       options: {
-        upload_url: "https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev/medusa-media/", // ✅ важно
         providers: [
           {
             resolve: '@medusajs/file-s3',
             id: 'r2',
             options: {
-              endpoint: 'https://pub-3ddc657c9b4f4fbab865c0d434eacd33.r2.dev',
+              endpoint: 'https://<ACCOUNT_ID>.r2.cloudflarestorage.com',
               accessKeyId: CLOUDFLARE_R2_ACCESS_KEY,
               secretAccessKey: CLOUDFLARE_R2_SECRET_KEY,
               bucket: 'gmorklstrage',
-              s3ForcePathStyle: true
+              region: 'auto',
+              s3ForcePathStyle: false
             }
           }
         ]
