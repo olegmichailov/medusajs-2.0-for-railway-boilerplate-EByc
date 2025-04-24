@@ -24,7 +24,6 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
 }) => {
   const imageUrl = thumbnail || images?.[0]?.url
 
-  // 👉 локальный путь (ожидаем, что в /public/products/... лежат те же имена файлов)
   const localPath = imageUrl?.includes("products/")
     ? `/${imageUrl.split("products/")[1]}`
     : undefined
@@ -54,7 +53,24 @@ const ImageOrPlaceholder = ({
   size,
   index,
 }: Pick<ThumbnailProps, "size"> & { image?: string; index: number }) => {
-  return image ? (
+  const isR2Image = image?.includes("r2.dev") || image?.includes("cdn.gmorkl.de")
+
+  if (!image) {
+    return (
+      <div className="w-full h-full absolute inset-0 flex items-center justify-center">
+        <PlaceholderImage size={size === "small" ? 16 : 24} />
+      </div>
+    )
+  }
+
+  return isR2Image ? (
+    <img
+      src={image}
+      alt="Thumbnail"
+      className="absolute inset-0 object-cover object-center w-full h-full"
+      loading={index < 4 ? "eager" : "lazy"}
+    />
+  ) : (
     <Image
       src={image}
       alt="Thumbnail"
@@ -68,10 +84,6 @@ const ImageOrPlaceholder = ({
       sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
       fill
     />
-  ) : (
-    <div className="w-full h-full absolute inset-0 flex items-center justify-center">
-      <PlaceholderImage size={size === "small" ? 16 : 24} />
-    </div>
   )
 }
 
