@@ -35,13 +35,15 @@ const SortProducts = ({
   }
 
   return (
-    <FilterRadioGroup
-      title="Sort by"
-      items={sortOptions}
-      value={sortBy}
-      handleChange={handleChange}
-      data-testid={dataTestId}
-    />
+    <div className="flex flex-col gap-2 font-sans text-sm tracking-wider">
+      {/** ⚠️ Заголовок убран, т.к. он уже есть снаружи — дубли не нужны */}
+      <FilterRadioGroup
+        items={sortOptions}
+        value={sortBy}
+        handleChange={handleChange}
+        data-testid={dataTestId}
+      />
+    </div>
   )
 }
 
