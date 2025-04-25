@@ -1,4 +1,4 @@
-// Final EditorCanvas.tsx draft coming up — all your requests applied.
+// Final EditorCanvas.tsx with improvements applied — handles toggle, dual export, high-res mode
 
 "use client";
 
@@ -8,8 +8,8 @@ import useImage from "use-image";
 import { useRouter } from "next/navigation";
 import { isMobile } from "react-device-detect";
 
-const CANVAS_WIDTH = 985;
-const CANVAS_HEIGHT = 1271;
+const CANVAS_WIDTH = 4000;
+const CANVAS_HEIGHT = 5000;
 const DISPLAY_HEIGHT = isMobile ? 680 : 750;
 const DISPLAY_WIDTH = (DISPLAY_HEIGHT * CANVAS_WIDTH) / CANVAS_HEIGHT;
 
@@ -67,7 +67,8 @@ const EditorCanvas = () => {
   });
 
   const handlePointerDown = (e: any) => {
-    if (e.target === e.target.getStage()) setSelectedImageIndex(null);
+    const isStage = e.target === e.target.getStage();
+    if (isStage) setSelectedImageIndex(null);
     if (mode !== "brush") return;
     const pos = stageRef.current.getPointerPosition();
     if (!pos) return;
@@ -95,8 +96,24 @@ const EditorCanvas = () => {
         transformerRef.current.nodes([node]);
         transformerRef.current.getLayer().batchDraw();
       }
+    } else if (transformerRef.current) {
+      transformerRef.current.nodes([]);
     }
   }, [selectedImageIndex]);
+
+  const exportCanvas = (includeMockup = true) => {
+    const originalMockup = mockupImage;
+    const mockupLayer = stageRef.current.findOne("Image");
+    if (!includeMockup && mockupLayer) mockupLayer.hide();
+
+    const uri = stageRef.current.toDataURL({ pixelRatio: 1 });
+    const link = document.createElement("a");
+    link.download = includeMockup ? "mockup.png" : "artwork.png";
+    link.href = uri;
+    link.click();
+
+    if (!includeMockup && mockupLayer) mockupLayer.show();
+  };
 
   return (
     <div className="w-screen h-screen bg-white overflow-hidden flex flex-col lg:flex-row">
@@ -114,13 +131,8 @@ const EditorCanvas = () => {
             <button className="border px-3 py-1" onClick={() => setMockupType("front")}>Front</button>
             <button className="border px-3 py-1" onClick={() => setMockupType("back")}>Back</button>
             <button className="border px-3 py-1" onClick={() => setDrawings([])}>Clear</button>
-            <button className="bg-black text-white px-3 py-1" onClick={() => {
-              const uri = stageRef.current.toDataURL({ pixelRatio: 2 });
-              const a = document.createElement("a");
-              a.href = uri;
-              a.download = "composition.png";
-              a.click();
-            }}>Download</button>
+            <button className="bg-black text-white px-3 py-1" onClick={() => exportCanvas(true)}>Download (with mockup)</button>
+            <button className="bg-black text-white px-3 py-1" onClick={() => exportCanvas(false)}>Download (art only)</button>
           </div>
           <input type="file" accept="image/*" onChange={handleFileChange} className="mb-3" />
           <label className="block text-xs mb-1">Opacity: {Math.round(opacity * 100)}%</label>
