@@ -19,7 +19,7 @@ export default async function sendAdminNotificationHandler({
     await notificationModuleService.createNotifications({
       to: 'larvarvar@gmail.com',
       channel: 'email',
-      template: EmailTemplates.ORDER_PLACED_ADMIN,
+      template: EmailTemplates.ORDER_PLACED, // <<< вот правильный ключ
       data: {
         emailOptions: {
           replyTo: 'info@example.com',
@@ -33,7 +33,7 @@ export default async function sendAdminNotificationHandler({
             quantity: item.quantity,
           })),
           summary: {
-            total: order.total, // вот тут правильное поле
+            total: order.total,
           },
         },
         shippingAddress: {
