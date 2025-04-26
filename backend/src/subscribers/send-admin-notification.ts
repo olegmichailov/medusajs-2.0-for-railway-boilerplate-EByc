@@ -1,6 +1,6 @@
 import { Modules } from '@medusajs/framework/utils'
 import { INotificationModuleService, IOrderModuleService } from '@medusajs/framework/types'
-import { SubscriberArgs, SubscriberConfig } from '@medusajs/medusa'
+import { SubscriberArgs, SubscriberConfig } from '@medusajs/framework'
 import { EmailTemplates } from '../modules/email-notifications/templates'
 
 export default async function sendAdminNotificationHandler({
