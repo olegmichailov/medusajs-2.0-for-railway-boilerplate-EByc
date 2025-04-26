@@ -1,11 +1,12 @@
 import { ReactNode } from 'react'
 import { MedusaError } from '@medusajs/framework/utils'
+
 import { InviteUserEmail, INVITE_USER, isInviteUserData } from './invite-user'
 import { OrderPlacedTemplate, ORDER_PLACED, isOrderPlacedTemplateData } from './order-placed'
 
 export const EmailTemplates = {
   INVITE_USER,
-  ORDER_PLACED
+  ORDER_PLACED,
 } as const
 
 export type EmailTemplateType = keyof typeof EmailTemplates
@@ -38,4 +39,10 @@ export function generateEmailTemplate(templateKey: string, data: unknown): React
   }
 }
 
-export { InviteUserEmail, OrderPlacedTemplate }
+// ⬇️ Вот что обязательно нужно экспортировать, чтобы бился билд:
+export {
+  InviteUserEmail,
+  OrderPlacedTemplate,
+  EmailTemplates,         // <<< нужно для subscribers
+  generateEmailTemplate,  // <<< нужно для resend.ts
+}
