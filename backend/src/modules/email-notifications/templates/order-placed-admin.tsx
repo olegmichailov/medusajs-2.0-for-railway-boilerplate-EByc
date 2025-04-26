@@ -1,59 +1,42 @@
-import * as React from "react"
+import { ReactElement } from "react"
+import { Body, Container, Head, Hr, Html, Preview, Section, Text } from "@react-email/components"
 
-interface OrderPlacedAdminEmailProps {
-  order: {
-    id: string
-    email: string
-    items: { title: string; quantity: number }[]
-    total: number // ✨ прямо тут в order
-  }
-  shippingAddress: {
-    first_name: string
-    last_name: string
-    address_1: string
-    city: string
-    postal_code: string
-    country_code: string
-  }
+type OrderPlacedAdminTemplateProps = {
+  email: string
+  orderId: string
+  firstName?: string
+  lastName?: string
 }
 
-export const ORDER_PLACED_ADMIN = "order_placed_admin"
+export const ORDER_PLACED_ADMIN = "order-placed-admin"
 
-export function isOrderPlacedAdminTemplateData(data: any): data is OrderPlacedAdminEmailProps {
-  return data && typeof data.order?.id === "string"
+export function isOrderPlacedAdminTemplateData(data: any): data is OrderPlacedAdminTemplateProps {
+  return typeof data?.email === "string" && typeof data?.orderId === "string"
 }
 
 export const OrderPlacedAdminTemplate = ({
-  order,
-  shippingAddress,
-}: OrderPlacedAdminEmailProps) => {
+  email,
+  orderId,
+  firstName,
+  lastName,
+}: OrderPlacedAdminTemplateProps): ReactElement => {
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", fontSize: "16px", color: "#333" }}>
-      <h1>Новый заказ #{order.id}</h1>
-
-      <p><strong>Покупатель:</strong> {order.email}</p>
-
-      <h2>Товары:</h2>
-      <ul>
-        {order.items.map((item, idx) => (
-          <li key={idx}>
-            {item.quantity} × {item.title}
-          </li>
-        ))}
-      </ul>
-
-      <h2>Итого:</h2>
-      <p><strong>Сумма заказа:</strong> {(order.total / 100).toFixed(2)} €</p>
-
-      <h2>Адрес доставки:</h2>
-      <p>
-        {shippingAddress.first_name} {shippingAddress.last_name}<br />
-        {shippingAddress.address_1}<br />
-        {shippingAddress.city}, {shippingAddress.postal_code}<br />
-        {shippingAddress.country_code.toUpperCase()}
-      </p>
-
-      <p>Проверьте и обработайте заказ в админке!</p>
-    </div>
+    <Html>
+      <Head />
+      <Preview>New order placed</Preview>
+      <Body style={{ backgroundColor: "#ffffff", fontFamily: "Arial, sans-serif" }}>
+        <Container>
+          <Section style={{ marginBottom: "16px" }}>
+            <Text>New order has been placed!</Text>
+          </Section>
+          <Section>
+            <Text><strong>Customer:</strong> {firstName || ""} {lastName || ""}</Text>
+            <Text><strong>Email:</strong> {email}</Text>
+            <Text><strong>Order ID:</strong> {orderId}</Text>
+          </Section>
+          <Hr />
+        </Container>
+      </Body>
+    </Html>
   )
 }
