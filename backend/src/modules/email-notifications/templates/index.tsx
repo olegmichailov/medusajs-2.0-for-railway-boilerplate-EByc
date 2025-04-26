@@ -38,11 +38,3 @@ export function generateEmailTemplate(templateKey: string, data: unknown): React
       )
   }
 }
-
-// ⬇️ Вот что обязательно нужно экспортировать, чтобы бился билд:
-export {
-  InviteUserEmail,
-  OrderPlacedTemplate,
-  EmailTemplates,         // <<< нужно для subscribers
-  generateEmailTemplate,  // <<< нужно для resend.ts
-}
