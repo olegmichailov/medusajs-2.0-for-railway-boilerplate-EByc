@@ -1,57 +1,38 @@
-import { Modules } from '@medusajs/framework/utils'
-import { INotificationModuleService, IOrderModuleService } from '@medusajs/framework/types'
-import { SubscriberArgs, SubscriberConfig } from '@medusajs/framework'
-import { EmailTemplates } from '../modules/email-notifications/templates'
+import { EntityManager } from "@mikro-orm/postgresql"
+import { EventBusService, OrderService } from "@medusajs/medusa"
+import { NotificationService } from "@medusajs/notification"
 
 export default async function sendAdminNotificationHandler({
-  event: { data },
+  data,
+  eventName,
   container,
-}: SubscriberArgs<any>) {
-  const notificationModuleService: INotificationModuleService = container.resolve(Modules.NOTIFICATION)
-  const orderModuleService: IOrderModuleService = container.resolve(Modules.ORDER)
-
-  const order = await orderModuleService.retrieveOrder(data.id, {
-    relations: ['items', 'shipping_address'],
-  })
-  const shippingAddress = await (orderModuleService as any).orderAddressService_.retrieve(order.shipping_address.id)
-
-  try {
-    await notificationModuleService.createNotifications({
-      to: 'larvarvar@gmail.com',
-      channel: 'email',
-      template: EmailTemplates.ORDER_PLACED, // <<< вот правильный ключ
-      data: {
-        emailOptions: {
-          replyTo: 'info@example.com',
-          subject: `Новый заказ от ${order.email}`,
-        },
-        order: {
-          id: order.id,
-          email: order.email,
-          items: order.items.map((item) => ({
-            title: item.title,
-            quantity: item.quantity,
-          })),
-          summary: {
-            total: order.total,
-          },
-        },
-        shippingAddress: {
-          first_name: shippingAddress.first_name,
-          last_name: shippingAddress.last_name,
-          address_1: shippingAddress.address_1,
-          city: shippingAddress.city,
-          postal_code: shippingAddress.postal_code,
-          country_code: shippingAddress.country_code,
-        },
-        preview: `Новый заказ от ${order.email}`,
-      },
-    })
-  } catch (error) {
-    console.error('Ошибка при отправке уведомления админу:', error)
+}: {
+  data: { id: string }
+  eventName: string
+  container: {
+    manager: EntityManager
+    orderService: OrderService
+    eventBusService: EventBusService
+    notificationService: NotificationService
   }
-}
+}) {
+  const { id } = data
 
-export const config: SubscriberConfig = {
-  event: 'order.placed',
+  const orderService = container.orderService
+  const notificationService = container.notificationService
+
+  const order = await orderService.retrieve(id, {
+    relations: ["customer", "items"],
+  })
+
+  await notificationService.sendNotification("resend", {
+    to: "larvarvar@gmail.com", // сюда отправляем админу
+    subject: `New order placed: ${order.display_id}`,
+    html: `
+      <h1>New Order Received</h1>
+      <p><strong>Order ID:</strong> ${order.display_id}</p>
+      <p><strong>Customer email:</strong> ${order.email}</p>
+      <p><strong>Total:</strong> €${(order.total / 100).toFixed(2)}</p>
+    `,
+  })
 }
