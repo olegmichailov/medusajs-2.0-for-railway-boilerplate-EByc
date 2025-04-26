@@ -1,6 +1,4 @@
-import { SubscriberConfig } from "@medusajs/medusa"
-
-export const config: SubscriberConfig = {
+export default {
   event: "order.placed",
   context: {
     subscriberId: "send-admin-notification",
