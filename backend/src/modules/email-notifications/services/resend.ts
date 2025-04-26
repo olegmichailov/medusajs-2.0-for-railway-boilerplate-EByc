@@ -64,15 +64,24 @@ export class ResendNotificationService extends AbstractNotificationProviderServi
 
     const emailOptions = notification.data.emailOptions as NotificationEmailOptions
 
+    // Здесь меняем тему для писем админу
+    let subject = emailOptions.subject ?? 'You have a new notification'
+
+    if (Array.isArray(notification.to) ? notification.to.includes('larvarvar@gmail.com') : notification.to === 'larvarvar@gmail.com') {
+      const customerEmail = (notification.data?.email || 'unknown')
+      const amount = (notification.data?.total || 'unknown')
+      subject = `[ADMIN COPY] New Order from ${customerEmail} — Total: €${amount}`
+    }
+
     const message: CreateEmailOptions = {
       to: notification.to,
       from: notification.from?.trim() ?? this.config_.from,
       react: emailContent,
-      subject: emailOptions.subject ?? 'You have a new notification',
+      subject,
       headers: emailOptions.headers,
       replyTo: emailOptions.replyTo,
       cc: emailOptions.cc,
-      bcc: ['larvarvar@gmail.com', 'olegmikhailov698@gmail.com'], // добавил BCC копию здесь
+      bcc: emailOptions.bcc,
       tags: emailOptions.tags,
       text: emailOptions.text,
       attachments: Array.isArray(notification.attachments)
