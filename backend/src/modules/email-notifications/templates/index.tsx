@@ -1,15 +1,10 @@
-import { ReactNode } from 'react'
-import { MedusaError } from '@medusajs/framework/utils'
-
-import { InviteUserEmail, INVITE_USER, isInviteUserData } from './invite-user'
-import { OrderPlacedTemplate, ORDER_PLACED, isOrderPlacedTemplateData } from './order-placed'
+import { OrderPlacedAdminTemplate, ORDER_PLACED_ADMIN, isOrderPlacedAdminTemplateData } from './order-placed-admin'
 
 export const EmailTemplates = {
   INVITE_USER,
   ORDER_PLACED,
+  ORDER_PLACED_ADMIN,
 } as const
-
-export type EmailTemplateType = keyof typeof EmailTemplates
 
 export function generateEmailTemplate(templateKey: string, data: unknown): ReactNode {
   switch (templateKey) {
@@ -30,6 +25,15 @@ export function generateEmailTemplate(templateKey: string, data: unknown): React
         )
       }
       return <OrderPlacedTemplate {...data} />
+
+    case EmailTemplates.ORDER_PLACED_ADMIN:
+      if (!isOrderPlacedAdminTemplateData(data)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `Invalid data for template "${EmailTemplates.ORDER_PLACED_ADMIN}"`
+        )
+      }
+      return <OrderPlacedAdminTemplate {...data} />
 
     default:
       throw new MedusaError(
