@@ -15,6 +15,13 @@ export default async function sendAdminNotificationHandler({
   })
   const shippingAddress = await (orderModuleService as any).orderAddressService_.retrieve(order.shipping_address.id)
 
+  const totalAmount =
+    (order.summary.subtotal || 0) +
+    (order.summary.shipping_total || 0) +
+    (order.summary.tax_total || 0) -
+    (order.summary.discount_total || 0) -
+    (order.summary.gift_card_total || 0)
+
   try {
     await notificationModuleService.createNotifications({
       to: 'larvarvar@gmail.com',
@@ -29,7 +36,7 @@ export default async function sendAdminNotificationHandler({
           id: order.id,
           email: order.email,
           items: order.items.map((i) => ({ title: i.title, quantity: i.quantity })),
-          total: order.summary.total, // ✨ Теперь передаем отдельно total
+          total: totalAmount,
         },
         shippingAddress,
         preview: `Новый заказ от ${order.email}`,
