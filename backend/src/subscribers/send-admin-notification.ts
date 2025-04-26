@@ -1,35 +1,57 @@
-export default async function sendAdminNotificationHandler({ data, container }) {
-  const notificationService = container.resolve('notificationService')
-  const orderService = container.resolve('orderService')
+import { OrderService } from "@medusajs/medusa"
+import { SubscriberArgs } from "@medusajs/utils"
 
-  if (!data?.id) {
-    console.warn('Order ID not found in event data')
-    return
-  }
+export default async function sendAdminNotificationHandler({
+  data,
+  container,
+}: SubscriberArgs<{
+  id: string
+}>) {
+  const orderService = container.resolve<OrderService>("orderService")
+  const notificationService = container.resolve("notificationService")
 
   const order = await orderService.retrieve(data.id, {
-    relations: ['items', 'customer'],
+    relations: ["items", "customer", "shipping_address"],
   })
 
-  const customerEmail = order?.customer?.email
-  if (!customerEmail) {
-    console.warn('Customer email not found for order', data.id)
-    return
-  }
+  const email = order.email
+  const firstName = order.shipping_address?.first_name || ""
+  const lastName = order.shipping_address?.last_name || ""
+  const address = order.shipping_address
+    ? `${order.shipping_address.address_1}, ${order.shipping_address.postal_code} ${order.shipping_address.city}, ${order.shipping_address.country_code?.toUpperCase()}`
+    : "No address"
 
-  // Формируем простое письмо админу
-  const subject = `Новый заказ №${order.display_id}`
-  const text = `
-    Новый заказ:
-    Номер: ${order.display_id}
-    Имя: ${order?.shipping_address?.first_name || ''} ${order?.shipping_address?.last_name || ''}
-    Email: ${customerEmail}
-    Сумма: ${order.total / 100} ${order.currency_code.toUpperCase()}
-  `
+  const items = order.items
+    .map(
+      (item) =>
+        `${item.quantity} × ${item.title} (${(item.total / 100).toFixed(2)} €)`
+    )
+    .join("\n")
 
-  await notificationService.sendEmail('resend', {
-    to: 'larvarvar@gmail.com', // <-- сюда приходит уведомление
-    subject: subject,
-    text: text,
-  })
+  const total = (order.total / 100).toFixed(2)
+  const shipping = (order.shipping_total / 100).toFixed(2)
+
+  const message = `
+New order placed!
+
+Customer: ${firstName} ${lastName}
+Email: ${email}
+Address: ${address}
+
+Items:
+${items}
+
+Shipping: ${shipping} €
+Total: ${total} €
+  `.trim()
+
+  await notificationService.sendNotification(
+    "resend",
+    "order-placed",
+    {
+      to: "weare@gmorkl.de", // ТВОЙ email администратора
+      subject: "New Order Received!",
+      text: message,
+    }
+  )
 }
