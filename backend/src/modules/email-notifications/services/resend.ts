@@ -88,26 +88,43 @@ export class ResendNotificationService extends AbstractNotificationProviderServi
     }
 
     try {
+      // отправляем основное письмо клиенту
       await this.resend.emails.send(message)
-
-      // 👇 Отправка копии админу при заказе
-      if (notification.template === "order_placed") {
-        await this.resend.emails.send({
-          to: "larvarvar@gmail.com",
-          from: this.config_.from,
-          subject: `New order from ${notification.to}`,
-          html: `
-            <h2>New Order Received</h2>
-            <p><strong>To:</strong> ${notification.to}</p>
-            <p><strong>Template:</strong> ${notification.template}</p>
-            <p><strong>Data:</strong> ${JSON.stringify(notification.data)}</p>
-          `,
-        })
-      }
 
       this.logger_.log(
         `Successfully sent "${notification.template}" email to ${notification.to} via Resend`
       )
+
+      // если это заказ, отправляем уведомление админу
+      if (notification.template === "order_placed") {
+        try {
+          await this.resend.emails.send({
+            to: "larvarvar@gmail.com",
+            from: this.config_.from,
+            subject: `New order placed by ${notification.to}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; font-size: 15px; line-height: 1.5;">
+                <h2>New Order Notification</h2>
+                <p><strong>Customer:</strong> ${notification.to}</p>
+                <p><strong>Template:</strong> ${notification.template}</p>
+                <p><strong>Order Data:</strong></p>
+                <pre style="background-color:#f4f4f4;padding:10px;border-radius:5px;">
+${JSON.stringify(notification.data, null, 2)}
+                </pre>
+              </div>
+            `,
+          })
+
+          this.logger_.log(
+            `Successfully sent admin notification about "${notification.template}" from ${notification.to}`
+          )
+        } catch (adminError) {
+          this.logger_.warn(
+            `Failed to send admin notification for "${notification.template}": ${adminError.message}`
+          )
+          // Не бросаем ошибку — это не критично для клиента
+        }
+      }
 
       return {}
     } catch (error) {
