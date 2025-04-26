@@ -1,38 +1,59 @@
-// ✅ backend/src/subscribers/send-admin-notification.ts
+import * as React from "react"
 
-import { Modules } from '@medusajs/framework/utils'
-import { INotificationModuleService, IOrderModuleService } from '@medusajs/framework/types'
-import { SubscriberArgs, SubscriberConfig } from '@medusajs/medusa'
-import { EmailTemplates } from '../modules/email-notifications/templates'
-
-export default async function sendAdminNotification({
-  event: { data },
-  container,
-}: SubscriberArgs<any>) {
-  const notificationModuleService: INotificationModuleService = container.resolve(Modules.NOTIFICATION)
-  const orderModuleService: IOrderModuleService = container.resolve(Modules.ORDER)
-
-  const order = await orderModuleService.retrieveOrder(data.id, { relations: ['items', 'summary', 'shipping_address'] })
-
-  try {
-    await notificationModuleService.createNotifications({
-      to: 'larvarvar@gmail.com', // ✅ сюда приходит уведомление админу
-      channel: 'email',
-      template: EmailTemplates.ORDER_PLACED_ADMIN, // ✅ используем отдельный шаблон для админа
-      data: {
-        emailOptions: {
-          replyTo: 'info@example.com',
-          subject: `New order received #${order.display_id}`,
-        },
-        order,
-        preview: 'New order placed!'
-      }
-    })
-  } catch (error) {
-    console.error('Error sending admin notification:', error)
+interface OrderPlacedAdminEmailProps {
+  order: {
+    id: string
+    email: string
+    items: { title: string; quantity: number }[]
+    total: number // ✨ прямо тут в order
+  }
+  shippingAddress: {
+    first_name: string
+    last_name: string
+    address_1: string
+    city: string
+    postal_code: string
+    country_code: string
   }
 }
 
-export const config: SubscriberConfig = {
-  event: 'order.placed',
+export const ORDER_PLACED_ADMIN = "order_placed_admin"
+
+export function isOrderPlacedAdminTemplateData(data: any): data is OrderPlacedAdminEmailProps {
+  return data && typeof data.order?.id === "string"
+}
+
+export const OrderPlacedAdminTemplate = ({
+  order,
+  shippingAddress,
+}: OrderPlacedAdminEmailProps) => {
+  return (
+    <div style={{ fontFamily: "Arial, sans-serif", fontSize: "16px", color: "#333" }}>
+      <h1>Новый заказ #{order.id}</h1>
+
+      <p><strong>Покупатель:</strong> {order.email}</p>
+
+      <h2>Товары:</h2>
+      <ul>
+        {order.items.map((item, idx) => (
+          <li key={idx}>
+            {item.quantity} × {item.title}
+          </li>
+        ))}
+      </ul>
+
+      <h2>Итого:</h2>
+      <p><strong>Сумма заказа:</strong> {(order.total / 100).toFixed(2)} €</p>
+
+      <h2>Адрес доставки:</h2>
+      <p>
+        {shippingAddress.first_name} {shippingAddress.last_name}<br />
+        {shippingAddress.address_1}<br />
+        {shippingAddress.city}, {shippingAddress.postal_code}<br />
+        {shippingAddress.country_code.toUpperCase()}
+      </p>
+
+      <p>Проверьте и обработайте заказ в админке!</p>
+    </div>
+  )
 }
