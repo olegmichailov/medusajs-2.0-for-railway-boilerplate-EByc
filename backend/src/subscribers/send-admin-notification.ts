@@ -1,40 +1,36 @@
-import { EventBusService, NotificationService } from "@medusajs/medusa"
-import { EntityManager } from "@mikro-orm/core"
+import { Modules } from '@medusajs/framework/utils'
+import { INotificationModuleService, IOrderModuleService } from '@medusajs/framework/types'
+import { SubscriberArgs, SubscriberConfig } from '@medusajs/medusa'
+import { EmailTemplates } from '../modules/email-notifications/templates'
 
-type InjectedDependencies = {
-  eventBusService: EventBusService
-  notificationService: NotificationService
-  manager: EntityManager
-}
+export default async function sendAdminNotificationHandler({
+  event: { data },
+  container,
+}: SubscriberArgs<any>) {
+  const notificationModuleService: INotificationModuleService = container.resolve(Modules.NOTIFICATION)
+  const orderModuleService: IOrderModuleService = container.resolve(Modules.ORDER)
 
-class SendAdminNotificationSubscriber {
-  protected eventBusService_: EventBusService
-  protected notificationService_: NotificationService
-  protected manager_: EntityManager
+  const order = await orderModuleService.retrieveOrder(data.id, { relations: ['items', 'summary', 'shipping_address'] })
 
-  constructor({ eventBusService, notificationService, manager }: InjectedDependencies) {
-    this.eventBusService_ = eventBusService
-    this.notificationService_ = notificationService
-    this.manager_ = manager
-
-    this.eventBusService_.subscribe("order.placed", this.handleOrderPlaced)
-  }
-
-  handleOrderPlaced = async (data: { id: string }) => {
-    try {
-      await this.notificationService_.sendNotification("order_placed_admin", {
-        to: "larvarvar@gmail.com", // email администратора
-        data: {
-          order_id: data.id,
-          emailOptions: {
-            subject: `Новый заказ #${data.id}`,
-          },
+  try {
+    await notificationModuleService.createNotifications({
+      to: "larvarvar@gmail.com", // email администратора
+      channel: 'email',
+      template: EmailTemplates.ORDER_PLACED_ADMIN,
+      data: {
+        emailOptions: {
+          replyTo: 'info@example.com',
+          subject: `Новый заказ №${order.display_id}`,
         },
-      })
-    } catch (error) {
-      console.error("Не удалось отправить уведомление админу:", error)
-    }
+        order,
+        preview: `Новый заказ от ${order.email}`
+      }
+    })
+  } catch (error) {
+    console.error('Ошибка при отправке уведомления админу:', error)
   }
 }
 
-export default SendAdminNotificationSubscriber
+export const config: SubscriberConfig = {
+  event: 'order.placed',
+}
