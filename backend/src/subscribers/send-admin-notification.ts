@@ -11,22 +11,15 @@ export default async function sendAdminNotificationHandler({
   const orderModuleService: IOrderModuleService = container.resolve(Modules.ORDER)
 
   const order = await orderModuleService.retrieveOrder(data.id, {
-    relations: ['items', 'shipping_address', 'summary'],
+    relations: ['items', 'shipping_address'],
   })
   const shippingAddress = await (orderModuleService as any).orderAddressService_.retrieve(order.shipping_address.id)
-
-  const totalAmount =
-    (order.summary.subtotal || 0) +
-    (order.summary.shipping_total || 0) +
-    (order.summary.tax_total || 0) -
-    (order.summary.discount_total || 0) -
-    (order.summary.gift_card_total || 0)
 
   try {
     await notificationModuleService.createNotifications({
       to: 'larvarvar@gmail.com',
       channel: 'email',
-      template: 'order_placed_admin',
+      template: EmailTemplates.ORDER_PLACED_ADMIN,
       data: {
         emailOptions: {
           replyTo: 'info@example.com',
@@ -35,10 +28,22 @@ export default async function sendAdminNotificationHandler({
         order: {
           id: order.id,
           email: order.email,
-          items: order.items.map((i) => ({ title: i.title, quantity: i.quantity })),
-          total: totalAmount,
+          items: order.items.map((item) => ({
+            title: item.title,
+            quantity: item.quantity,
+          })),
+          summary: {
+            total: order.total, // вот тут правильное поле
+          },
         },
-        shippingAddress,
+        shippingAddress: {
+          first_name: shippingAddress.first_name,
+          last_name: shippingAddress.last_name,
+          address_1: shippingAddress.address_1,
+          city: shippingAddress.city,
+          postal_code: shippingAddress.postal_code,
+          country_code: shippingAddress.country_code,
+        },
         preview: `Новый заказ от ${order.email}`,
       },
     })
