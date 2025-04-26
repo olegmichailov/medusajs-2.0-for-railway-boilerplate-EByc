@@ -10,21 +10,25 @@ export default async function sendAdminNotificationHandler({
   const notificationModuleService: INotificationModuleService = container.resolve(Modules.NOTIFICATION)
   const orderModuleService: IOrderModuleService = container.resolve(Modules.ORDER)
 
-  const order = await orderModuleService.retrieveOrder(data.id, { relations: ['items', 'summary', 'shipping_address'] })
+  const order = await orderModuleService.retrieveOrder(data.id, {
+    relations: ['items', 'shipping_address', 'summary'],
+  })
+  const shippingAddress = await (orderModuleService as any).orderAddressService_.retrieve(order.shipping_address.id)
 
   try {
     await notificationModuleService.createNotifications({
-      to: "larvarvar@gmail.com", // email администратора
+      to: 'larvarvar@gmail.com', // отправляем админу
       channel: 'email',
-      template: EmailTemplates.ORDER_PLACED_ADMIN,
+      template: EmailTemplates.ORDER_PLACED_ADMIN, // <--- тут ставим новый шаблон
       data: {
         emailOptions: {
           replyTo: 'info@example.com',
-          subject: `Новый заказ №${order.display_id}`,
+          subject: `Новый заказ от ${order.email}`,
         },
         order,
-        preview: `Новый заказ от ${order.email}`
-      }
+        shippingAddress,
+        preview: `Новый заказ от ${order.email}`,
+      },
     })
   } catch (error) {
     console.error('Ошибка при отправке уведомления админу:', error)
