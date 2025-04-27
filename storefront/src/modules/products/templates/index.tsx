@@ -1,5 +1,3 @@
-// storefront/src/modules/products/templates/index.tsx
-
 "use client"
 
 import React, { Suspense } from "react"
@@ -49,23 +47,27 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         data-testid="product-container"
       >
         {/* Левая колонка на десктопе */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Картинки + Tabs */}
+        {/* Центр — Картинки и Табы */}
         <div className="block w-full relative">
+          {/* Название товара на мобилке */}
+          <div className="block small:hidden mb-4">
+            <h1 className="text-2xl font-medium">{product.title}</h1>
+          </div>
+
+          {/* Галерея картинок */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
+          {/* Описание + Табы на мобилке */}
           <div className="block small:hidden mt-6">
-            <div className="text-ui-fg-base text-small-regular">
-              {product.description && (
-                <div className="border-t border-ui-border-base pt-6">
-                  <h3 className="text-base font-semibold mb-2">Description</h3>
-                  <p>{product.description}</p>
-                </div>
-              )}
-            </div>
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <p className="text-small-regular text-ui-fg-base">{product.description}</p>
+              </div>
+            )}
 
             <LazyProductTabs product={product} />
           </div>
@@ -74,17 +76,14 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
       </div>
 
       {/* Похожие товары */}
-      <div
-        className="content-container my-16 small:my-32"
-        data-testid="related-products-container"
-      >
+      <div className="content-container my-16 small:my-32" data-testid="related-products-container">
         <Suspense fallback={<SkeletonRelatedProducts />}>
           <RelatedProducts product={product} countryCode={countryCode} />
         </Suspense>
