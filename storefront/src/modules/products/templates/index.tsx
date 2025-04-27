@@ -52,7 +52,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Центр — Картинки + Описание + Табы */}
+        {/* Центр — Название, Галерея, Описание и Табы */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
@@ -62,15 +62,25 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           {/* Галерея картинок */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-          {/* Описание для всех устройств */}
-          {product.description && (
-            <div className="border-t border-ui-border-base pt-6 mt-6">
-              <p className="text-small-regular text-ui-fg-base">{product.description}</p>
-            </div>
-          )}
+          {/* Описание и Табы на мобилке */}
+          <div className="block small:hidden mt-6">
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <p className="text-small-regular text-ui-fg-base">{product.description}</p>
+              </div>
+            )}
 
-          {/* Табы для всех устройств */}
-          <div className="mt-6">
+            <LazyProductTabs product={product} />
+          </div>
+
+          {/* Описание и Табы на десктопе */}
+          <div className="hidden small:block w-full mt-8">
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <p className="text-small-regular text-ui-fg-base">{product.description}</p>
+              </div>
+            )}
+
             <LazyProductTabs product={product} />
           </div>
         </div>
@@ -78,13 +88,13 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
       </div>
 
-      {/* Кнопка Add to Cart на мобилке */}
+      {/* Mobile Actions: Кнопка Add to Cart на мобилке */}
       <div className="block small:hidden">
         <MobileActions
           product={product}
@@ -99,7 +109,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
 
       {/* Похожие товары */}
       <div className="content-container my-16 small:my-32" data-testid="related-products-container">
-        <Suspense fallback={<SkeletonRelatedProducts />}>
+        <Suspense fallback={<SkeletonRelatedProducts />}> 
           <RelatedProducts product={product} countryCode={countryCode} />
         </Suspense>
       </div>
@@ -107,4 +117,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate
+export default ProductTemplate;
