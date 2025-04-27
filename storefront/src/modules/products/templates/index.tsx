@@ -1,5 +1,3 @@
-// storefront/src/modules/products/templates/index.tsx
-
 "use client"
 
 import React, { Suspense } from "react"
@@ -48,30 +46,42 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Мобильная версия */}
-        <div className="block small:hidden w-full">
-          <h1 className="text-2xl font-semibold mb-4">{product.title}</h1>
-          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
-          <div className="my-6">
-            <h2 className="text-xl font-semibold mb-2">Description</h2>
-            <p className="text-sm leading-6">{product.description}</p>
-          </div>
+        {/* Левая колонка — инфо */}
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
+          <h1 className="text-ui-heading font-normal text-2xl leading-9">
+            {product.title}
+          </h1>
+
+          {/* Description Tab */}
+          {product.description && (
+            <div className="border-t border-ui-border-base pt-6">
+              <h2 className="text-base font-medium mb-2">Description</h2>
+              <p className="text-base-regular text-ui-fg-base">
+                {product.description}
+              </p>
+            </div>
+          )}
+
+          {/* Остальные вкладки */}
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Десктопная версия */}
-        <div className="hidden small:flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
-          <LazyProductInfo product={product} />
-          <LazyProductTabs product={product} />
+        {/* Галерея изображений */}
+        <div className="block w-full relative">
+          <ImageGallery
+            images={product?.images || []}
+            preloadFirst
+            preloadCount={2}
+            showIndicators // Показывает маленькие индикаторы карусели
+          />
         </div>
 
-        <div className="hidden small:block w-full relative">
-          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
-        </div>
-
-        <div className="hidden small:flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        {/* Правая колонка — CTA и Add to Cart */}
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense
+            fallback={<ProductActions disabled={true} product={product} region={region} />}
+          >
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
@@ -79,7 +89,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
 
       {/* Похожие товары */}
       <div
-        className="content-container my-16 small:my-32 relative z-0"
+        className="content-container my-16 small:my-32"
         data-testid="related-products-container"
       >
         <Suspense fallback={<SkeletonRelatedProducts />}>
