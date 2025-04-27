@@ -48,30 +48,31 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка — инфо (название товара) */}
+        {/* Левая колонка на десктопе */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <LazyProductInfo product={product} />
-        </div>
-
-        {/* Галерея изображений */}
-        <div className="block w-full relative">
-          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
-
-          {/* Мобильная версия: описание и табы */}
-          <div className="block small:hidden mt-6">
-            {/* Description */}
-            {product.description && (
-              <div className="text-ui-fg-base text-small-regular border-t border-ui-border-base pt-6">
-                <p>{product.description}</p>
-              </div>
-            )}
-
-            {/* Табы */}
+          <div className="hidden small:block">
             <LazyProductTabs product={product} />
           </div>
         </div>
 
-        {/* Правая колонка — CTA и Add to Cart */}
+        {/* Галерея изображений + Описание + Табы на мобилке */}
+        <div className="block w-full relative">
+          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
+
+          <div className="block small:hidden mt-6">
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <p className="text-ui-fg-base text-small-regular">
+                  {product.description}
+                </p>
+              </div>
+            )}
+            <LazyProductTabs product={product} />
+          </div>
+        </div>
+
+        {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
           <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
@@ -93,4 +94,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate
+export default ProductTemplate;
