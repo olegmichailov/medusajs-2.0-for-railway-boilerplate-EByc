@@ -50,12 +50,10 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Левая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
-
-          {/* Добавляем ТАПЫ на десктопе под Description */}
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Центр — Картинки */}
+        {/* Центр — Галерея */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
@@ -85,7 +83,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         </div>
       </div>
 
-      {/* Mobile Actions: Кнопка Add to Cart на мобилке */}
+      {/* Кнопка Add to Cart на мобилке с рабочей логикой */}
       <div className="block small:hidden">
         <MobileActions
           product={product}
