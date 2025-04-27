@@ -1,5 +1,3 @@
-// storefront/src/modules/products/templates/index.tsx
-
 "use client"
 
 import React, { Suspense } from "react"
@@ -53,12 +51,21 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Картинки + Табы */}
+        {/* Картинки + Description + Tabs */}
         <div className="block w-full relative">
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-          {/* Описание + табы под галереей на мобиле */}
+          {/* Описание под картинками (мобильная версия) */}
           <div className="block small:hidden mt-6">
+            <div className="text-ui-fg-base text-small-regular">
+              {product.description && (
+                <div className="border-t border-ui-border-base pt-6">
+                  <h3 className="text-base font-semibold mb-2">Description</h3>
+                  <p>{product.description}</p>
+                </div>
+              )}
+            </div>
+
             <LazyProductTabs product={product} />
           </div>
         </div>
