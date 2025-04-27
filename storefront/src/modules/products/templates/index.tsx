@@ -50,18 +50,17 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Левая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
-          {/* Добавляем табы под Description */}
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Центр — Картинки */}
+        {/* Центр — Галерея */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
             <h1 className="text-2xl font-medium">{product.title}</h1>
           </div>
 
-          {/* Галерея */}
+          {/* Галерея картинок */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
           {/* Описание + Табы на мобилке */}
@@ -87,15 +86,17 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
 
       {/* Mobile Actions: Кнопка Add to Cart на мобилке */}
       <div className="block small:hidden">
-        <MobileActions
-          product={product}
-          options={{}}
-          updateOptions={() => {}}
-          show={true}
-          optionsDisabled={false}
-          handleAddToCart={() => {}}
-          isAdding={false}
-        />
+        <Suspense fallback={<div />}> 
+          <MobileActions 
+            product={product} 
+            options={{}} 
+            updateOptions={() => {}} 
+            show={true} 
+            optionsDisabled={false} 
+            handleAddToCart={() => {}} 
+            isAdding={false} 
+          />
+        </Suspense>
       </div>
 
       {/* Похожие товары */}
