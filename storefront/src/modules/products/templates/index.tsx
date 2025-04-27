@@ -1,6 +1,6 @@
 "use client"
 
-import React, { Suspense, useState } from "react"
+import React, { Suspense, useEffect, useMemo, useState } from "react"
 
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
@@ -13,7 +13,6 @@ import MobileActions from "@modules/products/components/product-actions/mobile-a
 import { notFound } from "next/navigation"
 import ProductActionsWrapper from "./product-actions-wrapper"
 import { HttpTypes } from "@medusajs/types"
-import { getProductPrice } from "@lib/util/get-product-price"
 
 const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
   <Suspense fallback={<div className="h-10">Loading product info...</div>}>
@@ -42,39 +41,40 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
     return notFound()
   }
 
-  // Управление опциями товара для MobileActions
-  const [options, setOptions] = useState<Record<string, string | undefined>>(() => {
-    const initialOptions: Record<string, string | undefined> = {}
+  const [options, setOptions] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const initial = {} as Record<string, string>
     for (const option of product.options || []) {
-      if (option.values?.length) {
-        initialOptions[option.title || ""] = option.values[0].value
+      if (option.values.length) {
+        initial[option.title || ""] = option.values[0].value
       }
     }
-    return initialOptions
-  })
+    setOptions(initial)
+  }, [product])
 
-  const updateOptions = (title: string, value: string) => {
-    setOptions((prev) => ({ ...prev, [title]: value }))
-  }
-
-  const variants = product.variants || []
-
-  const selectedVariant = variants.find((variant) => {
-    return variant.options?.every((option) => {
-      const value = options[option.option_id]
-      return value === option.value
-    })
-  })
-
-  const inStock = (selectedVariant?.inventory_quantity || 0) > 0
+  const variant = useMemo(() => {
+    return product.variants?.find((v) =>
+      v.options.every((opt) => {
+        const optionTitle = product.options?.find(o => o.id === opt.option_id)?.title
+        return optionTitle && options[optionTitle] === opt.value
+      })
+    )
+  }, [options, product])
 
   const handleAddToCart = () => {
-    if (!selectedVariant) {
-      return
-    }
-    console.log(`Товар с id варианта ${selectedVariant.id} добавлен в корзину`)
-    // Здесь должна быть реальная функция добавления в корзину
+    console.log("Add to cart clicked", variant?.id)
+    // Здесь должна быть реальная логика добавления в корзину
   }
+
+  const updateOptions = (title: string, value: string) => {
+    setOptions((prev) => ({
+      ...prev,
+      [title]: value,
+    }))
+  }
+
+  const inStock = variant?.inventory_quantity && variant.inventory_quantity > 0
 
   return (
     <>
@@ -105,37 +105,39 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
                 <p className="text-small-regular text-ui-fg-base">{product.description}</p>
               </div>
             )}
-            <LazyProductTabs product={product} />
 
-            {/* Чёрная Кнопка Add to Cart */}
-            <div className="mt-6">
-              <MobileActions
-                product={product}
-                options={options}
-                updateOptions={updateOptions}
-                variant={selectedVariant}
-                handleAddToCart={handleAddToCart}
-                inStock={inStock}
-                isAdding={false}
-                show={true}
-                optionsDisabled={false}
-              />
-            </div>
+            <LazyProductTabs product={product} />
           </div>
         </div>
 
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
       </div>
 
+      {/* Mobile Actions: Чёрная кнопка Add to Cart на мобилке */}
+      <div className="block small:hidden">
+        <MobileActions
+          product={product}
+          variant={variant}
+          options={options}
+          updateOptions={updateOptions}
+          show={true}
+          optionsDisabled={false}
+          handleAddToCart={handleAddToCart}
+          isAdding={false}
+          inStock={inStock}
+        />
+      </div>
+
       {/* Похожие товары */}
       <div className="content-container my-16 small:my-32" data-testid="related-products-container">
-        <Suspense fallback={<SkeletonRelatedProducts />}>
+        <Suspense fallback={<SkeletonRelatedProducts />}
+        >
           <RelatedProducts product={product} countryCode={countryCode} />
         </Suspense>
       </div>
