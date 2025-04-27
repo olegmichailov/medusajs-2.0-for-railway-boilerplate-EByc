@@ -59,7 +59,7 @@
     "sharp": "^0.32.6",
     "node-fetch": "^3.3.2",
     "mkdirp": "^1.0.4",
-    "keen-slider": "^7.0.5"
+    "keen-slider": "^6.8.6"
   },
   "devDependencies": {
     "@babel/core": "^7.17.5",
