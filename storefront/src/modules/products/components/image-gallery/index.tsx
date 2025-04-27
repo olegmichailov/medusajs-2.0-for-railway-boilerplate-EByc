@@ -1,78 +1,48 @@
-"use client"
+// src/modules/products/components/image-gallery/index.tsx
 
+'use client'
+
+import { useKeenSlider } from "keen-slider/react"
+import "keen-slider/keen-slider.min.css"
 import { HttpTypes } from "@medusajs/types"
 import { Container } from "@medusajs/ui"
 import Image from "next/image"
-import { useKeenSlider } from "keen-slider/react"
-import "keen-slider/keen-slider.min.css"
 import { useState } from "react"
 
-type ImageGalleryProps = {
+interface ImageGalleryProps {
   images: HttpTypes.StoreProductImage[]
 }
 
 const ImageGallery = ({ images }: ImageGalleryProps) => {
-  const [currentSlide, setCurrentSlide] = useState(0)
-
-  const [sliderRef] = useKeenSlider({
-    loop: true,
-    slideChanged(slider) {
-      setCurrentSlide(slider.track.details.rel)
-    },
-    mode: "snap",
-    slides: {
-      perView: 1,
-      spacing: 8,
-    },
-    breakpoints: {
-      "(min-width: 640px)": {
-        slides: {
-          perView: 1,
-          spacing: 12,
-        },
-      },
-    },
+  const [sliderRef] = useKeenSlider<HTMLDivElement>({
+    loop: false,
   })
 
   return (
-    <div className="relative w-full">
-      <div ref={sliderRef} className="keen-slider">
-        {images.map((image, index) => {
-          const isPriority = index === 0
-          return (
-            <Container
-              key={image.id}
-              className="keen-slider__slide relative aspect-[29/34] w-full overflow-hidden bg-ui-bg-subtle"
-              id={image.id}
-            >
-              {!!image.url && (
-                <Image
-                  src={image.url}
-                  alt={`Product image ${index + 1}`}
-                  fill
-                  priority={isPriority}
-                  loading={isPriority ? "eager" : "lazy"}
-                  sizes="(max-width: 576px) 100vw, (max-width: 768px) 60vw, 800px"
-                  style={{ objectFit: "cover" }}
-                  unoptimized={false}
-                />
-              )}
-            </Container>
-          )
-        })}
-      </div>
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-2">
-        {images.map((_, idx) => (
+    <div className="flex flex-col items-center w-full">
+      <div ref={sliderRef} className="keen-slider w-full">
+        {images.map((image, i) => (
           <div
-            key={idx}
-            className={`h-2 w-2 rounded-full ${
-              currentSlide === idx ? "bg-gray-800" : "bg-gray-400 opacity-50"
-            }`}
-          ></div>
+            key={image.id}
+            className="keen-slider__slide aspect-[29/34] relative bg-ui-bg-subtle"
+          >
+            <Image
+              src={image.url}
+              alt={`Product image ${i + 1}`}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 50vw"
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-center gap-2 mt-4">
+        {images.map((_, i) => (
+          <div key={i} className="w-2 h-2 bg-gray-400 rounded-full opacity-50"></div>
         ))}
       </div>
     </div>
   )
 }
 
-export default ImageGallery
+export default ImageGallery;
