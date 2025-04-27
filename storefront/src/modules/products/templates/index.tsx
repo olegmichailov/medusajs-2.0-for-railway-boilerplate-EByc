@@ -9,6 +9,7 @@ import ProductTabs from "@modules/products/components/product-tabs"
 import RelatedProducts from "@modules/products/components/related-products"
 import ProductInfo from "@modules/products/templates/product-info"
 import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
+import MobileActions from "@modules/products/components/product-actions/mobile-actions"
 import { notFound } from "next/navigation"
 import ProductActionsWrapper from "./product-actions-wrapper"
 import { HttpTypes } from "@medusajs/types"
@@ -51,7 +52,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Центр — Картинки, описание и табы */}
+        {/* Центр — Картинки + Описание + Табы */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
@@ -61,18 +62,16 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           {/* Галерея картинок */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-          {/* Описание + Табы */}
-          <div className="mt-6">
-            {product.description && (
-              <div className="border-t border-ui-border-base pt-6">
-                <p className="text-small-regular text-ui-fg-base">{product.description}</p>
-              </div>
-            )}
-
-            {/* Табы Product Info и Shipping на десктопе и мобиле */}
-            <div className="mt-6">
-              <LazyProductTabs product={product} />
+          {/* Описание для всех устройств */}
+          {product.description && (
+            <div className="border-t border-ui-border-base pt-6 mt-6">
+              <p className="text-small-regular text-ui-fg-base">{product.description}</p>
             </div>
+          )}
+
+          {/* Табы для всех устройств */}
+          <div className="mt-6">
+            <LazyProductTabs product={product} />
           </div>
         </div>
 
@@ -83,6 +82,19 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
+      </div>
+
+      {/* Кнопка Add to Cart на мобилке */}
+      <div className="block small:hidden">
+        <MobileActions
+          product={product}
+          options={{}}
+          updateOptions={() => {}}
+          show={true}
+          optionsDisabled={false}
+          handleAddToCart={() => {}}
+          isAdding={false}
+        />
       </div>
 
       {/* Похожие товары */}
