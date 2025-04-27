@@ -1,6 +1,6 @@
 "use client"
 
-import React, { Suspense } from "react"
+import React, { Suspense, useState } from "react"
 
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
@@ -13,6 +13,7 @@ import MobileActions from "@modules/products/components/product-actions/mobile-a
 import { notFound } from "next/navigation"
 import ProductActionsWrapper from "./product-actions-wrapper"
 import { HttpTypes } from "@medusajs/types"
+import { getProductPrice } from "@lib/util/get-product-price"
 
 const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
   <Suspense fallback={<div className="h-10">Loading product info...</div>}>
@@ -39,6 +40,40 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
 }) => {
   if (!product || !product.id) {
     return notFound()
+  }
+
+  // Управление опциями товара для MobileActions
+  const [options, setOptions] = useState<Record<string, string | undefined>>(() => {
+    const initialOptions: Record<string, string | undefined> = {}
+    for (const option of product.options || []) {
+      if (option.values?.length) {
+        initialOptions[option.title || ""] = option.values[0].value
+      }
+    }
+    return initialOptions
+  })
+
+  const updateOptions = (title: string, value: string) => {
+    setOptions((prev) => ({ ...prev, [title]: value }))
+  }
+
+  const variants = product.variants || []
+
+  const selectedVariant = variants.find((variant) => {
+    return variant.options?.every((option) => {
+      const value = options[option.option_id]
+      return value === option.value
+    })
+  })
+
+  const inStock = (selectedVariant?.inventory_quantity || 0) > 0
+
+  const handleAddToCart = () => {
+    if (!selectedVariant) {
+      return
+    }
+    console.log(`Товар с id варианта ${selectedVariant.id} добавлен в корзину`)
+    // Здесь должна быть реальная функция добавления в корзину
   }
 
   return (
@@ -71,6 +106,21 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
               </div>
             )}
             <LazyProductTabs product={product} />
+
+            {/* Чёрная Кнопка Add to Cart */}
+            <div className="mt-6">
+              <MobileActions
+                product={product}
+                options={options}
+                updateOptions={updateOptions}
+                variant={selectedVariant}
+                handleAddToCart={handleAddToCart}
+                inStock={inStock}
+                isAdding={false}
+                show={true}
+                optionsDisabled={false}
+              />
+            </div>
           </div>
         </div>
 
@@ -81,19 +131,6 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
-      </div>
-
-      {/* Кнопка Add to Cart на мобилке с рабочей логикой */}
-      <div className="block small:hidden">
-        <MobileActions
-          product={product}
-          options={{}}
-          updateOptions={() => {}}
-          show={true}
-          optionsDisabled={false}
-          handleAddToCart={() => {}}
-          isAdding={false}
-        />
       </div>
 
       {/* Похожие товары */}
