@@ -13,7 +13,6 @@ import { notFound } from "next/navigation"
 import ProductActionsWrapper from "./product-actions-wrapper"
 import { HttpTypes } from "@medusajs/types"
 
-// Новый ленивый импорт (если нужно добавить ещё компонентов позже)
 const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
   <Suspense fallback={<div className="h-10">Loading product info...</div>}>
     <ProductInfo product={product} />
@@ -47,28 +46,36 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка — инфо */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
+        {/* Мобильная версия: сначала заголовок и карусель */}
+        <div className="block w-full small:hidden mb-8">
+          <LazyProductInfo product={product} />
+          <ImageGallery
+            images={product?.images || []}
+            preloadFirst
+            preloadCount={2}
+          />
+        </div>
+
+        {/* Десктопная версия: старая раскладка */}
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Галерея изображений с приоритетом на первые 2 изображения */}
-        <div className="block w-full relative">
+        {/* Карусель изображений для десктопа (просто если нужно) */}
+        <div className="hidden small:block w-full relative">
           <ImageGallery
             images={product?.images || []}
             preloadFirst
-            preloadCount={2} // <= это важное изменение
+            preloadCount={2}
           />
         </div>
 
         {/* Правая колонка — CTA и Add to Cart */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        <div className="flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
           <Suspense
-            fallback={
-              <ProductActions disabled={true} product={product} region={region} />
-            }
+            fallback={<ProductActions disabled={true} product={product} region={region} />}
           >
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
