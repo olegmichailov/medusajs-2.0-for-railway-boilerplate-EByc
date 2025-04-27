@@ -1,18 +1,19 @@
 // src/modules/products/templates/index.tsx
 
-"use client"
+'use client'
 
-import React, { Suspense } from "react"
-import ImageGallery from "@modules/products/components/image-gallery"
-import ProductActions from "@modules/products/components/product-actions"
-import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
-import ProductTabs from "@modules/products/components/product-tabs"
-import RelatedProducts from "@modules/products/components/related-products"
-import ProductInfo from "@modules/products/templates/product-info"
-import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
-import { notFound } from "next/navigation"
-import ProductActionsWrapper from "./product-actions-wrapper"
-import { HttpTypes } from "@medusajs/types"
+import React, { Suspense } from 'react'
+
+import ImageGallery from '@modules/products/components/image-gallery'
+import ProductActions from '@modules/products/components/product-actions'
+import ProductOnboardingCta from '@modules/products/components/product-onboarding-cta'
+import ProductTabs from '@modules/products/components/product-tabs'
+import RelatedProducts from '@modules/products/components/related-products'
+import ProductInfo from '@modules/products/templates/product-info'
+import SkeletonRelatedProducts from '@modules/skeletons/templates/skeleton-related-products'
+import { notFound } from 'next/navigation'
+import ProductActionsWrapper from './product-actions-wrapper'
+import { HttpTypes } from '@medusajs/types'
 
 const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
   <Suspense fallback={<div className="h-10">Loading product info...</div>}>
@@ -52,22 +53,19 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Галерея + Description + Tabs на мобиле */}
+        {/* Картинки + Description + Tabs */}
         <div className="block w-full relative">
-          <div className="block small:hidden">
-            <div className="text-ui-fg-base text-2xl font-normal mb-4">
-              {product.title}
-            </div>
-            <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
+          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-            <div className="text-ui-fg-base text-small-regular">
-              {product.description && (
-                <div className="border-t border-ui-border-base pt-6">
-                  <p>{product.description}</p>
-                </div>
-              )}
-            </div>
-
+          {/* Описание и табы под картинками (только на мобильной версии) */}
+          <div className="block small:hidden mt-6">
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <p className="text-ui-fg-base text-small-regular whitespace-pre-line">
+                  {product.description}
+                </p>
+              </div>
+            )}
             <LazyProductTabs product={product} />
           </div>
         </div>
@@ -75,8 +73,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}
-          >
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
@@ -95,4 +92,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate;
+export default ProductTemplate
