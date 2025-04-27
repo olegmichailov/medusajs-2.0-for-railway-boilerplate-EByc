@@ -1,9 +1,6 @@
-**src/modules/products/templates/index.tsx**
-
 "use client"
 
 import React, { Suspense } from "react"
-
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
 import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
@@ -53,10 +50,11 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Центр — галерея и описание */}
+        {/* Галерея изображений с приоритетом на первые 2 изображения */}
         <div className="block w-full relative">
           <ImageGallery images={product?.images || []} />
-          <div className="py-6">
+
+          <div className="mt-8">
             <LazyProductTabs product={product} />
           </div>
         </div>
@@ -64,7 +62,9 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка — CTA и Add to Cart */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense
+            fallback={<ProductActions disabled={true} product={product} region={region} />}
+          >
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
