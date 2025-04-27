@@ -48,29 +48,39 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
+        {/* Левая колонка на десктопе */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <LazyProductInfo product={product} />
-          <LazyProductTabs product={product} />
         </div>
 
+        {/* Галерея + Описание + Табы на мобильной версии */}
         <div className="block w-full relative">
-          <ImageGallery
-            images={product?.images || []}
-            preloadFirst
-            preloadCount={2}
-          />
+          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
+
+          {/* Мобильная версия — всё под галереей */}
+          <div className="block small:hidden mt-6">
+            {/* Описание */}
+            {product.description && (
+              <div className="border-t border-ui-border-base pt-6">
+                <h3 className="text-base font-semibold mb-2">Description</h3>
+                <p className="text-ui-fg-base text-small-regular">{product.description}</p>
+              </div>
+            )}
+            {/* Табы */}
+            <LazyProductTabs product={product} />
+          </div>
         </div>
 
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        {/* Правая колонка на десктопе */}
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense
-            fallback={<ProductActions disabled={true} product={product} region={region} />}
-          >
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
       </div>
 
+      {/* Похожие товары */}
       <div
         className="content-container my-16 small:my-32"
         data-testid="related-products-container"
@@ -83,4 +93,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate;
+export default ProductTemplate
