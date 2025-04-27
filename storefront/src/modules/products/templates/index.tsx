@@ -1,3 +1,5 @@
+// src/modules/products/templates/index.tsx
+
 "use client"
 
 import React, { Suspense } from "react"
@@ -50,16 +52,22 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Левая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
+          {product.description && (
+            <div className="border-t border-ui-border-base pt-6">
+              <p className="text-small-regular text-ui-fg-base">{product.description}</p>
+            </div>
+          )}
+          <LazyProductTabs product={product} />
         </div>
 
-        {/* Центр — Картинки и контент */}
+        {/* Центр — Галерея */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
             <h1 className="text-2xl font-medium">{product.title}</h1>
           </div>
 
-          {/* Галерея картинок */}
+          {/* Галерея */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
           {/* Описание + Табы на мобилке */}
@@ -69,7 +77,6 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
                 <p className="text-small-regular text-ui-fg-base">{product.description}</p>
               </div>
             )}
-
             <LazyProductTabs product={product} />
           </div>
         </div>
@@ -80,23 +87,10 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
-          {/* Табы на десктопе */}
-          {product.description && (
-            <div className="mt-8">
-              <LazyProductTabs product={product} />
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Кнопка Add to Cart на мобилке под табами */}
-      <div className="block small:hidden mt-6 px-4">
-        <Suspense fallback={<div className="h-12" />}>
-          <ProductActions disabled={false} product={product} region={region} />
-        </Suspense>
-      </div>
-
-      {/* Mobile Actions: всплывающая кнопка Add to Cart */}
+      {/* Mobile Actions: Кнопка Add to Cart на мобилке */}
       <div className="block small:hidden">
         <MobileActions
           product={product}
