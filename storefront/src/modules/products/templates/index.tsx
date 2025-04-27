@@ -50,15 +50,12 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Левая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
           <LazyProductInfo product={product} />
-          {product.description && (
-            <div className="border-t border-ui-border-base pt-6">
-              <p className="text-small-regular text-ui-fg-base">{product.description}</p>
-            </div>
-          )}
+
+          {/* Добавляем ТАПЫ на десктопе под Description */}
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Центр — Галерея картинок */}
+        {/* Центр — Картинки */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
@@ -75,7 +72,6 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
                 <p className="text-small-regular text-ui-fg-base">{product.description}</p>
               </div>
             )}
-
             <LazyProductTabs product={product} />
           </div>
         </div>
@@ -83,7 +79,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
