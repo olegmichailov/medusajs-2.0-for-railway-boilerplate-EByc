@@ -46,38 +46,32 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка — инфо */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
-          <h1 className="text-ui-heading font-normal text-2xl leading-9">
-            {product.title}
-          </h1>
-
-          {/* Description Tab */}
-          {product.description && (
-            <div className="border-t border-ui-border-base pt-6">
-              <h2 className="text-base font-medium mb-2">Description</h2>
-              <p className="text-base-regular text-ui-fg-base">
-                {product.description}
-              </p>
-            </div>
-          )}
-
-          {/* Остальные вкладки */}
+        {/* Левая колонка на десктопе: инфо + табы */}
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
+          <LazyProductInfo product={product} />
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Галерея изображений */}
+        {/* Блок с заголовком, каруселью, описанием — на мобильной версии */}
         <div className="block w-full relative">
-          <ImageGallery
-            images={product?.images || []}
-            preloadFirst
-            preloadCount={2}
-            showIndicators // Показывает маленькие индикаторы карусели
-          />
+          <div className="flex flex-col gap-y-6">
+            {/* Заголовок */}
+            <h1 className="text-2xl font-normal text-ui-fg-base px-2 pt-2">
+              {product.title}
+            </h1>
+
+            {/* Карусель изображений */}
+            <ImageGallery images={product?.images || []} />
+
+            {/* Описание и табы */}
+            <div className="block small:hidden">
+              <LazyProductTabs product={product} />
+            </div>
+          </div>
         </div>
 
-        {/* Правая колонка — CTA и Add to Cart */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        {/* Правая колонка на десктопе: CTA и Add to Cart */}
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
           <Suspense
             fallback={<ProductActions disabled={true} product={product} region={region} />}
@@ -85,6 +79,16 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
+      </div>
+
+      {/* Блок с Add to Cart и CTA для мобильной версии */}
+      <div className="block small:hidden content-container mt-8">
+        <ProductOnboardingCta />
+        <Suspense
+          fallback={<ProductActions disabled={true} product={product} region={region} />}
+        >
+          <ProductActionsWrapper id={product.id} region={region} />
+        </Suspense>
       </div>
 
       {/* Похожие товары */}
