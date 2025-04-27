@@ -1,5 +1,3 @@
-// storefront/src/modules/products/templates/index.tsx
-
 "use client"
 
 import React, { Suspense } from "react"
@@ -51,21 +49,25 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Левая колонка на десктопе */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <LazyProductInfo product={product} />
-          <div className="hidden small:block">
-            <LazyProductTabs product={product} />
-          </div>
         </div>
 
-        {/* Галерея изображений + Описание + Табы на мобилке */}
+        {/* Центральная часть */}
         <div className="block w-full relative">
+          {/* Название товара на мобилке */}
+          <div className="block small:hidden mb-6">
+            <h1 className="text-2xl font-medium tracking-wide">
+              {product.title}
+            </h1>
+          </div>
+
+          {/* Галерея изображений */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
+          {/* Описание и табы на мобилке */}
           <div className="block small:hidden mt-6">
             {product.description && (
-              <div className="border-t border-ui-border-base pt-6">
-                <p className="text-ui-fg-base text-small-regular">
-                  {product.description}
-                </p>
+              <div className="text-ui-fg-base text-small-regular">
+                <p className="mb-6">{product.description}</p>
               </div>
             )}
             <LazyProductTabs product={product} />
@@ -75,10 +77,20 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
+      </div>
+
+      {/* Описание и табы на десктопе */}
+      <div className="hidden small:block content-container">
+        {product.description && (
+          <div className="text-ui-fg-base text-small-regular border-t border-ui-border-base pt-6">
+            <p>{product.description}</p>
+          </div>
+        )}
+        <LazyProductTabs product={product} />
       </div>
 
       {/* Похожие товары */}
@@ -94,4 +106,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate;
+export default ProductTemplate
