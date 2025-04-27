@@ -9,7 +9,6 @@ import ProductTabs from "@modules/products/components/product-tabs"
 import RelatedProducts from "@modules/products/components/related-products"
 import ProductInfo from "@modules/products/templates/product-info"
 import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
-import MobileActions from "@modules/products/components/product-actions/mobile-actions"
 import { notFound } from "next/navigation"
 import ProductActionsWrapper from "./product-actions-wrapper"
 import { HttpTypes } from "@medusajs/types"
@@ -52,7 +51,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Центр — Картинки и Табы */}
+        {/* Центр — Картинки, описание и табы */}
         <div className="block w-full relative">
           {/* Название товара на мобилке */}
           <div className="block small:hidden mb-4">
@@ -62,38 +61,28 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           {/* Галерея картинок */}
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-          {/* Описание + Табы на мобилке */}
-          <div className="block small:hidden mt-6">
+          {/* Описание + Табы */}
+          <div className="mt-6">
             {product.description && (
               <div className="border-t border-ui-border-base pt-6">
                 <p className="text-small-regular text-ui-fg-base">{product.description}</p>
               </div>
             )}
 
-            <LazyProductTabs product={product} />
+            {/* Табы Product Info и Shipping на десктопе и мобиле */}
+            <div className="mt-6">
+              <LazyProductTabs product={product} />
+            </div>
           </div>
         </div>
 
         {/* Правая колонка на десктопе */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}> 
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
-      </div>
-
-      {/* Mobile Actions: Кнопка Add to Cart на мобилке */}
-      <div className="block small:hidden">
-        <MobileActions
-          product={product}
-          options={{}}
-          updateOptions={() => {}}
-          show={true}
-          optionsDisabled={false}
-          handleAddToCart={() => {}}
-          isAdding={false}
-        />
       </div>
 
       {/* Похожие товары */}
