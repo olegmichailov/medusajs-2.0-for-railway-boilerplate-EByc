@@ -1,3 +1,5 @@
+// storefront/src/modules/products/templates/index.tsx
+
 "use client"
 
 import React, { Suspense } from "react"
@@ -46,42 +48,25 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка — инфо */}
+        {/* Левая колонка на десктопе */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
-          <h1 className="text-ui-heading font-normal text-2xl leading-9">
-            {product.title}
-          </h1>
-
-          {/* Description Tab */}
-          {product.description && (
-            <div className="border-t border-ui-border-base pt-6">
-              <h2 className="text-base font-medium mb-2">Description</h2>
-              <p className="text-base-regular text-ui-fg-base">
-                {product.description}
-              </p>
-            </div>
-          )}
-
-          {/* Остальные вкладки */}
-          <LazyProductTabs product={product} />
+          <LazyProductInfo product={product} />
         </div>
 
-        {/* Галерея изображений */}
+        {/* Картинки + Tabs на мобиле */}
         <div className="block w-full relative">
-          <ImageGallery
-            images={product?.images || []}
-            preloadFirst
-            preloadCount={2}
-            showIndicators // Показывает маленькие индикаторы карусели
-          />
+          <ImageGallery images={product?.images || []} />
+
+          {/* Мобильное отображение Description и Tabs */}
+          <div className="block small:hidden mt-6">
+            <LazyProductTabs product={product} />
+          </div>
         </div>
 
-        {/* Правая колонка — CTA и Add to Cart */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        {/* Правая колонка на десктопе */}
+        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
-          <Suspense
-            fallback={<ProductActions disabled={true} product={product} region={region} />}
-          >
+          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
@@ -100,4 +85,4 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
   )
 }
 
-export default ProductTemplate
+export default ProductTemplate;
