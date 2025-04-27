@@ -48,30 +48,30 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка на десктопе */}
+        {/* Левая колонка — инфо (название товара) */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <LazyProductInfo product={product} />
         </div>
 
-        {/* Галерея + Описание + Табы на мобильной версии */}
+        {/* Галерея изображений */}
         <div className="block w-full relative">
           <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
 
-          {/* Мобильная версия — всё под галереей */}
+          {/* Мобильная версия: описание и табы */}
           <div className="block small:hidden mt-6">
-            {/* Описание */}
+            {/* Description */}
             {product.description && (
-              <div className="border-t border-ui-border-base pt-6">
-                <h3 className="text-base font-semibold mb-2">Description</h3>
-                <p className="text-ui-fg-base text-small-regular">{product.description}</p>
+              <div className="text-ui-fg-base text-small-regular border-t border-ui-border-base pt-6">
+                <p>{product.description}</p>
               </div>
             )}
+
             {/* Табы */}
             <LazyProductTabs product={product} />
           </div>
         </div>
 
-        {/* Правая колонка на десктопе */}
+        {/* Правая колонка — CTA и Add to Cart */}
         <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
           <ProductOnboardingCta />
           <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
