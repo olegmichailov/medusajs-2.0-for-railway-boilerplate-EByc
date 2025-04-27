@@ -3,6 +3,7 @@
 "use client"
 
 import React, { Suspense } from "react"
+
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
 import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
@@ -47,47 +48,29 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка десктоп */}
-        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <LazyProductInfo product={product} />
           <LazyProductTabs product={product} />
         </div>
 
-        {/* Галерея + мобила */}
         <div className="block w-full relative">
-          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
-
-          {/* Мобила: заголовок + описание + табы */}
-          <div className="block small:hidden px-4 mt-6">
-            {product.description && (
-              <div className="border-t border-ui-border-base pt-6">
-                <h3 className="text-base font-semibold mb-2">Description</h3>
-                <p className="text-small-regular text-ui-fg-base">
-                  {product.description}
-                </p>
-              </div>
-            )}
-            <LazyProductTabs product={product} />
-          </div>
+          <ImageGallery
+            images={product?.images || []}
+            preloadFirst
+            preloadCount={2}
+          />
         </div>
 
-        {/* Правая колонка десктоп */}
-        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
-            <ProductActionsWrapper id={product.id} region={region} />
-          </Suspense>
-        </div>
-
-        {/* Мобила AddToCart кнопка */}
-        <div className="block small:hidden px-4 mt-6">
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}>
+          <Suspense
+            fallback={<ProductActions disabled={true} product={product} region={region} />}
+          >
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
         </div>
       </div>
 
-      {/* Похожие товары */}
       <div
         className="content-container my-16 small:my-32"
         data-testid="related-products-container"
