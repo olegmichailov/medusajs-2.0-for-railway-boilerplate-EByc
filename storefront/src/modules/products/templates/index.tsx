@@ -1,18 +1,17 @@
-// src/modules/products/templates/index.tsx
+"use client"
 
-'use client'
+import React, { Suspense } from "react"
 
-import React, { Suspense } from 'react'
-import ImageGallery from '@modules/products/components/image-gallery'
-import ProductActions from '@modules/products/components/product-actions'
-import ProductOnboardingCta from '@modules/products/components/product-onboarding-cta'
-import ProductTabs from '@modules/products/components/product-tabs'
-import RelatedProducts from '@modules/products/components/related-products'
-import ProductInfo from '@modules/products/templates/product-info'
-import SkeletonRelatedProducts from '@modules/skeletons/templates/skeleton-related-products'
-import { notFound } from 'next/navigation'
-import ProductActionsWrapper from './product-actions-wrapper'
-import { HttpTypes } from '@medusajs/types'
+import ImageGallery from "@modules/products/components/image-gallery"
+import ProductActions from "@modules/products/components/product-actions"
+import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
+import ProductTabs from "@modules/products/components/product-tabs"
+import RelatedProducts from "@modules/products/components/related-products"
+import ProductInfo from "@modules/products/templates/product-info"
+import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
+import { notFound } from "next/navigation"
+import ProductActionsWrapper from "./product-actions-wrapper"
+import { HttpTypes } from "@medusajs/types"
 
 const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
   <Suspense fallback={<div className="h-10">Loading product info...</div>}>
@@ -43,45 +42,45 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
 
   return (
     <>
-      <div className="content-container flex flex-col small:flex-row small:items-start py-6 relative" data-testid="product-container">
-        {/* Левая колонка на десктопе */}
+      <div
+        className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
+        data-testid="product-container"
+      >
+        {/* Левая колонка — инфо */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
-          <LazyProductInfo product={product} />
-        </div>
+          <h1 className="text-ui-heading font-normal text-2xl leading-9">
+            {product.title}
+          </h1>
 
-        {/* Картинки + Description + Tabs на мобильном */}
-        <div className="block w-full relative">
-          {/* Название товара на мобиле */}
-          <div className="block small:hidden mb-6">
-            <h1 className="text-2xl-semi mb-2">{product.title}</h1>
-          </div>
-
-          <ImageGallery images={product?.images || []} preloadFirst preloadCount={2} />
-
-          {/* Описание товара и табы на мобиле */}
-          <div className="block small:hidden mt-8">
-            {product.description && (
-              <div className="text-ui-fg-base text-small-regular border-t border-ui-border-base pt-6">
-                <p>{product.description}</p>
-              </div>
-            )}
-
-            <LazyProductTabs product={product} />
-
-            {/* Кнопка Add to Cart на мобиле */}
-            <div className="mt-6">
-              <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}
-              >
-                <ProductActionsWrapper id={product.id} region={region} />
-              </Suspense>
+          {/* Description Tab */}
+          {product.description && (
+            <div className="border-t border-ui-border-base pt-6">
+              <h2 className="text-base font-medium mb-2">Description</h2>
+              <p className="text-base-regular text-ui-fg-base">
+                {product.description}
+              </p>
             </div>
-          </div>
+          )}
+
+          {/* Остальные вкладки */}
+          <LazyProductTabs product={product} />
         </div>
 
-        {/* Правая колонка на десктопе */}
-        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-12">
+        {/* Галерея изображений */}
+        <div className="block w-full relative">
+          <ImageGallery
+            images={product?.images || []}
+            preloadFirst
+            preloadCount={2}
+            showIndicators // Показывает маленькие индикаторы карусели
+          />
+        </div>
+
+        {/* Правая колонка — CTA и Add to Cart */}
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
-          <Suspense fallback={<ProductActions disabled={true} product={product} region={region} />}
+          <Suspense
+            fallback={<ProductActions disabled={true} product={product} region={region} />}
           >
             <ProductActionsWrapper id={product.id} region={region} />
           </Suspense>
@@ -89,9 +88,11 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
       </div>
 
       {/* Похожие товары */}
-      <div className="content-container my-16 small:my-32" data-testid="related-products-container">
-        <Suspense fallback={<SkeletonRelatedProducts />}
-        >
+      <div
+        className="content-container my-16 small:my-32"
+        data-testid="related-products-container"
+      >
+        <Suspense fallback={<SkeletonRelatedProducts />}>
           <RelatedProducts product={product} countryCode={countryCode} />
         </Suspense>
       </div>
