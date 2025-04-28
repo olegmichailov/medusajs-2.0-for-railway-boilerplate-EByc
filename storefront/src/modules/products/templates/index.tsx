@@ -55,7 +55,7 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
             <div className="text-ui-fg-base text-small-regular">
               {product.description && (
                 <div className="border-t border-ui-border-base pt-6">
-                  <h3 className="text-base font-semibold mb-2">Description</h3>
+                  <h3 className="text-base font-medium mb-2">Description</h3>
                   <p>{product.description}</p>
                 </div>
               )}
