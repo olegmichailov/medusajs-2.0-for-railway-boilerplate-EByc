@@ -1,13 +1,13 @@
 "use client"
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { SortOptions } from "./sort-products"
 import SortProducts from "./sort-products"
 import { getCategoriesList } from "@lib/data/categories"
 import { getCollectionsList } from "@lib/data/collections"
-import { getProductsList } from "@lib/data/products"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
+import { ProductVariant } from "@medusajs/medusa"
 
 interface RefinementListProps {
   sortBy: SortOptions
@@ -27,16 +27,7 @@ interface Collection {
   handle: string
 }
 
-interface ProductVariant {
-  id: string
-  options: { option_id: string; value: string }[]
-}
-
-interface Product {
-  id: string
-  variants: ProductVariant[]
-  options: { id: string; title: string }[]
-}
+const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"]
 
 const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListProps) => {
   const router = useRouter()
@@ -45,7 +36,6 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
 
   const [categories, setCategories] = useState<Category[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
-  const [products, setProducts] = useState<Product[]>([])
   const [showFilters, setShowFilters] = useState(() => {
     if (typeof window !== "undefined") {
       return window.innerWidth >= 640
@@ -57,10 +47,8 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
     const fetchData = async () => {
       const { product_categories } = await getCategoriesList(0, 100)
       const { collections } = await getCollectionsList(0, 100)
-      const { products } = await getProductsList({ limit: 1000 }) // без лимита
       setCategories(product_categories || [])
       setCollections(collections || [])
-      setProducts(products || [])
     }
     fetchData()
   }, [])
@@ -83,28 +71,6 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
     router.push(`${pathname}?${query}`)
   }
 
-  const availableSizes = useMemo(() => {
-    const sizes = new Set<string>()
-    for (const product of products) {
-      const sizeOption = product.options.find((o) => o.title.toLowerCase() === "size")
-      if (!sizeOption) continue
-
-      const optionId = sizeOption.id
-
-      for (const variant of product.variants) {
-        for (const opt of variant.options) {
-          if (opt.option_id === optionId) {
-            sizes.add(opt.value)
-          }
-        }
-      }
-    }
-
-    return Array.from(sizes).sort()
-  }, [products])
-
-  const selectedSize = searchParams.get("size")
-
   return (
     <div className="w-full sm:w-[250px] px-6 sm:px-0 mb-6">
       <div className="flex justify-center sm:justify-start mb-4">
@@ -118,7 +84,6 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
 
       {showFilters && (
         <div className="flex flex-col gap-6">
-          {/* Sort */}
           <div className="flex flex-col gap-2">
             <span className="text-sm uppercase text-gray-500">Sort by</span>
             <SortProducts
@@ -128,7 +93,6 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
             />
           </div>
 
-          {/* Categories */}
           <div className="flex flex-col gap-2">
             <span className="text-sm uppercase text-gray-500">Category</span>
             <ul className="flex flex-col gap-2 text-sm">
@@ -140,22 +104,19 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
                   All Products
                 </LocalizedClientLink>
               </li>
-              {categories
-                .filter((c) => !c.parent_category)
-                .map((category) => (
-                  <li key={category.id}>
-                    <LocalizedClientLink
-                      href={`/categories/${category.handle}`}
-                      className="hover:underline text-gray-600"
-                    >
-                      {category.name}
-                    </LocalizedClientLink>
-                  </li>
-                ))}
+              {categories.filter((c) => !c.parent_category).map((category) => (
+                <li key={category.id}>
+                  <LocalizedClientLink
+                    href={`/categories/${category.handle}`}
+                    className="hover:underline text-gray-600"
+                  >
+                    {category.name}
+                  </LocalizedClientLink>
+                </li>
+              ))}
             </ul>
           </div>
 
-          {/* Collections */}
           <div className="flex flex-col gap-2">
             <span className="text-sm uppercase text-gray-500">Collection</span>
             <ul className="flex flex-col gap-2 text-sm">
@@ -172,32 +133,19 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
             </ul>
           </div>
 
-          {/* Sizes */}
           <div className="flex flex-col gap-2">
             <span className="text-sm uppercase text-gray-500">Size</span>
-            <ul className="flex flex-col gap-2 text-sm">
-              {availableSizes.map((size) => (
+            <ul className="flex flex-wrap gap-2 text-sm">
+              {AVAILABLE_SIZES.map((size) => (
                 <li key={size}>
                   <button
                     onClick={() => setQueryParams("size", size)}
-                    className={`text-gray-600 hover:underline ${
-                      selectedSize === size ? "font-semibold underline" : ""
-                    }`}
+                    className="border border-gray-400 px-2 py-1 text-xs uppercase hover:bg-black hover:text-white"
                   >
                     {size}
                   </button>
                 </li>
               ))}
-              {selectedSize && (
-                <li>
-                  <button
-                    onClick={() => setQueryParams("size", "")}
-                    className="text-gray-400 text-xs"
-                  >
-                    Clear filter
-                  </button>
-                </li>
-              )}
             </ul>
           </div>
         </div>
