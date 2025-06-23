@@ -1,29 +1,23 @@
-// storefront/src/modules/store/templates/index.tsx
-
-import { Suspense } from "react"
-import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import RefinementList from "@modules/store/components/refinement-list"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
-import PaginatedProducts from "./paginated-products"
+import ProductPreview from "@modules/products/components/product-preview"
+import { HttpTypes } from "@medusajs/types"
 
 const StoreTemplate = ({
-  sortBy,
-  page,
+  products,
+  region,
   countryCode,
 }: {
-  sortBy?: SortOptions
-  page?: string
+  products: HttpTypes.StoreProduct[]
+  region: HttpTypes.StoreRegion
   countryCode: string
 }) => {
-  const pageNumber = page ? parseInt(page) : 1
-  const sort = sortBy || "created_at"
-
   return (
     <div
       className="flex flex-col small:flex-row small:items-start py-6 content-container"
       data-testid="category-container"
     >
-      <RefinementList sortBy={sort} />
+      <RefinementList />
       <div className="w-full px-6 sm:px-0">
         <h1
           data-testid="store-page-title"
@@ -31,13 +25,13 @@ const StoreTemplate = ({
         >
           All Products
         </h1>
-        <Suspense fallback={<SkeletonProductGrid />}>
-          <PaginatedProducts
-            sortBy={sort}
-            page={pageNumber}
-            countryCode={countryCode}
-          />
-        </Suspense>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
+          {products.map((product) => (
+            <li key={product.id}>
+              <ProductPreview product={product} region={region} />
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   )
