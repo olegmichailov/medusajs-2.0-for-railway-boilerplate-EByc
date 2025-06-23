@@ -13,17 +13,17 @@ const StoreTemplate = ({
 }) => {
   return (
     <div
-      className="flex flex-col small:flex-row small:items-start py-6 content-container"
+      className="flex flex-col small:flex-row small:items-start content-container py-6"
       data-testid="category-container"
     >
-      <div className="w-full small:w-[280px] small:mr-8 mb-6 small:mb-0">
+      <aside className="w-full small:w-[260px] small:mr-10 mb-6 small:mb-0 shrink-0">
         <RefinementList countryCode={countryCode} />
-      </div>
+      </aside>
 
-      <div className="w-full px-6 sm:px-0">
+      <section className="w-full">
         <h1
           data-testid="store-page-title"
-          className="text-4xl font-medium tracking-wider uppercase text-left mb-6"
+          className="text-4xl font-medium tracking-wider uppercase mb-6"
         >
           All Products
         </h1>
@@ -31,7 +31,7 @@ const StoreTemplate = ({
         {products && products.length > 0 ? (
           <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
             {products.map((product) => (
-              <li key={product.id} className="list-none">
+              <li key={product.id}>
                 <ProductPreview product={product} region={region} />
               </li>
             ))}
@@ -39,7 +39,7 @@ const StoreTemplate = ({
         ) : (
           <p className="text-lg text-gray-500 mt-4">No products found.</p>
         )}
-      </div>
+      </section>
     </div>
   )
 }
