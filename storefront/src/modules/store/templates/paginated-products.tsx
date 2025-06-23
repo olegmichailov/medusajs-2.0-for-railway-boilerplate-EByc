@@ -40,21 +40,17 @@ export default function PaginatedProducts({
   const loader = useRef(null)
 
   useEffect(() => {
-    const updateColumns = () => {
+    if (typeof window !== "undefined") {
       const mobile = window.innerWidth < 640
       setIsMobile(mobile)
-      setColumns(mobile ? 1 : 3)
+      setColumns(mobile ? 1 : 2)
     }
-
-    updateColumns()
-    window.addEventListener("resize", updateColumns)
-    return () => window.removeEventListener("resize", updateColumns)
   }, [])
 
   const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
-  useEffect(() => {
-    const fetchInitial = async () => {
+  const fetchInitial = useCallback(async () => {
+    try {
       const regionData = await getRegion(countryCode)
       if (!regionData) return
       setRegion(regionData)
@@ -65,47 +61,64 @@ export default function PaginatedProducts({
         offset: 0,
       }
 
-      if (collectionId) queryParams["collection_id"] = [collectionId]
-      if (categoryId) queryParams["category_id"] = [categoryId]
-      if (productsIds) queryParams["id"] = productsIds
-      if (sortBy === "created_at") queryParams["order"] = "created_at"
+      if (collectionId) queryParams.collection_id = [collectionId]
+      if (categoryId) queryParams.category_id = [categoryId]
+      if (productsIds) queryParams.id = productsIds
+      if (sortBy === "created_at") queryParams.order = "created_at"
 
-      const {
-        response: { products: newProducts },
-      } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
+      const { response } = await getProductsListWithSort({
+        page: 1,
+        queryParams,
+        sortBy,
+        countryCode,
+      })
 
+      const newProducts = response?.products || []
       setProducts(newProducts)
       setOffset(PRODUCT_LIMIT)
       setHasMore(newProducts.length >= PRODUCT_LIMIT)
       setInitialLoaded(true)
+    } catch (err) {
+      console.error("Initial fetch error:", err)
     }
-
-    fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
+  useEffect(() => {
+    fetchInitial()
+  }, [fetchInitial])
+
   const fetchMore = useCallback(async () => {
-    const queryParams: PaginatedProductsParams = {
-      limit: PRODUCT_LIMIT,
-      offset,
+    try {
+      const queryParams: PaginatedProductsParams = {
+        limit: PRODUCT_LIMIT,
+        offset,
+      }
+
+      if (collectionId) queryParams.collection_id = [collectionId]
+      if (categoryId) queryParams.category_id = [categoryId]
+      if (productsIds) queryParams.id = productsIds
+      if (sortBy === "created_at") queryParams.order = "created_at"
+
+      const { response } = await getProductsListWithSort({
+        page: 1,
+        queryParams,
+        sortBy,
+        countryCode,
+      })
+
+      const newProducts = response?.products || []
+
+      if (newProducts.length < PRODUCT_LIMIT) setHasMore(false)
+
+      setProducts((prev) => {
+        const ids = new Set(prev.map((p) => p.id))
+        return [...prev, ...newProducts.filter((p) => !ids.has(p.id))]
+      })
+
+      setOffset((prev) => prev + PRODUCT_LIMIT)
+    } catch (err) {
+      console.error("Fetch more error:", err)
     }
-
-    if (collectionId) queryParams["collection_id"] = [collectionId]
-    if (categoryId) queryParams["category_id"] = [categoryId]
-    if (productsIds) queryParams["id"] = productsIds
-    if (sortBy === "created_at") queryParams["order"] = "created_at"
-
-    const {
-      response: { products: newProducts },
-    } = await getProductsListWithSort({ page: 1, queryParams, sortBy, countryCode })
-
-    if (newProducts.length < PRODUCT_LIMIT) setHasMore(false)
-
-    setProducts((prev) => {
-      const ids = new Set(prev.map((p) => p.id))
-      return [...prev, ...newProducts.filter((p) => !ids.has(p.id))]
-    })
-
-    setOffset((prev) => prev + PRODUCT_LIMIT)
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
 
   useEffect(() => {
@@ -118,9 +131,11 @@ export default function PaginatedProducts({
       { threshold: 1.0 }
     )
 
-    if (loader.current) observer.observe(loader.current)
+    const currentLoader = loader.current
+    if (currentLoader) observer.observe(currentLoader)
+
     return () => {
-      if (loader.current) observer.unobserve(loader.current)
+      if (currentLoader) observer.unobserve(currentLoader)
     }
   }, [fetchMore, region, hasMore, initialLoaded])
 
@@ -136,7 +151,7 @@ export default function PaginatedProducts({
   return (
     <>
       <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
-        <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
+        <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
             <button
@@ -154,10 +169,7 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
-        data-testid="products-list"
-      >
+      <ul className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`} data-testid="products-list">
         {products.map((p, i) => (
           <li key={p.id}>
             <ProductPreview product={p} region={region} index={i} preload={i < 4} />
