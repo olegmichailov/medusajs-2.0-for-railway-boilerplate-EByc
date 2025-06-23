@@ -1,47 +1,51 @@
+"use client"
+
+import { Suspense } from "react"
+import { notFound } from "next/navigation"
+
+import InteractiveLink from "@modules/common/components/interactive-link"
+import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import RefinementList from "@modules/store/components/refinement-list"
-import ProductPreview from "@modules/products/components/product-preview"
+import PaginatedProducts from "@modules/store/templates/paginated-products"
+import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 import { HttpTypes } from "@medusajs/types"
 
-const StoreTemplate = ({
+export default function StoreTemplate({
   products,
   region,
   countryCode,
+  sortBy,
+  page,
 }: {
-  products: HttpTypes.StoreProduct[]
+  products?: HttpTypes.StoreProduct[]
   region: HttpTypes.StoreRegion
   countryCode: string
-}) => {
+  sortBy?: SortOptions
+  page?: string
+}) {
+  const pageNumber = page ? parseInt(page) : 1
+  const sort = sortBy || "created_at"
+
+  if (!region || !countryCode) notFound()
+
   return (
     <div
-      className="flex flex-col small:flex-row small:items-start content-container py-6"
-      data-testid="category-container"
+      className="flex flex-col small:flex-row small:items-start py-6 content-container"
+      data-testid="store-container"
     >
-      <aside className="w-full small:w-[260px] small:mr-10 mb-6 small:mb-0 shrink-0">
-        <RefinementList countryCode={countryCode} />
-      </aside>
-
-      <section className="w-full">
-        <h1
-          data-testid="store-page-title"
-          className="text-4xl font-medium tracking-wider uppercase mb-6"
-        >
-          All Products
-        </h1>
-
-        {products && products.length > 0 ? (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
-            {products.map((product) => (
-              <li key={product.id}>
-                <ProductPreview product={product} region={region} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-lg text-gray-500 mt-4">No products found.</p>
-        )}
-      </section>
+      <RefinementList sortBy={sort} data-testid="sort-by-container" />
+      <div className="w-full">
+        <div className="flex flex-row mb-8 text-2xl-semi gap-4">
+          <h1 data-testid="store-page-title">All Products</h1>
+        </div>
+        <Suspense fallback={<SkeletonProductGrid />}>
+          <PaginatedProducts
+            sortBy={sort}
+            page={pageNumber}
+            countryCode={countryCode}
+          />
+        </Suspense>
+      </div>
     </div>
   )
 }
-
-export default StoreTemplate
