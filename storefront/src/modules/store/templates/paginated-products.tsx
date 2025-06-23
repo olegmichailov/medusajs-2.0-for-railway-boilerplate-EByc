@@ -40,9 +40,15 @@ export default function PaginatedProducts({
   const loader = useRef(null)
 
   useEffect(() => {
-    const mobile = window.innerWidth < 640
-    setIsMobile(mobile)
-    setColumns(mobile ? 1 : 2)
+    const updateColumns = () => {
+      const mobile = window.innerWidth < 640
+      setIsMobile(mobile)
+      setColumns(mobile ? 1 : 3)
+    }
+
+    updateColumns()
+    window.addEventListener("resize", updateColumns)
+    return () => window.removeEventListener("resize", updateColumns)
   }, [])
 
   const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
