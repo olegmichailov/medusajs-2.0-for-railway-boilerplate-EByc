@@ -1,7 +1,8 @@
 import { Metadata } from "next"
-
-import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 import StoreTemplate from "@modules/store/templates"
+import { getProductsListWithSort } from "@lib/data/products"
+import { getRegion } from "@lib/data/regions"
+import { HttpTypes } from "@medusajs/types"
 
 export const metadata: Metadata = {
   title: "Store",
@@ -9,27 +10,37 @@ export const metadata: Metadata = {
 }
 
 type Params = {
-  searchParams: {
-    sortBy?: SortOptions
-    page?: string
-    categoryId?: string
-    collectionId?: string
-  }
   params: {
     countryCode: string
   }
 }
 
-export default async function StorePage({ searchParams, params }: Params) {
-  const { sortBy, page, categoryId, collectionId } = searchParams
+export default async function StorePage({ params }: Params) {
+  const countryCode = params.countryCode
+
+  const region = await getRegion(countryCode)
+
+  if (!region) {
+    return null // безопасно: регион обязателен для цен
+  }
+
+  const { response } = await getProductsListWithSort({
+    page: 1,
+    queryParams: {
+      limit: 100,
+      offset: 0,
+    },
+    countryCode,
+    sortBy: "created_at",
+  })
+
+  const products = response.products as HttpTypes.StoreProduct[]
 
   return (
     <StoreTemplate
-      sortBy={sortBy}
-      page={page}
-      categoryId={categoryId}
-      collectionId={collectionId}
-      countryCode={params.countryCode}
+      products={products}
+      region={region}
+      countryCode={countryCode}
     />
   )
 }
