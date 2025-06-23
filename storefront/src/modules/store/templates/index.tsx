@@ -29,9 +29,9 @@ const StoreTemplate = ({
         </h1>
 
         {products && products.length > 0 ? (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
+          <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
             {products.map((product) => (
-              <li key={product.id}>
+              <li key={product.id} className="list-none">
                 <ProductPreview product={product} region={region} />
               </li>
             ))}
