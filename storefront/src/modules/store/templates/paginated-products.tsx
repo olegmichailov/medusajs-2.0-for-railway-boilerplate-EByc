@@ -1,21 +1,10 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
-
-const PRODUCT_LIMIT = 12
-
-type PaginatedProductsParams = {
-  limit: number
-  offset?: number
-  collection_id?: string[]
-  category_id?: string[]
-  id?: string[]
-  order?: string
-}
 
 export default function PaginatedProducts({
   sortBy,
@@ -33,11 +22,7 @@ export default function PaginatedProducts({
   const [columns, setColumns] = useState(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
-  const [offset, setOffset] = useState(0)
-  const [hasMore, setHasMore] = useState(true)
-  const [initialLoaded, setInitialLoaded] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const loader = useRef(null)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -49,95 +34,39 @@ export default function PaginatedProducts({
 
   const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
-  const fetchInitial = useCallback(async () => {
-    try {
-      const regionData = await getRegion(countryCode)
-      if (!regionData) return
-      setRegion(regionData)
-      setOffset(0)
+  useEffect(() => {
+    const fetchAllProducts = async () => {
+      try {
+        const regionData = await getRegion(countryCode)
+        if (!regionData) return
+        setRegion(regionData)
 
-      const queryParams: PaginatedProductsParams = {
-        limit: PRODUCT_LIMIT,
-        offset: 0,
+        const queryParams: any = {
+          limit: 9999,
+          offset: 0,
+        }
+
+        if (collectionId) queryParams.collection_id = [collectionId]
+        if (categoryId) queryParams.category_id = [categoryId]
+        if (productsIds) queryParams.id = productsIds
+        if (sortBy === "created_at") queryParams.order = "created_at"
+
+        const { response } = await getProductsListWithSort({
+          page: 1,
+          queryParams,
+          sortBy,
+          countryCode,
+        })
+
+        const allProducts = response?.products || []
+        setProducts(allProducts)
+      } catch (err) {
+        console.error("Fetch all products error:", err)
       }
-
-      if (collectionId) queryParams.collection_id = [collectionId]
-      if (categoryId) queryParams.category_id = [categoryId]
-      if (productsIds) queryParams.id = productsIds
-      if (sortBy === "created_at") queryParams.order = "created_at"
-
-      const { response } = await getProductsListWithSort({
-        page: 1,
-        queryParams,
-        sortBy,
-        countryCode,
-      })
-
-      const newProducts = response?.products || []
-      setProducts(newProducts)
-      setOffset(PRODUCT_LIMIT)
-      setHasMore(newProducts.length >= PRODUCT_LIMIT)
-      setInitialLoaded(true)
-    } catch (err) {
-      console.error("Initial fetch error:", err)
     }
+
+    fetchAllProducts()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
-
-  useEffect(() => {
-    fetchInitial()
-  }, [fetchInitial])
-
-  const fetchMore = useCallback(async () => {
-    try {
-      const queryParams: PaginatedProductsParams = {
-        limit: PRODUCT_LIMIT,
-        offset,
-      }
-
-      if (collectionId) queryParams.collection_id = [collectionId]
-      if (categoryId) queryParams.category_id = [categoryId]
-      if (productsIds) queryParams.id = productsIds
-      if (sortBy === "created_at") queryParams.order = "created_at"
-
-      const { response } = await getProductsListWithSort({
-        page: 1,
-        queryParams,
-        sortBy,
-        countryCode,
-      })
-
-      const newProducts = response?.products || []
-
-      if (newProducts.length < PRODUCT_LIMIT) setHasMore(false)
-
-      setProducts((prev) => {
-        const ids = new Set(prev.map((p) => p.id))
-        return [...prev, ...newProducts.filter((p) => !ids.has(p.id))]
-      })
-
-      setOffset((prev) => prev + PRODUCT_LIMIT)
-    } catch (err) {
-      console.error("Fetch more error:", err)
-    }
-  }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
-
-  useEffect(() => {
-    if (!region || !hasMore || !initialLoaded) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) fetchMore()
-      },
-      { threshold: 1.0 }
-    )
-
-    const currentLoader = loader.current
-    if (currentLoader) observer.observe(currentLoader)
-
-    return () => {
-      if (currentLoader) observer.unobserve(currentLoader)
-    }
-  }, [fetchMore, region, hasMore, initialLoaded])
 
   const gridColsClass =
     columns === 1
@@ -169,15 +98,16 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      <ul className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`} data-testid="products-list">
+      <ul
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
+        data-testid="products-list"
+      >
         {products.map((p, i) => (
           <li key={p.id}>
             <ProductPreview product={p} region={region} index={i} preload={i < 4} />
           </li>
         ))}
       </ul>
-
-      {hasMore && <div ref={loader} className="h-10 mt-10" />}
     </>
   )
 }
