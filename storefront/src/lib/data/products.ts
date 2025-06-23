@@ -53,7 +53,7 @@ export const getProductsList = cache(async function ({
   nextPage: number | null
   queryParams?: HttpTypes.FindParams & HttpTypes.StoreProductParams
 }> {
-  const limit = queryParams?.limit || 1000 // Увеличено до 1000
+  const limit = queryParams?.limit || 1000 // загружаем всё
   const validPageParam = Math.max(pageParam, 1)
   const offset = (validPageParam - 1) * limit
   const region = await getRegion(countryCode)
@@ -92,7 +92,7 @@ export const getProductsList = cache(async function ({
 
 export const getProductsListWithSort = cache(async function ({
   page = 1,
-  queryParams = {},
+  queryParams,
   sortBy = "created_at",
   countryCode,
 }: {
@@ -106,45 +106,28 @@ export const getProductsListWithSort = cache(async function ({
   queryParams?: HttpTypes.FindParams & HttpTypes.StoreProductParams
 }> {
   const limit = queryParams?.limit || 1000
-  const offset = (page - 1) * limit
 
-  const orderMap: Record<SortOptions, string | undefined> = {
-    created_at: "created_at",
-    price_asc: "price_asc",
-    price_desc: "price_desc",
-  }
+  const {
+    response: { products, count },
+  } = await getProductsList({
+    pageParam: 1,
+    queryParams: {
+      ...queryParams,
+      limit,
+    },
+    countryCode,
+  })
 
-  const region = await getRegion(countryCode)
+  const sorted = sortProducts(products, sortBy)
 
-  if (!region) {
-    return {
-      response: { products: [], count: 0 },
-      nextPage: null,
-    }
-  }
-
-  const { products, count } = await sdk.store.product
-    .list(
-      {
-        limit,
-        offset,
-        region_id: region.id,
-        fields: "*variants.calculated_price",
-        order: orderMap[sortBy],
-        ...queryParams,
-      },
-      { next: { tags: ["products"] } }
-    )
-    .then(({ products, count }) => ({ products, count }))
-
-  const nextPage = count > offset + limit ? page + 1 : null
+  const paginated = sorted.slice((page - 1) * limit, page * limit)
 
   return {
     response: {
-      products,
+      products: paginated,
       count,
     },
-    nextPage,
+    nextPage: null,
     queryParams,
   }
 })
