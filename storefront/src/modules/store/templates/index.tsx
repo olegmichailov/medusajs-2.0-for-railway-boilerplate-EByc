@@ -12,12 +12,14 @@ const StoreTemplate = ({
   region: HttpTypes.StoreRegion
   countryCode: string
 }) => {
+  const sortBy: SortOptions = "created_at" // можно заменить, если нужно другое значение
+
   return (
     <div
       className="flex flex-col small:flex-row small:items-start py-6 content-container"
       data-testid="category-container"
     >
-      <RefinementList />
+      <RefinementList sortBy={sortBy} />
       <div className="w-full px-6 sm:px-0">
         <h1
           data-testid="store-page-title"
