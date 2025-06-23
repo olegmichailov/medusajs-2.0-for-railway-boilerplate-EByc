@@ -10,6 +10,11 @@ module.exports = {
     "./src/modules/**/*.{js,ts,jsx,tsx}",
     "./node_modules/@medusajs/ui/dist/**/*.{js,jsx,ts,tsx}",
   ],
+  safelist: [
+    {
+      pattern: /^grid-cols-[1-4]$/,
+    },
+  ],
   theme: {
     extend: {
       fontFamily: {
