@@ -13,16 +13,18 @@ type Params = {
   params: {
     countryCode: string
   }
+  searchParams: {
+    sort?: "created_at" | "price_asc" | "price_desc"
+  }
 }
 
-export default async function StorePage({ params }: Params) {
+export default async function StorePage({ params, searchParams }: Params) {
   const countryCode = params.countryCode
+  const sortBy = searchParams.sort || "created_at"
 
   const region = await getRegion(countryCode)
 
-  if (!region) {
-    return null // безопасно: регион обязателен для цен
-  }
+  if (!region) return null
 
   const { response } = await getProductsListWithSort({
     page: 1,
@@ -31,7 +33,7 @@ export default async function StorePage({ params }: Params) {
       offset: 0,
     },
     countryCode,
-    sortBy: "created_at",
+    sortBy,
   })
 
   const products = response.products as HttpTypes.StoreProduct[]
