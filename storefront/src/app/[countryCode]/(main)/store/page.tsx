@@ -9,6 +9,8 @@ export const metadata: Metadata = {
   description: "Explore all of our products.",
 }
 
+export const dynamic = "force-dynamic" // заставляет Next всегда обновлять страницу при смене query
+
 type Params = {
   params: {
     countryCode: string
