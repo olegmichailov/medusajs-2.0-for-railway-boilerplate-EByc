@@ -7,7 +7,6 @@ import SortProducts from "./sort-products"
 import { getCategoriesList } from "@lib/data/categories"
 import { getCollectionsList } from "@lib/data/collections"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
-import { ProductVariant } from "@medusajs/medusa"
 
 interface RefinementListProps {
   sortBy: SortOptions
@@ -26,8 +25,6 @@ interface Collection {
   title: string
   handle: string
 }
-
-const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"]
 
 const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListProps) => {
   const router = useRouter()
@@ -128,22 +125,6 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
                   >
                     {collection.title}
                   </LocalizedClientLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="text-sm uppercase text-gray-500">Size</span>
-            <ul className="flex flex-wrap gap-2 text-sm">
-              {AVAILABLE_SIZES.map((size) => (
-                <li key={size}>
-                  <button
-                    onClick={() => setQueryParams("size", size)}
-                    className="border border-gray-400 px-2 py-1 text-xs uppercase hover:bg-black hover:text-white"
-                  >
-                    {size}
-                  </button>
                 </li>
               ))}
             </ul>
