@@ -101,16 +101,18 @@ const RefinementList = ({ sortBy, "data-testid": dataTestId }: RefinementListPro
                   All Products
                 </LocalizedClientLink>
               </li>
-              {categories.filter((c) => !c.parent_category).map((category) => (
-                <li key={category.id}>
-                  <LocalizedClientLink
-                    href={`/categories/${category.handle}`}
-                    className="hover:underline text-gray-600"
-                  >
-                    {category.name}
-                  </LocalizedClientLink>
-                </li>
-              ))}
+              {categories
+                .filter((c) => !c.parent_category)
+                .map((category) => (
+                  <li key={category.id}>
+                    <LocalizedClientLink
+                      href={`/categories/${category.handle}`}
+                      className="hover:underline text-gray-600"
+                    >
+                      {category.name}
+                    </LocalizedClientLink>
+                  </li>
+                ))}
             </ul>
           </div>
 
