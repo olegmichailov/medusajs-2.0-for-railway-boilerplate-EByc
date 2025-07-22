@@ -2,4 +2,3 @@ node_modules
 .medusa
 .cache
 dist
-.env
