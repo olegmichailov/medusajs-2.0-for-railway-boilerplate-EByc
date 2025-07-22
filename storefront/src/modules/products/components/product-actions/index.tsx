@@ -38,25 +38,24 @@ export default function ProductActions({
   const [isAdding, setIsAdding] = useState(false)
   const countryCode = useParams().countryCode as string
 
-  // If there is only 1 variant, preselect the options
   useEffect(() => {
     if (product.variants?.length === 1) {
       const variantOptions = optionsAsKeymap(product.variants[0].options)
       setOptions(variantOptions ?? {})
+    }
 
-      // Also prefill the first option if it exists and has only 1 value
-      if (product.options?.length === 1 && product.options[0].values.length === 1) {
-        const singleOption = product.options[0]
-        setOptions({ [singleOption.title]: singleOption.values[0].value })
-      }
+    // даже если один вариант, но одна опция — задать её
+    if (product.options?.length === 1 && product.options[0].values.length === 1) {
+      const singleOption = product.options[0]
+      setOptions((prev) => ({
+        ...prev,
+        [singleOption.title]: singleOption.values[0].value,
+      }))
     }
   }, [product])
 
   const selectedVariant = useMemo(() => {
-    if (!product.variants || product.variants.length === 0) {
-      return
-    }
-
+    if (!product.variants || product.variants.length === 0) return
     return product.variants.find((v) => {
       const variantOptions = optionsAsKeymap(v.options)
       return isEqual(variantOptions, options)
@@ -71,21 +70,13 @@ export default function ProductActions({
   }
 
   const inStock = useMemo(() => {
-    if (selectedVariant && !selectedVariant.manage_inventory) {
-      return true
-    }
-
-    if (selectedVariant?.allow_backorder) {
-      return true
-    }
-
+    if (selectedVariant && !selectedVariant.manage_inventory) return true
+    if (selectedVariant?.allow_backorder) return true
     if (
       selectedVariant?.manage_inventory &&
       (selectedVariant?.inventory_quantity || 0) > 0
-    ) {
+    )
       return true
-    }
-
     return false
   }, [selectedVariant])
 
@@ -94,15 +85,12 @@ export default function ProductActions({
 
   const handleAddToCart = async () => {
     if (!selectedVariant?.id) return null
-
     setIsAdding(true)
-
     await addToCart({
       variantId: selectedVariant.id,
       quantity: 1,
       countryCode,
     })
-
     setIsAdding(false)
   }
 
@@ -110,22 +98,21 @@ export default function ProductActions({
     <>
       <div className="flex flex-col gap-y-2" ref={actionsRef}>
         <div>
-          {(product.variants?.length ?? 0) > 1 && (
+          {/* Показывать всегда, если есть хотя бы одна опция */}
+          {(product.options?.length ?? 0) > 0 && (
             <div className="flex flex-col gap-y-4">
-              {(product.options || []).map((option) => {
-                return (
-                  <div key={option.id}>
-                    <OptionSelect
-                      option={option}
-                      current={options[option.title ?? ""]}
-                      updateOption={setOptionValue}
-                      title={option.title ?? ""}
-                      data-testid="product-options"
-                      disabled={!!disabled || isAdding}
-                    />
-                  </div>
-                )
-              })}
+              {(product.options || []).map((option) => (
+                <div key={option.id}>
+                  <OptionSelect
+                    option={option}
+                    current={options[option.title ?? ""]}
+                    updateOption={setOptionValue}
+                    title={option.title ?? ""}
+                    data-testid="product-options"
+                    disabled={!!disabled || isAdding}
+                  />
+                </div>
+              ))}
               <Divider />
             </div>
           )}
