@@ -23,6 +23,11 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
 }) => {
   const filteredOptions = option.values?.map((v) => v.value).filter(Boolean)
 
+  const displayLabel =
+    option.title?.toLowerCase() === "size"
+      ? "Size"
+      : option.title || title || "Option"
+
   // Automatically select the only option if there's just one
   useEffect(() => {
     if (
@@ -34,33 +39,33 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
     }
   }, [filteredOptions, current, updateOption, option.title])
 
+  if (!filteredOptions || filteredOptions.length === 0) return null
+
   return (
     <div className="flex flex-col gap-y-3">
-      <span className="text-sm">Select {title}</span>
+      <span className="text-sm font-medium tracking-wide uppercase">{displayLabel}</span>
       <div
         className="flex flex-wrap justify-between gap-2"
         data-testid={dataTestId}
       >
-        {filteredOptions?.map((v) => {
-          return (
-            <button
-              onClick={() => updateOption(option.title ?? "", v ?? "")}
-              key={v}
-              className={clx(
-                "border-ui-border-base bg-ui-bg-subtle border text-small-regular h-10 rounded-rounded p-2 flex-1",
-                {
-                  "border-ui-border-interactive": v === current,
-                  "hover:shadow-elevation-card-rest transition-shadow ease-in-out duration-150":
-                    v !== current,
-                }
-              )}
-              disabled={disabled}
-              data-testid="option-button"
-            >
-              {v}
-            </button>
-          )
-        })}
+        {filteredOptions.map((v) => (
+          <button
+            key={v}
+            onClick={() => updateOption(option.title ?? "", v ?? "")}
+            className={clx(
+              "border-ui-border-base bg-ui-bg-subtle border text-small-regular h-10 rounded-rounded p-2 flex-1",
+              {
+                "border-ui-border-interactive": v === current,
+                "hover:shadow-elevation-card-rest transition-shadow ease-in-out duration-150":
+                  v !== current,
+              }
+            )}
+            disabled={disabled}
+            data-testid="option-button"
+          >
+            {v}
+          </button>
+        ))}
       </div>
     </div>
   )
