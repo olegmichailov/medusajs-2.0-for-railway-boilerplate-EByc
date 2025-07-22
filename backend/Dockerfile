@@ -1,26 +1,29 @@
-# Используем официальный Node.js образ с поддержкой pnpm
-FROM node:22
+# ✅ Рабочий Dockerfile для Medusa 2.0 backend с pnpm, Node.js 22, Railway, без .env
+# Использует только переменные из Railway UI
 
-# Устанавливаем pnpm
-RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+FROM node:22-slim
 
-# Устанавливаем рабочую директорию
+# Установка pnpm
+RUN npm install -g pnpm@9.10.0
+
+# Создание рабочего каталога
 WORKDIR /app
 
-# Копируем файлы зависимостей
-COPY package.json pnpm-lock.yaml ./
+# Копируем манифесты и lock-файл
+COPY backend/package.json ./
+COPY backend/pnpm-lock.yaml ./
 
-# Устанавливаем зависимости
+# Установка зависимостей
 RUN pnpm install --frozen-lockfile
 
-# Копируем остальные файлы проекта
-COPY . .
+# Копируем всё остальное
+COPY backend .
 
-# Собираем Medusa backend
+# Сборка проекта (включает postBuild.js, если он есть)
 RUN pnpm build
 
-# Открываем порт (если нужен)
+# Экспонируем порт
 EXPOSE 9000
 
-# Запускаем сервер
+# Запуск Medusa
 CMD ["pnpm", "start"]
