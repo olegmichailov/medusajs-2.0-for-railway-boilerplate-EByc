@@ -1,6 +1,4 @@
 node_modules
+.medsua
+.cache
 dist
-.build
-Dockerfile
-.dockerignore
-.env
