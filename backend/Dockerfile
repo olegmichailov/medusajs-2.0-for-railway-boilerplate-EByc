@@ -1,23 +1,23 @@
-# Используем Node.js c поддержкой pnpm
-FROM node:22-bullseye
+# Используем образ с поддержкой Node 22 и pnpm
+FROM node:22-alpine
 
-# Устанавливаем pnpm
-RUN npm install -g pnpm@9.10.0
+# Установка pnpm
+RUN corepack enable && corepack prepare pnpm@9.1.1 --activate
 
-# Создаем рабочую директорию
+# Создаём рабочую директорию
 WORKDIR /app
 
-# Копируем все необходимые файлы
-COPY . .
+# Копируем только нужные файлы для установки зависимостей
+COPY package.json pnpm-lock.yaml ./
 
 # Устанавливаем зависимости
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
-# Собираем Medusa
+# Копируем всё остальное
+COPY . .
+
+# Собираем backend
 RUN pnpm build
 
-# Открываем порт
-EXPOSE 9000
-
-# Запускаем сервер
+# Запускаем сервер Medusa
 CMD ["pnpm", "start"]
