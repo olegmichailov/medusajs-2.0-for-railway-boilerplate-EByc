@@ -1,7 +1,6 @@
 const checkEnvVariables = require("./check-env-variables")
 checkEnvVariables()
 
-// 🔧 Удаление протокола и слэшей
 const getCleanHostname = (url) => {
   if (!url) return null
   try {
@@ -11,27 +10,25 @@ const getCleanHostname = (url) => {
   }
 }
 
-// 🌐 Хосты
 const backendHost = getCleanHostname(process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL)
 const minioHost = getCleanHostname(process.env.NEXT_PUBLIC_MINIO_ENDPOINT)
-const cloudflareHost = getCleanHostname(process.env.NEXT_PUBLIC_R2_PUBLIC_URL) // 👈 если используешь Cloudflare R2
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
 
   eslint: {
-    ignoreDuringBuilds: true, // ✅ не ломает билды
+    ignoreDuringBuilds: true,
   },
 
   typescript: {
-    ignoreBuildErrors: true, // ✅ не ломает билды
+    ignoreBuildErrors: true,
   },
 
   images: {
-    loader: "default", // ⚡ sharp
+    loader: "default", // встроенный sharp-оптимизатор
     formats: ["image/avif", "image/webp"],
-    minimumCacheTTL: 86400, // 📦 1 день (можно меньше, если часто меняются изображения)
+    minimumCacheTTL: 600, // кэш на 10 минут (можно 86400, но MinIO без CDN — осторожно)
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
 
     remotePatterns: [
@@ -52,14 +49,6 @@ const nextConfig = {
             {
               protocol: "https",
               hostname: minioHost,
-            },
-          ]
-        : []),
-      ...(cloudflareHost
-        ? [
-            {
-              protocol: "https",
-              hostname: cloudflareHost,
             },
           ]
         : []),
