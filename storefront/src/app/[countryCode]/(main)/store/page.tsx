@@ -9,23 +9,20 @@ export const metadata: Metadata = {
   description: "Explore all of our products.",
 }
 
-export const dynamic = "force-dynamic" // заставляет Next всегда обновлять страницу при смене query
-
 type Params = {
   params: {
     countryCode: string
   }
   searchParams: {
-    sort?: "created_at" | "price_asc" | "price_desc"
+    sortBy?: "created_at" | "price_asc" | "price_desc"
   }
 }
 
 export default async function StorePage({ params, searchParams }: Params) {
   const countryCode = params.countryCode
-  const sortBy = searchParams.sort || "created_at"
+  const sortBy = searchParams.sortBy || "created_at"
 
   const region = await getRegion(countryCode)
-
   if (!region) return null
 
   const { response } = await getProductsListWithSort({
@@ -45,6 +42,7 @@ export default async function StorePage({ params, searchParams }: Params) {
       products={products}
       region={region}
       countryCode={countryCode}
+      sortBy={sortBy}
     />
   )
 }
