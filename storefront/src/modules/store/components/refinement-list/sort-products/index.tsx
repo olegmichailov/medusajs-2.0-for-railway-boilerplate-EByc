@@ -36,7 +36,6 @@ const SortProducts = ({
 
   return (
     <div className="flex flex-col gap-2 font-sans text-sm tracking-wider">
-      {/** ⚠️ Заголовок убран, т.к. он уже есть снаружи — дубли не нужны */}
       <FilterRadioGroup
         items={sortOptions}
         value={sortBy}
