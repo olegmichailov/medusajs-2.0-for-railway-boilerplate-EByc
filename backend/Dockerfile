@@ -1,25 +1,30 @@
-FROM node:18-slim
+# Используем образ с Node 20
+FROM node:20-slim
 
-# Install dependencies
+# Устанавливаем необходимые утилиты
 RUN apt-get update && apt-get install -y openssl
 
-# Set workdir
+# Устанавливаем PNPM нужной версии
+RUN npm install -g pnpm@8.15.9
+
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Copy only package files
+# Копируем package.json и pnpm-lock.yaml
 COPY package.json pnpm-lock.yaml ./
 
-# Install pnpm
-RUN npm install -g pnpm@8
-
-# Install app dependencies
+# Устанавливаем зависимости
 RUN pnpm install
 
-# Copy the rest of the code
+# Копируем остальной проект
 COPY . .
 
-# Build the Medusa app
+# Пробрасываем переменные (в том числе DATABASE_URL)
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
+
+# Сборка
 RUN pnpm build
 
-# Start the app
+# Запуск сервера
 CMD ["pnpm", "start"]
