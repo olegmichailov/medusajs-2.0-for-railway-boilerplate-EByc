@@ -1,6 +1,8 @@
+"use client"
+
 import { HttpTypes } from "@medusajs/types"
 import { clx } from "@medusajs/ui"
-import React from "react"
+import React, { useEffect } from "react"
 
 type OptionSelectProps = {
   option: HttpTypes.StoreProductOption
@@ -19,7 +21,18 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
   "data-testid": dataTestId,
   disabled,
 }) => {
-  const filteredOptions = option.values?.map((v) => v.value)
+  const filteredOptions = option.values?.map((v) => v.value).filter(Boolean)
+
+  // Automatically select the only option if there's just one
+  useEffect(() => {
+    if (
+      filteredOptions &&
+      filteredOptions.length === 1 &&
+      current !== filteredOptions[0]
+    ) {
+      updateOption(option.title ?? "", filteredOptions[0]!)
+    }
+  }, [filteredOptions, current, updateOption, option.title])
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -34,7 +47,7 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
               onClick={() => updateOption(option.title ?? "", v ?? "")}
               key={v}
               className={clx(
-                "border-ui-border-base bg-ui-bg-subtle border text-small-regular h-10 rounded-rounded p-2 flex-1 ",
+                "border-ui-border-base bg-ui-bg-subtle border text-small-regular h-10 rounded-rounded p-2 flex-1",
                 {
                   "border-ui-border-interactive": v === current,
                   "hover:shadow-elevation-card-rest transition-shadow ease-in-out duration-150":
