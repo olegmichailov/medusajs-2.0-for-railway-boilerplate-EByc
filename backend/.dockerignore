@@ -1,10 +1,6 @@
 node_modules
-npm-debug.log
-pnpm-lock.yaml
-.yarn
-.cache
+dist
+.build
+Dockerfile
+.dockerignore
 .env
-.DS_Store
-*.log
-*.test.ts
-__tests__
