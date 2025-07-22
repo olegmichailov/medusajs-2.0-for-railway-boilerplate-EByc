@@ -1,20 +1,21 @@
-# Используем официальный Node.js образ
+# Use official Node.js LTS image
 FROM node:18-alpine
 
-# Устанавливаем рабочую директорию
+# Set working directory
 WORKDIR /app
 
-# Копируем package.json и pnpm-lock.yaml заранее для кеширования зависимостей
-COPY package.json pnpm-lock.yaml ./
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm install
 
-# Устанавливаем pnpm глобально и зависимости проекта
-RUN npm install -g pnpm && pnpm install
-
-# Копируем остальные файлы проекта
+# Copy the rest of the application
 COPY . .
 
-# Указываем порт, используемый Medusa
+# Build the app
+RUN npm run build
+
+# Expose port (если используется, можно поменять)
 EXPOSE 9000
 
-# Стартуем Medusa-сервер
-CMD ["pnpm", "start"]
+# Start the app
+CMD ["npm", "run", "start"]
