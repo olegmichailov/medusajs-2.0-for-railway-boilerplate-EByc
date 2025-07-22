@@ -1,30 +1,26 @@
-# Используем образ с Node 20
+# Используем образ с Node.js
 FROM node:20-slim
 
 # Устанавливаем необходимые утилиты
 RUN apt-get update && apt-get install -y openssl
 
-# Устанавливаем PNPM нужной версии
+# Устанавливаем PNPM
 RUN npm install -g pnpm@8.15.9
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем package.json и pnpm-lock.yaml
+# Копируем зависимости
 COPY package.json pnpm-lock.yaml ./
 
 # Устанавливаем зависимости
 RUN pnpm install
 
-# Копируем остальной проект
+# Копируем остальной код
 COPY . .
 
-# Пробрасываем переменные (в том числе DATABASE_URL)
-ARG DATABASE_URL
-ENV DATABASE_URL=$DATABASE_URL
+# Открываем порт Medusa
+EXPOSE 9000
 
-# Сборка
-RUN pnpm build
-
-# Запуск сервера
+# Запускаем без сборки (build перенеси внутрь `start` если нужно)
 CMD ["pnpm", "start"]
