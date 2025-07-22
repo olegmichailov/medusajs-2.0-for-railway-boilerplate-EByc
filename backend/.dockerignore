@@ -1,6 +1,10 @@
 node_modules
-.pnpm-store
+npm-debug.log
+pnpm-lock.yaml
+.yarn
+.cache
 .env
-.env.*
-dist
+.DS_Store
 *.log
+*.test.ts
+__tests__
