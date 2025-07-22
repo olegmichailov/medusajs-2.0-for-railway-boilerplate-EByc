@@ -1,28 +1,25 @@
-# backend/Dockerfile
+FROM node:20-alpine
 
-# Используем официальный Node образ
-FROM node:22-alpine
-
-# Создаём рабочую директорию
+# Создание директории приложения
 WORKDIR /app
 
-# Копируем зависимости
-COPY package.json pnpm-lock.yaml ./
-
-# Устанавливаем pnpm
+# Установка pnpm
 RUN npm install -g pnpm
 
-# Устанавливаем зависимости
+# Копируем package.json и pnpm-lock.yaml
+COPY package.json pnpm-lock.yaml ./
+
+# Установка зависимостей
 RUN pnpm install
 
-# Копируем весь код
+# Копируем остальные файлы
 COPY . .
 
-# Собираем проект
+# Билдим проект (ты уже указал build-скрипт в package.json)
 RUN pnpm build
 
 # Открываем порт
 EXPOSE 9000
 
-# Запускаем Medusa backend
+# Запуск сервера
 CMD ["pnpm", "start"]
