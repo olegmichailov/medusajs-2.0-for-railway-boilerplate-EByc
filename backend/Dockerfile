@@ -1,23 +1,28 @@
-# Используем образ с поддержкой Node 22 и pnpm
-FROM node:22-alpine
+# backend/Dockerfile
 
-# Установка pnpm
-RUN corepack enable && corepack prepare pnpm@9.1.1 --activate
+# Используем официальный Node образ
+FROM node:22-alpine
 
 # Создаём рабочую директорию
 WORKDIR /app
 
-# Копируем только нужные файлы для установки зависимостей
+# Копируем зависимости
 COPY package.json pnpm-lock.yaml ./
+
+# Устанавливаем pnpm
+RUN npm install -g pnpm
 
 # Устанавливаем зависимости
 RUN pnpm install
 
-# Копируем всё остальное
+# Копируем весь код
 COPY . .
 
-# Собираем backend
+# Собираем проект
 RUN pnpm build
 
-# Запускаем сервер Medusa
+# Открываем порт
+EXPOSE 9000
+
+# Запускаем Medusa backend
 CMD ["pnpm", "start"]
