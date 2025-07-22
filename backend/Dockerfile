@@ -1,15 +1,23 @@
-FROM node:18-alpine
+# Используем Node.js c поддержкой pnpm
+FROM node:22-bullseye
 
+# Устанавливаем pnpm
+RUN npm install -g pnpm@9.10.0
+
+# Создаем рабочую директорию
 WORKDIR /app
 
-# Убираем package-lock.json
-COPY package.json ./
-RUN npm install
-
+# Копируем все необходимые файлы
 COPY . .
 
-RUN npm run build
+# Устанавливаем зависимости
+RUN pnpm install --frozen-lockfile
 
+# Собираем Medusa
+RUN pnpm build
+
+# Открываем порт
 EXPOSE 9000
 
-CMD ["npm", "run", "start"]
+# Запускаем сервер
+CMD ["pnpm", "start"]
