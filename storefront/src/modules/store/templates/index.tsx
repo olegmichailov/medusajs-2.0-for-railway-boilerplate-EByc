@@ -1,4 +1,5 @@
-import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
+'use client'
+
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 import RefinementSidebar from "@modules/store/components/refinement-list/refinement-sidebar"
 import PaginatedProducts from "./paginated-products"
@@ -31,8 +32,6 @@ const StoreTemplate = ({
         <div className="mb-8 text-2xl-semi">
           <h1>All products</h1>
         </div>
-
-        {/* ❌ Удалили Suspense и скелетоны отсюда */}
         <PaginatedProducts
           sortBy={sort}
           page={pageNumber}
