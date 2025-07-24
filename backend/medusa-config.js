@@ -53,30 +53,28 @@ const medusaConfig = {
             options: {
               cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
               api_key: process.env.CLOUDINARY_API_KEY,
-              api_secret: process.env.CLOUDINARY_API_SECRET
+              api_secret: process.env.CLOUDINARY_API_SECRET,
             }
           }
         ]
       }
     },
-    ...(REDIS_URL ? [
-      {
-        key: Modules.EVENT_BUS,
-        resolve: '@medusajs/event-bus-redis',
-        options: {
-          redisUrl: REDIS_URL
-        }
-      },
-      {
-        key: Modules.WORKFLOW_ENGINE,
-        resolve: '@medusajs/workflow-engine-redis',
-        options: {
-          redis: {
-            url: REDIS_URL
-          }
+    ...(REDIS_URL ? [{
+      key: Modules.EVENT_BUS,
+      resolve: '@medusajs/event-bus-redis',
+      options: {
+        redisUrl: REDIS_URL
+      }
+    },
+    {
+      key: Modules.WORKFLOW_ENGINE,
+      resolve: '@medusajs/workflow-engine-redis',
+      options: {
+        redis: {
+          url: REDIS_URL,
         }
       }
-    ] : []),
+    }] : []),
     ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
       key: Modules.NOTIFICATION,
       resolve: '@medusajs/notification',
@@ -88,7 +86,7 @@ const medusaConfig = {
             options: {
               channels: ['email'],
               api_key: SENDGRID_API_KEY,
-              from: SENDGRID_FROM_EMAIL
+              from: SENDGRID_FROM_EMAIL,
             }
           }] : []),
           ...(RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
@@ -97,9 +95,9 @@ const medusaConfig = {
             options: {
               channels: ['email'],
               api_key: RESEND_API_KEY,
-              from: RESEND_FROM_EMAIL
-            }
-          }] : [])
+              from: RESEND_FROM_EMAIL,
+            },
+          }] : []),
         ]
       }
     }] : []),
@@ -113,11 +111,11 @@ const medusaConfig = {
             id: 'stripe',
             options: {
               apiKey: STRIPE_API_KEY,
-              webhookSecret: STRIPE_WEBHOOK_SECRET
-            }
-          }
-        ]
-      }
+              webhookSecret: STRIPE_WEBHOOK_SECRET,
+            },
+          },
+        ],
+      },
     }] : [])
   ],
   plugins: [
@@ -132,9 +130,9 @@ const medusaConfig = {
           products: {
             indexSettings: {
               searchableAttributes: ['title', 'description', 'variant_sku'],
-              displayedAttributes: ['id', 'title', 'description', 'variant_sku', 'thumbnail', 'handle']
+              displayedAttributes: ['id', 'title', 'description', 'variant_sku', 'thumbnail', 'handle'],
             },
-            primaryKey: 'id'
+            primaryKey: 'id',
           }
         }
       }
