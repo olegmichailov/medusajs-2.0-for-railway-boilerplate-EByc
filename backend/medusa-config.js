@@ -1,4 +1,4 @@
-import { loadEnv, Modules, defineConfig } from '@medusajs/utils';
+import { loadEnv, Modules, defineConfig } from '@medusajs/utils'
 import {
   ADMIN_CORS,
   AUTH_CORS,
@@ -16,15 +16,11 @@ import {
   STRIPE_API_KEY,
   STRIPE_WEBHOOK_SECRET,
   WORKER_MODE,
-  MINIO_ENDPOINT,
-  MINIO_ACCESS_KEY,
-  MINIO_SECRET_KEY,
-  MINIO_BUCKET,
   MEILISEARCH_HOST,
   MEILISEARCH_ADMIN_KEY
-} from 'lib/constants';
+} from 'lib/constants'
 
-loadEnv(process.env.NODE_ENV, process.cwd());
+loadEnv(process.env.NODE_ENV, process.cwd())
 
 const medusaConfig = {
   projectConfig: {
@@ -32,7 +28,7 @@ const medusaConfig = {
     databaseLogging: false,
     redisUrl: REDIS_URL,
     workerMode: WORKER_MODE,
-    cors: "https://gmorkl.de", // ✅ ЭТО ДОБАВЛЕНО: фикс CORS-ошибки
+    cors: "https://gmorkl.de",
     http: {
       adminCors: `${ADMIN_CORS},https://gmorkl.de`,
       authCors: `${AUTH_CORS},https://gmorkl.de`,
@@ -51,42 +47,36 @@ const medusaConfig = {
       resolve: '@medusajs/file',
       options: {
         providers: [
-          ...(MINIO_ENDPOINT && MINIO_ACCESS_KEY && MINIO_SECRET_KEY ? [{
-            resolve: './src/modules/minio-file',
-            id: 'minio',
+          {
+            resolve: '@medusajs/file-cloudinary',
+            id: 'cloudinary',
             options: {
-              endPoint: MINIO_ENDPOINT,
-              accessKey: MINIO_ACCESS_KEY,
-              secretKey: MINIO_SECRET_KEY,
-              bucket: MINIO_BUCKET
+              cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+              api_key: process.env.CLOUDINARY_API_KEY,
+              api_secret: process.env.CLOUDINARY_API_SECRET
             }
-          }] : [{
-            resolve: '@medusajs/file-local',
-            id: 'local',
-            options: {
-              upload_dir: 'static',
-              backend_url: `${BACKEND_URL}/static`
-            }
-          }])
+          }
         ]
       }
     },
-    ...(REDIS_URL ? [{
-      key: Modules.EVENT_BUS,
-      resolve: '@medusajs/event-bus-redis',
-      options: {
-        redisUrl: REDIS_URL
-      }
-    },
-    {
-      key: Modules.WORKFLOW_ENGINE,
-      resolve: '@medusajs/workflow-engine-redis',
-      options: {
-        redis: {
-          url: REDIS_URL,
+    ...(REDIS_URL ? [
+      {
+        key: Modules.EVENT_BUS,
+        resolve: '@medusajs/event-bus-redis',
+        options: {
+          redisUrl: REDIS_URL
+        }
+      },
+      {
+        key: Modules.WORKFLOW_ENGINE,
+        resolve: '@medusajs/workflow-engine-redis',
+        options: {
+          redis: {
+            url: REDIS_URL
+          }
         }
       }
-    }] : []),
+    ] : []),
     ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
       key: Modules.NOTIFICATION,
       resolve: '@medusajs/notification',
@@ -98,7 +88,7 @@ const medusaConfig = {
             options: {
               channels: ['email'],
               api_key: SENDGRID_API_KEY,
-              from: SENDGRID_FROM_EMAIL,
+              from: SENDGRID_FROM_EMAIL
             }
           }] : []),
           ...(RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
@@ -107,9 +97,9 @@ const medusaConfig = {
             options: {
               channels: ['email'],
               api_key: RESEND_API_KEY,
-              from: RESEND_FROM_EMAIL,
-            },
-          }] : []),
+              from: RESEND_FROM_EMAIL
+            }
+          }] : [])
         ]
       }
     }] : []),
@@ -123,11 +113,11 @@ const medusaConfig = {
             id: 'stripe',
             options: {
               apiKey: STRIPE_API_KEY,
-              webhookSecret: STRIPE_WEBHOOK_SECRET,
-            },
-          },
-        ],
-      },
+              webhookSecret: STRIPE_WEBHOOK_SECRET
+            }
+          }
+        ]
+      }
     }] : [])
   ],
   plugins: [
@@ -142,15 +132,15 @@ const medusaConfig = {
           products: {
             indexSettings: {
               searchableAttributes: ['title', 'description', 'variant_sku'],
-              displayedAttributes: ['id', 'title', 'description', 'variant_sku', 'thumbnail', 'handle'],
+              displayedAttributes: ['id', 'title', 'description', 'variant_sku', 'thumbnail', 'handle']
             },
-            primaryKey: 'id',
+            primaryKey: 'id'
           }
         }
       }
     }] : [])
   ]
-};
+}
 
-console.log(JSON.stringify(medusaConfig, null, 2));
-export default defineConfig(medusaConfig);
+console.log(JSON.stringify(medusaConfig, null, 2))
+export default defineConfig(medusaConfig)
