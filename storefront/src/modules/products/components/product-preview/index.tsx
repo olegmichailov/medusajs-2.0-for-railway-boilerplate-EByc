@@ -11,12 +11,10 @@ export default function ProductPreview({
   product,
   isFeatured,
   region,
-  index = 0,
 }: {
   product: HttpTypes.StoreProduct
   isFeatured?: boolean
   region: HttpTypes.StoreRegion
-  index?: number
 }) {
   const { cheapestPrice } = getProductPrice({
     product,
@@ -34,7 +32,6 @@ export default function ProductPreview({
           images={product.images}
           size="full"
           isFeatured={isFeatured}
-          priority={index < 2}
         />
         <div className="flex txt-compact-medium mt-2 justify-between px-1">
           <Text
