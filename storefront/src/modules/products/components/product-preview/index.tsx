@@ -11,7 +11,7 @@ export default function ProductPreview({
   product,
   isFeatured,
   region,
-  index = 0, // 👈 добавлен индекс для управления priority
+  index = 0,
 }: {
   product: HttpTypes.StoreProduct
   isFeatured?: boolean
@@ -35,7 +35,7 @@ export default function ProductPreview({
           images={product.images}
           size="full"
           isFeatured={isFeatured}
-          priority={index < 2} // 👈 первые 2 картинки грузим с приоритетом
+          priority={index < 2} // 👈 загружаем первые картинки с приоритетом
         />
         <div className="flex txt-compact-medium mt-2 justify-between px-1">
           <Text
