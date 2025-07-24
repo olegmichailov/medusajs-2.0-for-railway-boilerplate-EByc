@@ -34,7 +34,7 @@ export default function ProductPreview({
           images={product.images}
           size="full"
           isFeatured={isFeatured}
-          priority={index < 2} // загружаем первые картинки с приоритетом
+          priority={index < 2}
         />
         <div className="flex txt-compact-medium mt-2 justify-between px-1">
           <Text
