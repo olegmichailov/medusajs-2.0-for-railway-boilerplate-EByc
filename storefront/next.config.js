@@ -26,12 +26,9 @@ const nextConfig = {
   },
 
   images: {
-    unoptimized: true, // <— вот эта строка отключает оптимизацию полностью
-    loader: "default", // встроенный sharp-оптимизатор (больше не используется)
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 600,
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
-
     remotePatterns: [
       {
         protocol: "http",
