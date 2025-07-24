@@ -1,5 +1,5 @@
 import { Container, clx } from "@medusajs/ui"
-import Image from "next/image"
+import Image, { ImageLoader } from "next/image"
 import React from "react"
 import PlaceholderImage from "@modules/common/icons/placeholder-image"
 
@@ -55,6 +55,11 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   )
 }
 
+// 🔧 кастомный лоадер отключает ресайз и отдаёт прямой URL
+const directLoader: ImageLoader = ({ src }) => {
+  return src
+}
+
 const ImageOrPlaceholder = ({
   image,
   size,
@@ -68,6 +73,8 @@ const ImageOrPlaceholder = ({
 }) => {
   return image ? (
     <Image
+      loader={directLoader}
+      unoptimized
       src={image}
       alt="Thumbnail"
       className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
