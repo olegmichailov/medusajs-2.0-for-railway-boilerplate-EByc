@@ -1,5 +1,3 @@
-import { Suspense } from "react"
-
 import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 import RefinementSidebar from "@modules/store/components/refinement-list/refinement-sidebar"
@@ -33,15 +31,15 @@ const StoreTemplate = ({
         <div className="mb-8 text-2xl-semi">
           <h1>All products</h1>
         </div>
-        <Suspense fallback={<SkeletonProductGrid />}>
-          <PaginatedProducts
-            sortBy={sort}
-            page={pageNumber}
-            countryCode={countryCode}
-            categoryId={categoryId}
-            collectionId={collectionId}
-          />
-        </Suspense>
+
+        {/* ❌ Удалили Suspense и скелетоны отсюда */}
+        <PaginatedProducts
+          sortBy={sort}
+          page={pageNumber}
+          countryCode={countryCode}
+          categoryId={categoryId}
+          collectionId={collectionId}
+        />
       </div>
     </div>
   )
