@@ -42,7 +42,7 @@ export default function PaginatedProducts({
         setRegion(regionData)
 
         const queryParams: any = {
-          limit: 9999,
+          limit: 24,
           offset: 0,
         }
 
@@ -77,6 +77,8 @@ export default function PaginatedProducts({
       ? "grid-cols-3"
       : "grid-cols-4"
 
+  if (!region) return null
+
   return (
     <>
       <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
@@ -104,7 +106,7 @@ export default function PaginatedProducts({
       >
         {products.map((p, i) => (
           <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
+            <ProductPreview product={p} region={region} index={i} />
           </li>
         ))}
       </ul>
