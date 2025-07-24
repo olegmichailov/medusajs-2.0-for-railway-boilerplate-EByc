@@ -26,9 +26,13 @@ const nextConfig = {
   },
 
   images: {
+    // 💥 КРИТИЧНО: отключает Next.js-оптимизацию, чтобы избежать ошибок
+    unoptimized: true,
+
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 600,
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
+
     remotePatterns: [
       {
         protocol: "http",
