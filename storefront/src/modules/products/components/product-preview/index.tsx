@@ -9,7 +9,7 @@ import { HttpTypes } from "@medusajs/types"
 
 export default function ProductPreview({
   product,
-  isFeatured,
+  isFeatured = false,
   region,
 }: {
   product: HttpTypes.StoreProduct
