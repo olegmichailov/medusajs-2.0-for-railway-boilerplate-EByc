@@ -23,10 +23,12 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
 }) => {
   const filteredOptions = option.values?.map((v) => v.value).filter(Boolean)
 
-  const displayLabel =
-    option.title?.toLowerCase() === "size"
-      ? "Size"
-      : option.title || title || "Option"
+  const rawTitle = option.title?.toLowerCase() ?? ""
+  const isDefault = rawTitle === "default"
+
+  const displayLabel = isDefault
+    ? "Size"
+    : option.title || title || "Option"
 
   // Automatically select the only option if there's just one
   useEffect(() => {
@@ -43,7 +45,9 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
 
   return (
     <div className="flex flex-col gap-y-3">
-      <span className="text-sm font-medium tracking-wide uppercase">{displayLabel}</span>
+      <span className="text-sm font-medium tracking-wide uppercase">
+        {displayLabel}
+      </span>
       <div
         className="flex flex-wrap justify-between gap-2"
         data-testid={dataTestId}
