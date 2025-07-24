@@ -26,7 +26,9 @@ const nextConfig = {
   },
 
   images: {
+    // 💥 КРИТИЧНО: отключает Next.js-оптимизацию, чтобы избежать ошибок
     unoptimized: true,
+
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 600,
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
@@ -37,10 +39,20 @@ const nextConfig = {
         hostname: "localhost",
       },
       ...(backendHost
-        ? [{ protocol: "https", hostname: backendHost }]
+        ? [
+            {
+              protocol: "https",
+              hostname: backendHost,
+            },
+          ]
         : []),
       ...(minioHost
-        ? [{ protocol: "https", hostname: minioHost }]
+        ? [
+            {
+              protocol: "https",
+              hostname: minioHost,
+            },
+          ]
         : []),
       {
         protocol: "https",
@@ -59,20 +71,6 @@ const nextConfig = {
         hostname: "medusa-server-testing.s3.us-east-1.amazonaws.com",
       },
     ],
-  },
-
-  async headers() {
-    return [
-      {
-        source: "/(.*)\\.(jpg|jpeg|png|webp|svg|gif|avif)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=604800, immutable",
-          },
-        ],
-      },
-    ]
   },
 
   serverRuntimeConfig: {
