@@ -86,7 +86,7 @@ export default function PaginatedProducts({
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
             <button
-              key={col}
+              key={`col-${col}`}
               onClick={() => setColumns(col)}
               className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
                 columns === col
@@ -105,8 +105,8 @@ export default function PaginatedProducts({
         data-testid="products-list"
       >
         {products.map((p, i) => (
-          <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} />
+          <li key={`product-${p.id}-${i}`}>
+            <ProductPreview product={p} region={region} isFeatured={false} />
           </li>
         ))}
       </ul>
