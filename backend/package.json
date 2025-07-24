@@ -24,7 +24,7 @@
     "@medusajs/admin-sdk": "latest",
     "@medusajs/cli": "latest",
     "@medusajs/core-flows": "latest",
-    "@medusajs/file-cloudinary": "^1.2.0",
+    "@medusajs/file-cloudinary": "latest",
     "@medusajs/framework": "latest",
     "@medusajs/medusa": "latest",
     "@medusajs/notification-sendgrid": "latest",
@@ -38,7 +38,6 @@
     "@rokmohar/medusa-plugin-meilisearch": "^1.0.3",
     "awilix": "^8.0.1",
     "medusajs-launch-utils": "^0.0.15",
-    "minio": "^8.0.3",
     "pg": "^8.13.1",
     "resend": "4.0.1",
     "ulid": "^2.3.0"
