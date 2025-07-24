@@ -24,6 +24,7 @@
     "@medusajs/admin-sdk": "latest",
     "@medusajs/cli": "latest",
     "@medusajs/core-flows": "latest",
+    "@medusajs/file-cloudinary": "^1.2.0",
     "@medusajs/framework": "latest",
     "@medusajs/medusa": "latest",
     "@medusajs/notification-sendgrid": "latest",
