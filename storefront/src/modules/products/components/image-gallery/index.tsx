@@ -1,11 +1,10 @@
-// src/modules/products/components/image-gallery/index.tsx
-
 "use client"
 
 import { PricedProduct } from "@medusajs/medusa/dist/types/pricing"
 import { useState } from "react"
 import Image from "next/image"
-import Thumbnail from "../thumbnail"
+import Zoom from "react-medium-image-zoom"
+import "react-medium-image-zoom/dist/styles.css"
 
 type ImageGalleryProps = {
   images: PricedProduct["images"]
@@ -17,26 +16,28 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
   if (!images || images.length === 0) return null
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Главное изображение */}
-      <div className="relative w-full aspect-[3/4] bg-white">
-        <Image
-          src={images[selectedImage].url}
-          alt={`Product image ${selectedImage + 1}`}
-          fill
-          sizes="(max-width: 768px) 100vw, 50vw"
-          className="object-cover transition-opacity duration-300"
-          priority
-        />
+    <div className="flex flex-col items-start gap-y-4">
+      {/* Главное изображение с Zoom */}
+      <div className="w-full aspect-[3/4] relative bg-white">
+        <Zoom>
+          <Image
+            src={images[selectedImage].url}
+            alt={`Product image ${selectedImage + 1}`}
+            fill
+            sizes="(max-width: 768px) 100vw, 50vw"
+            className="object-cover"
+            priority
+          />
+        </Zoom>
       </div>
 
-      {/* Миниатюры в сетке */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Миниатюры */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 w-full">
         {images.map((image, index) => (
           <button
             key={image.id}
             onClick={() => setSelectedImage(index)}
-            className={`relative aspect-square w-full border ${
+            className={`relative aspect-square border ${
               index === selectedImage ? "border-gray-900" : "border-transparent"
             }`}
           >
@@ -44,7 +45,7 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
               src={image.url}
               alt={`Thumbnail ${index + 1}`}
               fill
-              sizes="(max-width: 768px) 50vw, 12vw"
+              sizes="(max-width: 768px) 33vw, 12vw"
               className="object-cover"
             />
           </button>
