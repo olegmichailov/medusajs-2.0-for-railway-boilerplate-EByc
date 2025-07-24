@@ -5,6 +5,7 @@ import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
+import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 
 export default function PaginatedProducts({
   sortBy,
@@ -20,7 +21,7 @@ export default function PaginatedProducts({
   countryCode: string
 }) {
   const [columns, setColumns] = useState(1)
-  const [products, setProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<any[] | null>(null)
   const [region, setRegion] = useState<any>(null)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -58,8 +59,7 @@ export default function PaginatedProducts({
           countryCode,
         })
 
-        const allProducts = response?.products || []
-        setProducts(allProducts)
+        setProducts(response?.products || [])
       } catch (err) {
         console.error("Fetch all products error:", err)
       }
@@ -104,11 +104,17 @@ export default function PaginatedProducts({
         className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
-        {products.map((p, i) => (
-          <li key={`product-${p.id}-${i}`}>
-            <ProductPreview product={p} region={region} isFeatured={false} />
-          </li>
-        ))}
+        {products
+          ? products.map((p, i) => (
+              <li key={`product-${p.id}-${i}`}>
+                <ProductPreview product={p} region={region} isFeatured={false} />
+              </li>
+            ))
+          : [...Array(8)].map((_, i) => (
+              <li key={`skeleton-${i}`}>
+                <SkeletonProductGrid columns={columns} />
+              </li>
+            ))}
       </ul>
     </>
   )
