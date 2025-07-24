@@ -26,9 +26,7 @@ const nextConfig = {
   },
 
   images: {
-    // ❗ отключаем оптимизацию — безопасно
     unoptimized: true,
-
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 600,
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
@@ -39,20 +37,10 @@ const nextConfig = {
         hostname: "localhost",
       },
       ...(backendHost
-        ? [
-            {
-              protocol: "https",
-              hostname: backendHost,
-            },
-          ]
+        ? [{ protocol: "https", hostname: backendHost }]
         : []),
       ...(minioHost
-        ? [
-            {
-              protocol: "https",
-              hostname: minioHost,
-            },
-          ]
+        ? [{ protocol: "https", hostname: minioHost }]
         : []),
       {
         protocol: "https",
@@ -73,7 +61,6 @@ const nextConfig = {
     ],
   },
 
-  // ✅ Добавляем заголовки для кэширования картинок в браузере
   async headers() {
     return [
       {
@@ -81,7 +68,7 @@ const nextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=604800, immutable", // 7 дней кэша
+            value: "public, max-age=604800, immutable",
           },
         ],
       },
