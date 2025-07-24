@@ -1,5 +1,4 @@
 import { Container, clx } from "@medusajs/ui"
-import Image from "next/image"
 import React from "react"
 import PlaceholderImage from "@modules/common/icons/placeholder-image"
 
@@ -31,6 +30,7 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
     : undefined
 
   const useLocal = !!localPath
+  const finalUrl = useLocal ? localPath : imageUrl
 
   return (
     <Container
@@ -46,18 +46,13 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
       data-testid={dataTestid}
     >
       <ImageOrPlaceholder
-        image={useLocal ? localPath : imageUrl}
+        image={finalUrl}
         size={size}
         priority={priority}
         index={index}
       />
     </Container>
   )
-}
-
-const safeLoader = ({ src }: { src: string }) => {
-  if (src.startsWith("http") || src.startsWith("/")) return src
-  return `/${src}`
 }
 
 const ImageOrPlaceholder = ({
@@ -80,18 +75,11 @@ const ImageOrPlaceholder = ({
   }
 
   return (
-    <Image
+    <img
       src={image}
       alt="Thumbnail"
-      loader={safeLoader}
-      unoptimized
-      className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
+      className="absolute inset-0 object-cover object-center w-full h-full transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
       draggable={false}
-      quality={70}
-      loading={priority ? "eager" : "lazy"}
-      priority={priority}
-      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
-      fill
     />
   )
 }
