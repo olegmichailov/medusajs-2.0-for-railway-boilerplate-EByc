@@ -27,7 +27,6 @@ export default function ProductPreview({
     <LocalizedClientLink
       href={`/products/${product?.handle || ""}`}
       className="group pointer-events-auto"
-      scroll={false}
     >
       <div data-testid="product-wrapper">
         <Thumbnail
@@ -35,7 +34,7 @@ export default function ProductPreview({
           images={product.images}
           size="full"
           isFeatured={isFeatured}
-          priority={index < 2} // 👈 загружаем первые картинки с приоритетом
+          priority={index < 2} // загружаем первые картинки с приоритетом
         />
         <div className="flex txt-compact-medium mt-2 justify-between px-1">
           <Text
