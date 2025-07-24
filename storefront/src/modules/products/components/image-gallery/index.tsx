@@ -1,55 +1,39 @@
 "use client"
 
-import { PricedProduct } from "@medusajs/medusa/dist/types/pricing"
-import { useState } from "react"
+import { HttpTypes } from "@medusajs/types"
+import { Container } from "@medusajs/ui"
 import Image from "next/image"
-import Zoom from "react-medium-image-zoom"
-import "react-medium-image-zoom/dist/styles.css"
 
 type ImageGalleryProps = {
-  images: PricedProduct["images"]
+  images: HttpTypes.StoreProductImage[]
 }
 
 const ImageGallery = ({ images }: ImageGalleryProps) => {
-  const [selectedImage, setSelectedImage] = useState(0)
-
   if (!images || images.length === 0) return null
 
   return (
-    <div className="flex flex-col items-start gap-y-4">
-      {/* Главное изображение с Zoom */}
-      <div className="w-full aspect-[3/4] relative bg-white">
-        <Zoom>
-          <Image
-            src={images[selectedImage].url}
-            alt={`Product image ${selectedImage + 1}`}
-            fill
-            sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-cover"
-            priority
-          />
-        </Zoom>
-      </div>
-
-      {/* Миниатюры */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 w-full">
-        {images.map((image, index) => (
-          <button
-            key={image.id}
-            onClick={() => setSelectedImage(index)}
-            className={`relative aspect-square border ${
-              index === selectedImage ? "border-gray-900" : "border-transparent"
-            }`}
-          >
-            <Image
-              src={image.url}
-              alt={`Thumbnail ${index + 1}`}
-              fill
-              sizes="(max-width: 768px) 33vw, 12vw"
-              className="object-cover"
-            />
-          </button>
-        ))}
+    <div className="flex items-start relative">
+      <div className="flex flex-col flex-1 small:mx-16 gap-y-4">
+        {images.map((image, index) => {
+          const isPriority = index === 0
+          return (
+            <Container
+              key={image.id || index}
+              className="relative aspect-[29/34] w-full overflow-hidden bg-ui-bg-subtle"
+              id={image.id}
+            >
+              <Image
+                src={image.url}
+                alt={Product image ${index + 1}}
+                fill
+                priority={isPriority}
+                loading={isPriority ? "eager" : "lazy"}
+                sizes="(max-width: 576px) 100vw, (max-width: 768px) 80vw, 1024px"
+                style={{ objectFit: "cover" }}
+              />
+            </Container>
+          )
+        })}
       </div>
     </div>
   )
