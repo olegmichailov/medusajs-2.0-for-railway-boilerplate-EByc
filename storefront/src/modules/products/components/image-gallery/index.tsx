@@ -1,68 +1,64 @@
 "use client"
 
-import { HttpTypes } from "@medusajs/types"
-import { Container } from "@medusajs/ui"
+import { useState } from "react"
 import Image from "next/image"
+import Zoom from "react-medium-image-zoom"
+import "react-medium-image-zoom/dist/styles.css"
 
-type ImageGalleryProps = {
-  images: HttpTypes.StoreProductImage[]
+type ImageType = {
+  url: string
 }
 
-const BASE_URL = "https://gmorkl.de"
+type ImageGalleryProps = {
+  images: ImageType[]
+}
 
 const ImageGallery = ({ images }: ImageGalleryProps) => {
-  if (!images || images.length === 0) return null
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
 
-  console.log("📷 images from props:", images)
+  if (!images || images.length === 0) {
+    return (
+      <div className="w-full h-[500px] bg-gray-100 flex items-center justify-center">
+        <span className="text-gray-500 text-sm">No images available</span>
+      </div>
+    )
+  }
+
+  const selectedImage = images[selectedImageIndex]
 
   return (
-    <div className="flex items-start relative">
-      <div className="flex flex-col flex-1 small:mx-16 gap-y-4">
-        {images.map((image, index) => {
-          const isPriority = index === 0
+    <div className="flex flex-col items-start gap-4">
+      <Zoom>
+        <div className="relative w-full aspect-square border rounded overflow-hidden">
+          <Image
+            src={selectedImage.url}
+            alt="Product image"
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 50vw"
+            unoptimized
+          />
+        </div>
+      </Zoom>
 
-          const rawUrl = image?.url
-          const imageUrl = rawUrl?.startsWith("http")
-            ? rawUrl
-            : rawUrl
-            ? `${BASE_URL}${rawUrl}`
-            : null
-
-          console.log(`🖼 image ${index}:`, {
-            rawUrl,
-            finalUrl: imageUrl,
-            id: image.id,
-          })
-
-          return (
-            <Container
-              key={image.id || index}
-              className="relative aspect-[29/34] w-full overflow-hidden bg-ui-bg-subtle"
-              id={image.id}
-            >
-              {imageUrl ? (
-                <Image
-                  src={imageUrl}
-                  alt={`Product image ${index + 1}`}
-                  fill
-                  unoptimized
-                  priority={isPriority}
-                  loading={isPriority ? "eager" : "lazy"}
-                  sizes="(max-width: 576px) 100vw, (max-width: 768px) 80vw, 1024px"
-                  style={{
-                    objectFit: "cover",
-                    transition: "opacity 0.5s ease",
-                  }}
-                  className="opacity-0 animate-fadeIn absolute inset-0 object-cover object-center"
-                />
-              ) : (
-                <div className="w-full h-full absolute inset-0 flex items-center justify-center text-sm text-gray-500">
-                  ⚠️ No image URL
-                </div>
-              )}
-            </Container>
-          )
-        })}
+      <div className="flex gap-2 overflow-x-auto max-w-full">
+        {images.map((img, i) => (
+          <button
+            key={i}
+            onClick={() => setSelectedImageIndex(i)}
+            className={`relative w-20 h-20 border rounded overflow-hidden ${
+              i === selectedImageIndex ? "border-black" : "border-gray-200"
+            }`}
+          >
+            <Image
+              src={img.url}
+              alt={`Thumbnail ${i + 1}`}
+              fill
+              className="object-cover"
+              unoptimized
+            />
+          </button>
+        ))}
       </div>
     </div>
   )
