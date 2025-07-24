@@ -15,22 +15,20 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
     <div className="flex items-start relative">
       <div className="flex flex-col flex-1 small:mx-16 gap-y-4">
         {images.map((image, index) => {
-          const isPriority = index < 2 // ← Грузим сразу 2 картинки, не одну
+          const isPriority = index === 0
           return (
             <Container
               key={image.id || index}
-              className="relative w-full overflow-hidden bg-ui-bg-subtle"
+              className="relative aspect-[29/34] w-full overflow-hidden bg-ui-bg-subtle"
               id={image.id}
-              style={{ aspectRatio: "29 / 34" }} // Фиксированный аспект, без tailwind
             >
               <Image
                 src={image.url}
                 alt={`Product image ${index + 1}`}
-                width={580}
-                height={680}
+                fill
                 priority={isPriority}
                 loading={isPriority ? "eager" : "lazy"}
-                sizes="(max-width: 768px) 100vw, (min-width: 769px) 580px"
+                sizes="(max-width: 576px) 100vw, (max-width: 768px) 80vw, 1024px"
                 style={{ objectFit: "cover" }}
               />
             </Container>
