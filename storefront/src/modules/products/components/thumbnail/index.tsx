@@ -24,9 +24,9 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   priority = false,
   index = 0,
 }) => {
-  const imageUrl = thumbnail || images?.[0]?.url
+  const imageUrl = thumbnail || images?.[0]?.url || "/placeholder.png"
 
-  const localPath = imageUrl?.includes("products/")
+  const localPath = imageUrl.includes("products/")
     ? `/${imageUrl.split("products/")[1]}`
     : undefined
 
@@ -55,7 +55,6 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   )
 }
 
-// 🔧 кастомный лоадер отключает ресайз и отдаёт прямой URL
 const directLoader: ImageLoader = ({ src }) => {
   return src
 }
@@ -71,7 +70,15 @@ const ImageOrPlaceholder = ({
   priority?: boolean
   index?: number
 }) => {
-  return image ? (
+  if (!image || typeof image !== "string" || image.trim() === "") {
+    return (
+      <div className="w-full h-full absolute inset-0 flex items-center justify-center">
+        <PlaceholderImage size={size === "small" ? 16 : 24} />
+      </div>
+    )
+  }
+
+  return (
     <Image
       loader={directLoader}
       unoptimized
@@ -79,18 +86,12 @@ const ImageOrPlaceholder = ({
       alt="Thumbnail"
       className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
       draggable={false}
-      placeholder="blur"
-      blurDataURL="/placeholder.png"
       quality={70}
       loading={priority ? "eager" : "lazy"}
       priority={priority}
       sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
       fill
     />
-  ) : (
-    <div className="w-full h-full absolute inset-0 flex items-center justify-center">
-      <PlaceholderImage size={size === "small" ? 16 : 24} />
-    </div>
   )
 }
 
