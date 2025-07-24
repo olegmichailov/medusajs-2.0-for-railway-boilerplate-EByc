@@ -24,7 +24,7 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
             >
               <Image
                 src={image.url}
-                alt={Product image ${index + 1}}
+                alt={`Product image ${index + 1}`}
                 fill
                 priority={isPriority}
                 loading={isPriority ? "eager" : "lazy"}
