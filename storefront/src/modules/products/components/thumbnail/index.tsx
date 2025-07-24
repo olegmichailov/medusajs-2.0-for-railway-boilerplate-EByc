@@ -1,4 +1,5 @@
 import { Container, clx } from "@medusajs/ui"
+import Image from "next/image"
 import React from "react"
 import PlaceholderImage from "@modules/common/icons/placeholder-image"
 
@@ -54,6 +55,11 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   )
 }
 
+const safeLoader = ({ src }: { src: string }) => {
+  if (src.startsWith("http") || src.startsWith("/")) return src
+  return `/${src}`
+}
+
 const ImageOrPlaceholder = ({
   image,
   size,
@@ -74,13 +80,18 @@ const ImageOrPlaceholder = ({
   }
 
   return (
-    <img
+    <Image
       src={image}
       alt="Thumbnail"
-      className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
+      loader={safeLoader}
+      unoptimized
+      className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
       draggable={false}
+      quality={70}
       loading={priority ? "eager" : "lazy"}
-      decoding="async"
+      priority={priority}
+      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+      fill
     />
   )
 }
