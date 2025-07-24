@@ -26,7 +26,7 @@ const nextConfig = {
   },
 
   images: {
-    // 💥 КРИТИЧНО: отключает Next.js-оптимизацию, чтобы избежать ошибок
+    // ❗ отключаем оптимизацию — безопасно
     unoptimized: true,
 
     formats: ["image/avif", "image/webp"],
@@ -71,6 +71,21 @@ const nextConfig = {
         hostname: "medusa-server-testing.s3.us-east-1.amazonaws.com",
       },
     ],
+  },
+
+  // ✅ Добавляем заголовки для кэширования картинок в браузере
+  async headers() {
+    return [
+      {
+        source: "/(.*)\\.(jpg|jpeg|png|webp|svg|gif|avif)",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=604800, immutable", // 7 дней кэша
+          },
+        ],
+      },
+    ]
   },
 
   serverRuntimeConfig: {
