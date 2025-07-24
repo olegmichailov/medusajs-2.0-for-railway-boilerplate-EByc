@@ -1,61 +1,51 @@
+// src/modules/products/components/image-gallery/index.tsx
+
 "use client"
 
+import { PricedProduct } from "@medusajs/medusa/dist/types/pricing"
 import { useState } from "react"
 import Image from "next/image"
-import Zoom from "react-medium-image-zoom"
-import "react-medium-image-zoom/dist/styles.css"
-
-type ImageType = {
-  url: string
-}
+import Thumbnail from "../thumbnail"
 
 type ImageGalleryProps = {
-  images: ImageType[]
+  images: PricedProduct["images"]
 }
 
 const ImageGallery = ({ images }: ImageGalleryProps) => {
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [selectedImage, setSelectedImage] = useState(0)
 
-  if (!images || images.length === 0) {
-    return (
-      <div className="w-full h-[500px] bg-gray-100 flex items-center justify-center">
-        <span className="text-gray-500 text-sm">No images available</span>
-      </div>
-    )
-  }
-
-  const selectedImage = images[selectedImageIndex]
+  if (!images || images.length === 0) return null
 
   return (
-    <div className="flex flex-col items-start gap-4">
-      <Zoom>
-        <div className="relative w-full aspect-square border rounded overflow-hidden">
-          <Image
-            src={selectedImage.url}
-            alt="Product image"
-            fill
-            className="object-cover"
-            sizes="(max-width: 768px) 100vw, 50vw"
-            unoptimized
-          />
-        </div>
-      </Zoom>
+    <div className="flex flex-col gap-4">
+      {/* Главное изображение */}
+      <div className="relative w-full aspect-[3/4] bg-white">
+        <Image
+          src={images[selectedImage].url}
+          alt={`Product image ${selectedImage + 1}`}
+          fill
+          sizes="(max-width: 768px) 100vw, 50vw"
+          className="object-cover transition-opacity duration-300"
+          priority
+        />
+      </div>
 
-      <div className="flex gap-2 overflow-x-auto max-w-full">
-        {images.map((img, i) => (
+      {/* Миниатюры в сетке */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {images.map((image, index) => (
           <button
-            key={i}
-            onClick={() => setSelectedImageIndex(i)}
-            className={`relative w-20 h-20 border rounded overflow-hidden ${
-              i === selectedImageIndex ? "border-black" : "border-gray-200"
+            key={image.id}
+            onClick={() => setSelectedImage(index)}
+            className={`relative aspect-square w-full border ${
+              index === selectedImage ? "border-gray-900" : "border-transparent"
             }`}
           >
             <Image
-              src={img.url}
-              alt={`Thumbnail ${i + 1}`}
+              src={image.url}
+              alt={`Thumbnail ${index + 1}`}
               fill
+              sizes="(max-width: 768px) 50vw, 12vw"
               className="object-cover"
-              unoptimized
             />
           </button>
         ))}
