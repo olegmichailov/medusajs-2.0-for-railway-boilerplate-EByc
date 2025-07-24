@@ -28,7 +28,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const { response } = await getProductsListWithSort({
     page: 1,
     queryParams: {
-      limit: 100,
+      limit: 24, // ✅ оптимально для скорости
       offset: 0,
     },
     countryCode,
