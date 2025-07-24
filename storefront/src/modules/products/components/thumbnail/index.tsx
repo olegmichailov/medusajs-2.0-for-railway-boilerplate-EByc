@@ -55,6 +55,11 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   )
 }
 
+const safeLoader = ({ src }: { src: string }) => {
+  if (src.startsWith("http") || src.startsWith("/")) return src
+  return `/${src}`
+}
+
 const ImageOrPlaceholder = ({
   image,
   size,
@@ -78,6 +83,8 @@ const ImageOrPlaceholder = ({
     <Image
       src={image}
       alt="Thumbnail"
+      loader={safeLoader}
+      unoptimized
       className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
       draggable={false}
       quality={70}
