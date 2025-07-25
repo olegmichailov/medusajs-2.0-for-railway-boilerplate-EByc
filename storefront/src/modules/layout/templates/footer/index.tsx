@@ -1,3 +1,5 @@
+"use client"
+
 import { getCategoriesList } from "@lib/data/categories"
 import { getCollectionsList } from "@lib/data/collections"
 import { Text, clx } from "@medusajs/ui"
@@ -24,7 +26,7 @@ export default async function Footer() {
             <div className="mt-6">
               <img
                 src="/icons/payments.png"
-                alt="Supported Payment Methods: Visa, MasterCard, Apple Pay, Google Pay, Klarna, Stripe"
+                alt="Supported Payment Methods"
                 className="h-8 w-auto object-contain"
               />
             </div>
@@ -122,6 +124,16 @@ export default async function Footer() {
                 <li>
                   <LocalizedClientLink href="/rueckgabe" className="hover:text-ui-fg-base">
                     Rückgabe
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/versand" className="hover:text-ui-fg-base">
+                    Versand
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/zahlung" className="hover:text-ui-fg-base">
+                    Zahlung
                   </LocalizedClientLink>
                 </li>
                 <li>
