@@ -1,25 +1,14 @@
-"use client"
-
-import { useState, useEffect } from "react"
-import { Text, clx } from "@medusajs/ui"
+// /storefront/src/modules/layout/templates/footer/index.tsx
+import { getCategoriesList } from "@lib/data/categories"
+import { getCollectionsList } from "@lib/data/collections"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import MedusaCTA from "@modules/layout/components/medusa-cta"
+import { Text, clx } from "@medusajs/ui"
 
-export default function Footer() {
-  const [collections, setCollections] = useState([])
-  const [categories, setCategories] = useState([])
-
-  useEffect(() => {
-    // Загрузка коллекций
-    fetch("/api/collections")
-      .then(res => res.json())
-      .then(data => setCollections(data.collections || []))
-
-    // Загрузка категорий
-    fetch("/api/categories")
-      .then(res => res.json())
-      .then(data => setCategories(data.categories || []))
-  }, [])
+export default async function Footer() {
+  // Не убирать async! Не добавлять "use client"!
+  const { collections } = await getCollectionsList(0, 6)
+  const { product_categories } = await getCategoriesList(0, 6)
 
   return (
     <footer className="border-t border-ui-border-base w-full">
@@ -41,37 +30,70 @@ export default function Footer() {
             </div>
           </div>
           <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
-            <div className="flex flex-col gap-y-2">
-              <span className="uppercase text-ui-fg-base text-sm">Categories</span>
-              <ul className="grid grid-cols-1 gap-2" data-testid="footer-categories">
-                {categories.map((c) => (
-                  <li className="flex flex-col gap-2 text-ui-fg-subtle text-sm" key={c.id}>
-                    <LocalizedClientLink
-                      className="hover:text-ui-fg-base"
-                      href={`/categories/${c.handle}`}
-                      data-testid="category-link"
-                    >
-                      {c.name}
-                    </LocalizedClientLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="flex flex-col gap-y-2">
-              <span className="uppercase text-ui-fg-base text-sm">Collections</span>
-              <ul className="grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm">
-                {collections.map((c) => (
-                  <li key={c.id}>
-                    <LocalizedClientLink
-                      className="hover:text-ui-fg-base"
-                      href={`/collections/${c.handle}`}
-                    >
-                      {c.title}
-                    </LocalizedClientLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {product_categories && product_categories.length > 0 && (
+              <div className="flex flex-col gap-y-2">
+                <span className="uppercase text-ui-fg-base text-sm">Categories</span>
+                <ul className="grid grid-cols-1 gap-2" data-testid="footer-categories">
+                  {product_categories.slice(0, 6).map((c) => {
+                    if (c.parent_category) return
+                    const children = c.category_children?.map((child) => ({
+                      name: child.name,
+                      handle: child.handle,
+                      id: child.id,
+                    })) || null
+                    return (
+                      <li className="flex flex-col gap-2 text-ui-fg-subtle text-sm" key={c.id}>
+                        <LocalizedClientLink
+                          className={clx("hover:text-ui-fg-base", children && "text-sm")}
+                          href={`/categories/${c.handle}`}
+                          data-testid="category-link"
+                        >
+                          {c.name}
+                        </LocalizedClientLink>
+                        {children && (
+                          <ul className="grid grid-cols-1 ml-3 gap-2">
+                            {children.map((child) => (
+                              <li key={child.id}>
+                                <LocalizedClientLink
+                                  className="hover:text-ui-fg-base text-sm"
+                                  href={`/categories/${child.handle}`}
+                                  data-testid="category-link"
+                                >
+                                  {child.name}
+                                </LocalizedClientLink>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {collections && collections.length > 0 && (
+              <div className="flex flex-col gap-y-2">
+                <span className="uppercase text-ui-fg-base text-sm">Collections</span>
+                <ul
+                  className={clx("grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm", {
+                    "grid-cols-2": collections.length > 3,
+                  })}
+                >
+                  {collections.slice(0, 6).map((c) => (
+                    <li key={c.id}>
+                      <LocalizedClientLink
+                        className="hover:text-ui-fg-base"
+                        href={`/collections/${c.handle}`}
+                      >
+                        {c.title}
+                      </LocalizedClientLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="flex flex-col gap-y-2">
               <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
