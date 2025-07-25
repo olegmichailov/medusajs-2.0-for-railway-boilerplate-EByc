@@ -1,14 +1,16 @@
-// /storefront/src/modules/layout/templates/footer/index.tsx
 import { getCategoriesList } from "@lib/data/categories"
 import { getCollectionsList } from "@lib/data/collections"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import MedusaCTA from "@modules/layout/components/medusa-cta"
 import { Text, clx } from "@medusajs/ui"
 
-export default async function Footer() {
+export default async function Footer({ countryCode }: { countryCode?: string }) {
   // Не убирать async! Не добавлять "use client"!
   const { collections } = await getCollectionsList(0, 6)
   const { product_categories } = await getCategoriesList(0, 6)
+
+  // Фоллбэк на de если countryCode не прокинут
+  const cc = countryCode || "de"
 
   return (
     <footer className="border-t border-ui-border-base w-full">
@@ -94,24 +96,41 @@ export default async function Footer() {
               </div>
             )}
 
+            {/* Юридический раздел */}
             <div className="flex flex-col gap-y-2">
-              <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
+              <span className="uppercase text-ui-fg-base text-sm">Rechtliches</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
                 <li>
-                  <LocalizedClientLink href="/about" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href={`/${cc}/impressum`} className="hover:text-ui-fg-base">
+                    Impressum
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href={`/${cc}/datenschutz`} className="hover:text-ui-fg-base">
+                    Datenschutz
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href={`/${cc}/widerruf`} className="hover:text-ui-fg-base">
+                    Widerruf
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href={`/${cc}/agb`} className="hover:text-ui-fg-base">
+                    AGB
+                  </LocalizedClientLink>
+                </li>
+                {/* Если хочешь добавить About/Gallery, оставь ниже */}
+                {/* <li>
+                  <LocalizedClientLink href={`/${cc}/about`} className="hover:text-ui-fg-base">
                     About
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/gallery" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href={`/${cc}/gallery`} className="hover:text-ui-fg-base">
                     Gallery
                   </LocalizedClientLink>
-                </li>
-                <li>
-                  <LocalizedClientLink href="/impressum" className="hover:text-ui-fg-base">
-                    Impressum
-                  </LocalizedClientLink>
-                </li>
+                </li> */}
                 <li>
                   <a
                     href="https://www.instagram.com/gmorkl/"
