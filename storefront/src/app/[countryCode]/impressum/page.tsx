@@ -6,23 +6,29 @@ export default function ImpressumPage() {
       <h1 className="text-3xl font-semibold mb-8 tracking-wide uppercase">Impressum</h1>
       <div className="space-y-4 text-base leading-relaxed">
         <p>
-          Angaben gemäß § 5 TMG
-          <br />
-          Maria Rodigina <br />
-          Gmorkl Store <br />
-          ...<br />
-          (здесь вставь твои реквизиты, адрес, электронку, телефон — всё, что требует закон)
-        </p>
-        <p>
-          Verantwortlich für den Inhalt nach § 55 Abs. 2 RStV:<br />
-          Maria Rodigina
+          Angaben gemäß § 5 TMG<br />
+          <b>Maria Rodigina</b><br />
+          Gmorkl Store<br />
+          Sülzgürtel 54<br />
+          50937 Köln<br />
+          Deutschland
         </p>
         <p>
           Kontakt:<br />
-          E-Mail: info@gmorkl.de
+          E-Mail: <a href="mailto:info@gmorkl.de" className="underline">info@gmorkl.de</a>
         </p>
         <p>
-          Haftungsausschluss: Trotz sorgfältiger inhaltlicher Kontrolle übernehmen wir keine Haftung für die Inhalte externer Links. Für den Inhalt der verlinkten Seiten sind ausschließlich deren Betreiber verantwortlich.
+          Verantwortlich für den Inhalt nach § 55 Abs. 2 RStV:<br />
+          <b>Maria Rodigina</b>
+        </p>
+        <p>
+          Haftungsausschluss:<br />
+          Trotz sorgfältiger inhaltlicher Kontrolle übernehmen wir keine Haftung für die Inhalte externer Links.
+          Für den Inhalt der verlinkten Seiten sind ausschließlich deren Betreiber verantwortlich.
+        </p>
+        <p>
+          Umsatzsteuer-Identifikationsnummer gemäß § 27 a Umsatzsteuergesetz:<br />
+          <b>DE352262606</b>
         </p>
       </div>
     </div>
