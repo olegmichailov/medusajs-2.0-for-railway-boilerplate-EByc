@@ -1,23 +1,16 @@
 "use client"
 
+import { getCategoriesList } from "@lib/data/categories"
+import { getCollectionsList } from "@lib/data/collections"
 import { Text, clx } from "@medusajs/ui"
+
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import MedusaCTA from "@modules/layout/components/medusa-cta"
 
-// Временно заменим на статические массивы (для деплоя)
-// Потом вернём динамику, когда деплой пройдёт успешно
-const product_categories = [
-  { id: 1, name: "T-Shirts", handle: "t-shirts", parent_category: null, category_children: [] },
-  { id: 2, name: "Jackets", handle: "jackets", parent_category: null, category_children: [] },
-  // ...добавь нужные категории
-]
-const collections = [
-  { id: 1, title: "Spring 2025", handle: "spring-2025" },
-  { id: 2, title: "Limited", handle: "limited" },
-  // ...добавь нужные коллекции
-]
+export default async function Footer() {
+  const { collections } = await getCollectionsList(0, 6)
+  const { product_categories } = await getCategoriesList(0, 6)
 
-export default function Footer() {
   return (
     <footer className="border-t border-ui-border-base w-full">
       <div className="content-container flex flex-col w-full font-sans text-base tracking-wider">
@@ -46,11 +39,12 @@ export default function Footer() {
                 <ul className="grid grid-cols-1 gap-2" data-testid="footer-categories">
                   {product_categories.slice(0, 6).map((c) => {
                     if (c.parent_category) return
-                    const children = c.category_children?.map((child) => ({
-                      name: child.name,
-                      handle: child.handle,
-                      id: child.id,
-                    })) || null
+                    const children =
+                      c.category_children?.map((child) => ({
+                        name: child.name,
+                        handle: child.handle,
+                        id: child.id,
+                      })) || null
                     return (
                       <li className="flex flex-col gap-2 text-ui-fg-subtle text-sm" key={c.id}>
                         <LocalizedClientLink
@@ -115,6 +109,26 @@ export default function Footer() {
                 <li>
                   <LocalizedClientLink href="/gallery" className="hover:text-ui-fg-base">
                     Gallery
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/impressum" className="hover:text-ui-fg-base">
+                    Impressum
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/datenschutz" className="hover:text-ui-fg-base">
+                    Datenschutz
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/rueckgabe" className="hover:text-ui-fg-base">
+                    Rückgabe
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/zahlung" className="hover:text-ui-fg-base">
+                    Zahlung
                   </LocalizedClientLink>
                 </li>
                 <li>
