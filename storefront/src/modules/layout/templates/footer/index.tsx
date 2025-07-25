@@ -21,26 +21,28 @@ export default async function Footer() {
               Gmorkl Store
             </LocalizedClientLink>
 
-            <div className="flex gap-4 mt-6">
-              <img src="/icons/visa.svg" alt="Visa" className="w-8 h-8" />
-              <img src="/icons/mastercard.svg" alt="Mastercard" className="w-8 h-8" />
-              <img src="/icons/paypal.svg" alt="PayPal" className="w-8 h-8" />
-              <img src="/icons/bank.svg" alt="Bank Transfer" className="w-8 h-8" />
+            <div className="mt-6">
+              <img
+                src="/icons/payments.png"
+                alt="Supported Payment Methods: Visa, MasterCard, Apple Pay, Google Pay, Klarna, Stripe"
+                className="h-8 w-auto object-contain"
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-10 text-base tracking-wider items-start">
+          <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
             {product_categories && product_categories.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
                 <ul className="grid grid-cols-1 gap-2" data-testid="footer-categories">
                   {product_categories.slice(0, 6).map((c) => {
                     if (c.parent_category) return
-                    const children = c.category_children?.map((child) => ({
-                      name: child.name,
-                      handle: child.handle,
-                      id: child.id,
-                    })) || null
+                    const children =
+                      c.category_children?.map((child) => ({
+                        name: child.name,
+                        handle: child.handle,
+                        id: child.id,
+                      })) || null
                     return (
                       <li className="flex flex-col gap-2 text-ui-fg-subtle text-sm" key={c.id}>
                         <LocalizedClientLink
@@ -76,12 +78,9 @@ export default async function Footer() {
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Collections</span>
                 <ul
-                  className={clx(
-                    "grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm",
-                    {
-                      "grid-cols-2": collections.length > 3,
-                    }
-                  )}
+                  className={clx("grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm", {
+                    "grid-cols-2": collections.length > 3,
+                  })}
                 >
                   {collections.slice(0, 6).map((c) => (
                     <li key={c.id}>
