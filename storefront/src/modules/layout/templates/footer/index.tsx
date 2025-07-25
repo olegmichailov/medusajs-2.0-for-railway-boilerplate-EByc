@@ -1,29 +1,45 @@
-import { getCategoriesList } from "@lib/data/categories"
-import { getCollectionsList } from "@lib/data/collections"
-import { Text, clx } from "@medusajs/ui"
+"use client"
 
+import { Text, clx } from "@medusajs/ui"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import MedusaCTA from "@modules/layout/components/medusa-cta"
 
-export default async function Footer() {
-  const { collections } = await getCollectionsList(0, 6)
-  const { product_categories } = await getCategoriesList(0, 6)
+// Временно заменим на статические массивы (для деплоя)
+// Потом вернём динамику, когда деплой пройдёт успешно
+const product_categories = [
+  { id: 1, name: "T-Shirts", handle: "t-shirts", parent_category: null, category_children: [] },
+  { id: 2, name: "Jackets", handle: "jackets", parent_category: null, category_children: [] },
+  // ...добавь нужные категории
+]
+const collections = [
+  { id: 1, title: "Spring 2025", handle: "spring-2025" },
+  { id: 2, title: "Limited", handle: "limited" },
+  // ...добавь нужные коллекции
+]
 
+export default function Footer() {
   return (
     <footer className="border-t border-ui-border-base w-full">
       <div className="content-container flex flex-col w-full font-sans text-base tracking-wider">
-        <div className="flex flex-col gap-y-6 xsmall:flex-row items-start justify-between py-40">
-          <div>
+        <div className="flex flex-col gap-y-10 xsmall:flex-row items-start justify-between py-20 sm:py-28 md:py-32">
+          <div className="mb-10">
             <LocalizedClientLink
               href="/"
-              className="text-lg tracking-wider uppercase text-ui-fg-subtle hover:text-ui-fg-base"
+              className="text-xl tracking-wider uppercase text-ui-fg-subtle hover:text-ui-fg-base"
             >
               Gmorkl Store
             </LocalizedClientLink>
+
+            <div className="mt-6">
+              <img
+                src="/icons/payments.png"
+                alt="Supported Payment Methods"
+                className="h-8 w-auto object-contain"
+              />
+            </div>
           </div>
 
           <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
-            {/* Categories */}
             {product_categories && product_categories.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
@@ -39,7 +55,7 @@ export default async function Footer() {
                       <li className="flex flex-col gap-2 text-ui-fg-subtle text-sm" key={c.id}>
                         <LocalizedClientLink
                           className={clx("hover:text-ui-fg-base", children && "text-sm")}
-                          href={/categories/${c.handle}}
+                          href={`/categories/${c.handle}`}
                           data-testid="category-link"
                         >
                           {c.name}
@@ -50,7 +66,7 @@ export default async function Footer() {
                               <li key={child.id}>
                                 <LocalizedClientLink
                                   className="hover:text-ui-fg-base text-sm"
-                                  href={/categories/${child.handle}}
+                                  href={`/categories/${child.handle}`}
                                   data-testid="category-link"
                                 >
                                   {child.name}
@@ -66,23 +82,19 @@ export default async function Footer() {
               </div>
             )}
 
-            {/* Collections */}
             {collections && collections.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Collections</span>
                 <ul
-                  className={clx(
-                    "grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm",
-                    {
-                      "grid-cols-2": collections.length > 3,
-                    }
-                  )}
+                  className={clx("grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm", {
+                    "grid-cols-2": collections.length > 3,
+                  })}
                 >
                   {collections.slice(0, 6).map((c) => (
                     <li key={c.id}>
                       <LocalizedClientLink
                         className="hover:text-ui-fg-base"
-                        href={/collections/${c.handle}}
+                        href={`/collections/${c.handle}`}
                       >
                         {c.title}
                       </LocalizedClientLink>
@@ -92,23 +104,16 @@ export default async function Footer() {
               </div>
             )}
 
-            {/* GMORKL Links */}
             <div className="flex flex-col gap-y-2">
               <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
                 <li>
-                  <LocalizedClientLink
-                    href="/about"
-                    className="hover:text-ui-fg-base"
-                  >
+                  <LocalizedClientLink href="/about" className="hover:text-ui-fg-base">
                     About
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink
-                    href="/gallery"
-                    className="hover:text-ui-fg-base"
-                  >
+                  <LocalizedClientLink href="/gallery" className="hover:text-ui-fg-base">
                     Gallery
                   </LocalizedClientLink>
                 </li>
@@ -144,5 +149,3 @@ export default async function Footer() {
     </footer>
   )
 }
-
-storefront/src/modules/layout/templates/footer/index.tsx
