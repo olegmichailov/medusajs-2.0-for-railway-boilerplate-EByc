@@ -1,6 +1,6 @@
 // src/app/[countryCode]/not-found.tsx
-import { ArrowRightMini } from "medusajs/icons"
-import { Text } from "medusajs/ui"
+import { ArrowRightMini } from "@medusajs/icons"
+import { Text } from "@medusajs/ui"
 import { Metadata } from "next"
 import Link from "next/link"
 
