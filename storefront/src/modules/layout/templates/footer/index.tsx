@@ -29,7 +29,7 @@ export default async function Footer() {
             </div>
           </div>
 
-          <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-10 text-base tracking-wider items-start">
             {product_categories && product_categories.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
