@@ -27,6 +27,7 @@
     "@medusajs/js-sdk": "preview",
     "@medusajs/types": "preview",
     "@medusajs/ui": "preview",
+    "@medusajs/icons": "preview",
     "@meilisearch/instant-meilisearch": "^0.7.1",
     "@paypal/paypal-js": "^5.0.6",
     "@paypal/react-paypal-js": "^7.8.1",
