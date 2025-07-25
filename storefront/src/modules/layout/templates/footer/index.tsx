@@ -102,37 +102,32 @@ export default async function Footer() {
               <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
                 <li>
-                  <LocalizedClientLink href="/about" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/about" className="hover:text-ui-fg-base">
                     About
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/gallery" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/gallery" className="hover:text-ui-fg-base">
                     Gallery
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/impressum" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/impressum" className="hover:text-ui-fg-base">
                     Impressum
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/datenschutz" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/datenschutz" className="hover:text-ui-fg-base">
                     Datenschutz
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/rueckgabe" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/rueckgabe" className="hover:text-ui-fg-base">
                     Rückgabe
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink href="/versand" className="hover:text-ui-fg-base">
-                    Versand
-                  </LocalizedClientLink>
-                </li>
-                <li>
-                  <LocalizedClientLink href="/zahlung" className="hover:text-ui-fg-base">
+                  <LocalizedClientLink href="/[countryCode]/zahlung" className="hover:text-ui-fg-base">
                     Zahlung
                   </LocalizedClientLink>
                 </li>
