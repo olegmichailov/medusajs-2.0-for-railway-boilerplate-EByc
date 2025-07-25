@@ -15,7 +15,7 @@ export default async function Footer() {
     <footer className="border-t border-ui-border-base w-full">
       <div className="content-container flex flex-col w-full font-sans text-base tracking-wider">
         <div className="flex flex-col gap-y-10 xsmall:flex-row items-start justify-between py-20 sm:py-28 md:py-32">
-          {/* Блок с логотипом и payment.png увеличенного размера */}
+          {/* Лого и payment.png */}
           <div className="mb-10 flex flex-col gap-6">
             <LocalizedClientLink
               href="/"
@@ -27,11 +27,14 @@ export default async function Footer() {
               <img
                 src="/icons/payments.png"
                 alt="Supported Payment Methods"
-                className="h-20 w-auto object-contain" // УВЕЛИЧИЛ ДО h-20 (примерно 80px)
+                className="h-20 w-auto object-contain" // БОЛЬШЕ, чем было (80px)
               />
             </div>
           </div>
+
+          {/* Категории, коллекции, юридические */}
           <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
+            {/* CATEGORIES */}
             {product_categories && product_categories.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
@@ -75,6 +78,7 @@ export default async function Footer() {
               </div>
             )}
 
+            {/* COLLECTIONS */}
             {collections && collections.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Collections</span>
@@ -97,7 +101,7 @@ export default async function Footer() {
               </div>
             )}
 
-            {/* Блок с legal links (RECHTLICHES) */}
+            {/* Юридический блок */}
             <div className="flex flex-col gap-y-2">
               <span className="uppercase text-ui-fg-base text-sm">RECHTLICHES</span>
               <ul className="grid grid-cols-1 gap-y-1 text-ui-fg-subtle text-sm">
