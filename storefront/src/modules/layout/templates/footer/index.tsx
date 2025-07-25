@@ -15,14 +15,14 @@ export default async function Footer() {
     <footer className="border-t border-ui-border-base w-full">
       <div className="content-container flex flex-col w-full font-sans text-base tracking-wider">
         <div className="flex flex-col gap-y-10 xsmall:flex-row items-start justify-between py-20 sm:py-28 md:py-32">
-          <div className="mb-10">
+          {/* LOGO + PAYMENTS */}
+          <div className="mb-10 min-w-[180px]">
             <LocalizedClientLink
               href="/"
               className="text-xl tracking-wider uppercase text-ui-fg-subtle hover:text-ui-fg-base"
             >
               Gmorkl Store
             </LocalizedClientLink>
-
             <div className="mt-6">
               <img
                 src="/icons/payments.png"
@@ -32,9 +32,11 @@ export default async function Footer() {
             </div>
           </div>
 
-          <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
+          {/* CATEGORIES & COLLECTIONS & STATIC */}
+          <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider w-full">
+            {/* Categories */}
             {product_categories && product_categories.length > 0 && (
-              <div className="flex flex-col gap-y-2">
+              <div className="flex flex-col gap-y-2 min-w-[150px]">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
                 <ul className="grid grid-cols-1 gap-2" data-testid="footer-categories">
                   {product_categories.slice(0, 6).map((c) => {
@@ -76,8 +78,9 @@ export default async function Footer() {
               </div>
             )}
 
+            {/* Collections */}
             {collections && collections.length > 0 && (
-              <div className="flex flex-col gap-y-2">
+              <div className="flex flex-col gap-y-2 min-w-[150px]">
                 <span className="uppercase text-ui-fg-base text-sm">Collections</span>
                 <ul
                   className={clx("grid grid-cols-1 gap-2 text-ui-fg-subtle text-sm", {
@@ -98,7 +101,8 @@ export default async function Footer() {
               </div>
             )}
 
-            <div className="flex flex-col gap-y-2">
+            {/* Static Links */}
+            <div className="flex flex-col gap-y-2 min-w-[150px]">
               <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
                 <li>
@@ -153,6 +157,7 @@ export default async function Footer() {
           </div>
         </div>
 
+        {/* BOTTOM LINE */}
         <div className="flex w-full mb-16 justify-between text-ui-fg-muted">
           <Text className="text-sm tracking-wide uppercase">
             © {new Date().getFullYear()} Gmorkl Store. All rights reserved.
