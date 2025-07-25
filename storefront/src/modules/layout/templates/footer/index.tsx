@@ -12,18 +12,24 @@ export default async function Footer() {
   return (
     <footer className="border-t border-ui-border-base w-full">
       <div className="content-container flex flex-col w-full font-sans text-base tracking-wider">
-        <div className="flex flex-col gap-y-6 xsmall:flex-row items-start justify-between py-40">
-          <div>
+        <div className="flex flex-col gap-y-10 xsmall:flex-row items-start justify-between py-20 sm:py-28 md:py-32">
+          <div className="mb-10">
             <LocalizedClientLink
               href="/"
-              className="text-lg tracking-wider uppercase text-ui-fg-subtle hover:text-ui-fg-base"
+              className="text-xl tracking-wider uppercase text-ui-fg-subtle hover:text-ui-fg-base"
             >
               Gmorkl Store
             </LocalizedClientLink>
+
+            <div className="flex gap-4 mt-6">
+              <img src="/icons/visa.svg" alt="Visa" className="w-8 h-8" />
+              <img src="/icons/mastercard.svg" alt="Mastercard" className="w-8 h-8" />
+              <img src="/icons/paypal.svg" alt="PayPal" className="w-8 h-8" />
+              <img src="/icons/bank.svg" alt="Bank Transfer" className="w-8 h-8" />
+            </div>
           </div>
 
           <div className="gap-10 md:gap-x-16 grid grid-cols-2 sm:grid-cols-3 text-base tracking-wider">
-            {/* Categories */}
             {product_categories && product_categories.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Categories</span>
@@ -66,7 +72,6 @@ export default async function Footer() {
               </div>
             )}
 
-            {/* Collections */}
             {collections && collections.length > 0 && (
               <div className="flex flex-col gap-y-2">
                 <span className="uppercase text-ui-fg-base text-sm">Collections</span>
@@ -92,24 +97,32 @@ export default async function Footer() {
               </div>
             )}
 
-            {/* GMORKL Links */}
             <div className="flex flex-col gap-y-2">
               <span className="uppercase text-ui-fg-base text-sm">GMORKL</span>
               <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle text-sm">
                 <li>
-                  <LocalizedClientLink
-                    href="/about"
-                    className="hover:text-ui-fg-base"
-                  >
+                  <LocalizedClientLink href="/about" className="hover:text-ui-fg-base">
                     About
                   </LocalizedClientLink>
                 </li>
                 <li>
-                  <LocalizedClientLink
-                    href="/gallery"
-                    className="hover:text-ui-fg-base"
-                  >
+                  <LocalizedClientLink href="/gallery" className="hover:text-ui-fg-base">
                     Gallery
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/impressum" className="hover:text-ui-fg-base">
+                    Impressum
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/datenschutz" className="hover:text-ui-fg-base">
+                    Datenschutz
+                  </LocalizedClientLink>
+                </li>
+                <li>
+                  <LocalizedClientLink href="/rueckgabe" className="hover:text-ui-fg-base">
+                    Rückgabe
                   </LocalizedClientLink>
                 </li>
                 <li>
