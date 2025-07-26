@@ -18,7 +18,7 @@ export default function DatenschutzPage() {
         Maria Rodigina Freischaffende Designerin und Künstlerin<br />
         Simon-Meister-Str. 24<br />
         50733 Köln<br />
-        kontakt@gmorkl.de
+        weare@gmorkl.de
       </p>
 
       <h2 className="text-lg font-semibold mt-10 mb-2">2. Erhebung und Verarbeitung personenbezogener Daten</h2>
@@ -61,7 +61,7 @@ export default function DatenschutzPage() {
       <h2 className="text-lg font-semibold mt-10 mb-2">8. Kontakt für Datenschutzanfragen</h2>
       <p>
         Bei Fragen zur Erhebung, Verarbeitung oder Nutzung Ihrer personenbezogenen Daten, wenden Sie sich bitte an:<br />
-        kontakt@gmorkl.de
+        weare@gmorkl.de
       </p>
     </div>
   )
