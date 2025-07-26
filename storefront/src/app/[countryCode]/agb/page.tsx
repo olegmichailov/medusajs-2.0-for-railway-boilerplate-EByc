@@ -64,7 +64,7 @@ export default function AgbPage() {
         Maria Rodigina Freischaffende Designerin und Künstlerin<br />
         Simon-Meister-Str. 24<br />
         50733 Köln<br />
-        kontakt@gmorkl.de<br />
+        weare@gmorkl.de<br />
         Tel.: +49 174 9482074
       </p>
     </div>
