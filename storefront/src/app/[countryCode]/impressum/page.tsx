@@ -22,7 +22,7 @@ export default function ImpressumPage() {
       <p className="mb-6">
         Kontakt:<br />
         Telefon: <a href="tel:+491749482074" className="underline hover:text-ui-fg-base">+49 174 9482074</a><br />
-        E-Mail: <a href="mailto:kontakt@gmorkl.de" className="underline hover:text-ui-fg-base">kontakt@gmorkl.de</a><br />
+        E-Mail: <a href="mailto:weare@gmorkl.de" className="underline hover:text-ui-fg-base">weare@gmorkl.de</a><br />
         Instagram: <a href="https://www.instagram.com/gmorkl/" target="_blank" rel="noopener noreferrer" className="underline hover:text-ui-fg-base">@gmorkl</a>
       </p>
 
