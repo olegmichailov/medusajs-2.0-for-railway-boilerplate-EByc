@@ -113,6 +113,16 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
+  // 👇 Временно: лог всех payment methods из Stripe/Medusa
+  useEffect(() => {
+    if (availablePaymentMethods?.length) {
+      console.log(
+        "Available payment methods:",
+        availablePaymentMethods.map((m) => m.provider_id)
+      )
+    }
+  }, [availablePaymentMethods])
+
   return (
     <div className="bg-white">
       <div className="flex flex-row items-center justify-between mb-6">
@@ -143,7 +153,7 @@ const Payment = ({
       </div>
       <div>
         <div className={isOpen ? "block" : "hidden"}>
-          {!paidByGiftcard && availablePaymentMethods?.length && (
+          {!paidByGiftcard && availablePaymentMethods?.length > 0 && (
             <>
               <RadioGroup
                 value={selectedPaymentMethod}
@@ -217,7 +227,7 @@ const Payment = ({
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
+              ? "Enter card details"
               : "Continue to review"}
           </Button>
         </div>
