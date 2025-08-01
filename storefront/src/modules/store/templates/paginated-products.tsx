@@ -21,25 +21,17 @@ export default function PaginatedProducts({
   categoryId,
   productsIds,
   countryCode,
+  columns,
 }: {
   sortBy?: SortOptions
   collectionId?: string
   categoryId?: string
   productsIds?: string[]
   countryCode: string
+  columns: number
 }) {
-  const [columns, setColumns] = useState(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
-  const [isMobile, setIsMobile] = useState(false)
-
-  useEffect(() => {
-    const mobile = window.innerWidth < 640
-    setIsMobile(mobile)
-    setColumns(mobile ? 1 : 2)
-  }, [])
-
-  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -54,7 +46,6 @@ export default function PaginatedProducts({
       if (productsIds) queryParams["id"] = productsIds
       if (sortBy === "created_at") queryParams["order"] = "created_at"
 
-      // Задаём лимит достаточно большой, чтобы загрузить все товары (например, 1000)
       queryParams["limit"] = 1000
       queryParams["offset"] = 0
 
@@ -83,41 +74,20 @@ export default function PaginatedProducts({
       : "grid-cols-4"
 
   return (
-    <>
-      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
-        <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
-        <div className="flex gap-1 ml-auto">
-          {columnOptions.map((col) => (
-            <button
-              key={col}
-              onClick={() => setColumns(col)}
-              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
-                columns === col
-                  ? "bg-black text-white border-black"
-                  : "bg-white text-black border-gray-300 hover:border-black"
-              }`}
-            >
-              {col}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
-        data-testid="products-list"
-      >
-        {products.map((p, i) => (
-          <li key={p.id}>
-            <ProductPreview
-              product={p}
-              region={region}
-              index={i}
-              preload={i < 4}
-            />
-          </li>
-        ))}
-      </ul>
-    </>
+    <ul
+      className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
+      data-testid="products-list"
+    >
+      {products.map((p, i) => (
+        <li key={p.id}>
+          <ProductPreview
+            product={p}
+            region={region}
+            index={i}
+            preload={i < columns * 2}
+          />
+        </li>
+      ))}
+    </ul>
   )
 }
