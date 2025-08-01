@@ -11,6 +11,8 @@ type PaginatedProductsParams = {
   category_id?: string[]
   id?: string[]
   order?: string
+  limit?: number
+  offset?: number
 }
 
 export default function PaginatedProducts({
@@ -51,6 +53,10 @@ export default function PaginatedProducts({
       if (categoryId) queryParams["category_id"] = [categoryId]
       if (productsIds) queryParams["id"] = productsIds
       if (sortBy === "created_at") queryParams["order"] = "created_at"
+
+      // Задаём лимит достаточно большой, чтобы загрузить все товары (например, 1000)
+      queryParams["limit"] = 1000
+      queryParams["offset"] = 0
 
       const {
         response: { products: newProducts },
@@ -103,7 +109,12 @@ export default function PaginatedProducts({
       >
         {products.map((p, i) => (
           <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
+            <ProductPreview
+              product={p}
+              region={region}
+              index={i}
+              preload={i < 4}
+            />
           </li>
         ))}
       </ul>
