@@ -4,8 +4,8 @@ import { useEffect, useState } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
-import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
+import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
 type PaginatedProductsParams = {
   collection_id?: string[]
