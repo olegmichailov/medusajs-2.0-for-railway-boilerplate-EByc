@@ -1,11 +1,20 @@
 "use client"
 
-import { useEffect, useState, Suspense } from "react"
+import { useEffect, useState } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
+
+type PaginatedProductsParams = {
+  collection_id?: string[]
+  category_id?: string[]
+  id?: string[]
+  order?: string
+  limit?: number
+  offset?: number
+}
 
 export default function PaginatedProducts({
   sortBy,
@@ -13,60 +22,51 @@ export default function PaginatedProducts({
   categoryId,
   productsIds,
   countryCode,
+  columns,
 }: {
   sortBy?: SortOptions
   collectionId?: string
   categoryId?: string
   productsIds?: string[]
   countryCode: string
+  columns: number
 }) {
-  const [columns, setColumns] = useState(1)
-  const [products, setProducts] = useState<any[] | null>(null)
+  const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
-  const [isMobile, setIsMobile] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const mobile = window.innerWidth < 640
-      setIsMobile(mobile)
-      setColumns(mobile ? 1 : 2)
-    }
-  }, [])
+    const fetchAll = async () => {
+      setIsLoading(true)
 
-  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
+      const regionData = await getRegion(countryCode)
+      if (!regionData) return
+      setRegion(regionData)
 
-  useEffect(() => {
-    const fetchAllProducts = async () => {
-      try {
-        const regionData = await getRegion(countryCode)
-        if (!regionData) return
-        setRegion(regionData)
+      const queryParams: PaginatedProductsParams = {}
 
-        const queryParams: any = {
-          limit: 24,
-          offset: 0,
-        }
+      if (collectionId) queryParams["collection_id"] = [collectionId]
+      if (categoryId) queryParams["category_id"] = [categoryId]
+      if (productsIds) queryParams["id"] = productsIds
+      if (sortBy === "created_at") queryParams["order"] = "created_at"
 
-        if (collectionId) queryParams.collection_id = [collectionId]
-        if (categoryId) queryParams.category_id = [categoryId]
-        if (productsIds) queryParams.id = productsIds
-        if (sortBy === "created_at") queryParams.order = "created_at"
+      queryParams["limit"] = 1000
+      queryParams["offset"] = 0
 
-        const { response } = await getProductsListWithSort({
-          page: 1,
-          queryParams,
-          sortBy,
-          countryCode,
-        })
+      const {
+        response: { products: newProducts },
+      } = await getProductsListWithSort({
+        page: 1,
+        queryParams,
+        sortBy,
+        countryCode,
+      })
 
-        const allProducts = response?.products || []
-        setProducts(allProducts)
-      } catch (err) {
-        console.error("Fetch all products error:", err)
-      }
+      setProducts(newProducts)
+      setIsLoading(false)
     }
 
-    fetchAllProducts()
+    fetchAll()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
   const gridColsClass =
@@ -78,45 +78,25 @@ export default function PaginatedProducts({
       ? "grid-cols-3"
       : "grid-cols-4"
 
-  if (!region) return null
+  if (isLoading) {
+    return <SkeletonProductGrid columns={columns} />
+  }
 
   return (
-    <>
-      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
-        <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
-        <div className="flex gap-1 ml-auto">
-          {columnOptions.map((col) => (
-            <button
-              key={`col-${col}`}
-              onClick={() => setColumns(col)}
-              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
-                columns === col
-                  ? "bg-black text-white border-black"
-                  : "bg-white text-black border-gray-300 hover:border-black"
-              }`}
-            >
-              {col}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Suspense fallback={<SkeletonProductGrid columns={columns} />}>
-        {products ? (
-          <ul
-            className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
-            data-testid="products-list"
-          >
-            {products.map((p, i) => (
-              <li key={`product-${p.id}-${i}`}>
-                <ProductPreview product={p} region={region} isFeatured={false} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <SkeletonProductGrid columns={columns} />
-        )}
-      </Suspense>
-    </>
+    <ul
+      className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
+      data-testid="products-list"
+    >
+      {products.map((p, i) => (
+        <li key={p.id}>
+          <ProductPreview
+            product={p}
+            region={region}
+            index={i}
+            preload={i < columns * 2}
+          />
+        </li>
+      ))}
+    </ul>
   )
 }
