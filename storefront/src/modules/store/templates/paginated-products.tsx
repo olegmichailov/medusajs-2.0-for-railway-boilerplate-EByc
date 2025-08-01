@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
-import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
 type PaginatedProductsParams = {
@@ -12,8 +11,6 @@ type PaginatedProductsParams = {
   category_id?: string[]
   id?: string[]
   order?: string
-  limit?: number
-  offset?: number
 }
 
 export default function PaginatedProducts({
@@ -22,23 +19,28 @@ export default function PaginatedProducts({
   categoryId,
   productsIds,
   countryCode,
-  columns,
 }: {
   sortBy?: SortOptions
   collectionId?: string
   categoryId?: string
   productsIds?: string[]
   countryCode: string
-  columns: number
 }) {
+  const [columns, setColumns] = useState(1)
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const mobile = window.innerWidth < 640
+    setIsMobile(mobile)
+    setColumns(mobile ? 1 : 2)
+  }, [])
+
+  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
   useEffect(() => {
     const fetchAll = async () => {
-      setIsLoading(true)
-
       const regionData = await getRegion(countryCode)
       if (!regionData) return
       setRegion(regionData)
@@ -50,9 +52,6 @@ export default function PaginatedProducts({
       if (productsIds) queryParams["id"] = productsIds
       if (sortBy === "created_at") queryParams["order"] = "created_at"
 
-      queryParams["limit"] = 1000
-      queryParams["offset"] = 0
-
       const {
         response: { products: newProducts },
       } = await getProductsListWithSort({
@@ -63,7 +62,6 @@ export default function PaginatedProducts({
       })
 
       setProducts(newProducts)
-      setIsLoading(false)
     }
 
     fetchAll()
@@ -78,25 +76,37 @@ export default function PaginatedProducts({
       ? "grid-cols-3"
       : "grid-cols-4"
 
-  if (isLoading) {
-    return <SkeletonProductGrid columns={columns} />
-  }
-
   return (
-    <ul
-      className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
-      data-testid="products-list"
-    >
-      {products.map((p, i) => (
-        <li key={p.id}>
-          <ProductPreview
-            product={p}
-            region={region}
-            index={i}
-            preload={i < columns * 2}
-          />
-        </li>
-      ))}
-    </ul>
+    <>
+      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
+        <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
+        <div className="flex gap-1 ml-auto">
+          {columnOptions.map((col) => (
+            <button
+              key={col}
+              onClick={() => setColumns(col)}
+              className={w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
+                columns === col
+                  ? "bg-black text-white border-black"
+                  : "bg-white text-black border-gray-300 hover:border-black"
+              }}
+            >
+              {col}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <ul
+        className={grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0}
+        data-testid="products-list"
+      >
+        {products.map((p, i) => (
+          <li key={p.id}>
+            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
