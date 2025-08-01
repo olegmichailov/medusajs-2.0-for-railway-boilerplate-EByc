@@ -75,4 +75,4 @@ const StoreTemplate = ({
   )
 }
 
-export default StoreTemplate
+export default StoreTemplateate
