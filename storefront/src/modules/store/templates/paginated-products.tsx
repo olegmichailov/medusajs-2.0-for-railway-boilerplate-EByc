@@ -5,6 +5,7 @@ import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
+import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 
 type PaginatedProductsParams = {
   collection_id?: string[]
@@ -32,9 +33,12 @@ export default function PaginatedProducts({
 }) {
   const [products, setProducts] = useState<any[]>([])
   const [region, setRegion] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const fetchAll = async () => {
+      setIsLoading(true)
+
       const regionData = await getRegion(countryCode)
       if (!regionData) return
       setRegion(regionData)
@@ -59,6 +63,7 @@ export default function PaginatedProducts({
       })
 
       setProducts(newProducts)
+      setIsLoading(false)
     }
 
     fetchAll()
@@ -72,6 +77,10 @@ export default function PaginatedProducts({
       : columns === 3
       ? "grid-cols-3"
       : "grid-cols-4"
+
+  if (isLoading) {
+    return <SkeletonProductGrid columns={columns} />
+  }
 
   return (
     <ul
