@@ -11,6 +11,8 @@ type PaginatedProductsParams = {
   category_id?: string[]
   id?: string[]
   order?: string
+  limit?: number
+  offset?: number
 }
 
 export default function PaginatedProducts({
@@ -52,6 +54,10 @@ export default function PaginatedProducts({
       if (productsIds) queryParams["id"] = productsIds
       if (sortBy === "created_at") queryParams["order"] = "created_at"
 
+      // Задаём лимит достаточно большой, чтобы загрузить все товары (например, 1000)
+      queryParams["limit"] = 1000
+      queryParams["offset"] = 0
+
       const {
         response: { products: newProducts },
       } = await getProductsListWithSort({
@@ -85,11 +91,11 @@ export default function PaginatedProducts({
             <button
               key={col}
               onClick={() => setColumns(col)}
-              className={w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
+              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
                 columns === col
                   ? "bg-black text-white border-black"
                   : "bg-white text-black border-gray-300 hover:border-black"
-              }}
+              }`}
             >
               {col}
             </button>
@@ -98,12 +104,17 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
           <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
+            <ProductPreview
+              product={p}
+              region={region}
+              index={i}
+              preload={i < 4}
+            />
           </li>
         ))}
       </ul>
