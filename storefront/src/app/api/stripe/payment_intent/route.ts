@@ -1,25 +1,31 @@
+// src/app/api/payment_intent/route.ts
+
 import { NextResponse } from "next/server"
-import { stripe } from "@/lib/stripe"
+import { stripe } from "medusa-payment-stripe"
+import { medusaClient } from "@lib/config"
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
+    const { cart_id } = await req.json()
 
-    const params: Stripe.Checkout.SessionCreateParams = {
-      payment_method_types: ["card", "apple_pay", "google_pay"], // будет заменено в Payment Element автоматически
-      mode: "payment",
-      line_items: body.line_items,
-      success_url: body.success_url,
-      cancel_url: body.cancel_url,
-      currency: body.currency || "eur",
+    const response = await medusaClient.carts.retrieve(cart_id)
+    const cart = response.cart
+
+    if (!cart) {
+      return NextResponse.json({ error: "Cart not found" }, { status: 404 })
     }
 
-    const session = await stripe.checkout.sessions.create(params)
+    const paymentSession = cart.payment_sessions?.find(
+      (session) => session.provider_id === "stripe"
+    )
 
-    return NextResponse.json({ session })
-  } catch (error) {
-    console.error("Stripe error:", error)
-    return new NextResponse("Internal Error", { status: 500 })
+    if (!paymentSession?.data?.client_secret) {
+      return NextResponse.json({ error: "Stripe session not found" }, { status: 400 })
+    }
+
+    return NextResponse.json({ client_secret: paymentSession.data.client_secret })
+  } catch (error: any) {
+    console.error("Stripe Intent Error:", error)
+    return NextResponse.json({ error: error.message || "Unknown error" }, { status: 500 })
   }
 }
-
