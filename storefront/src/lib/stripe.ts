@@ -1,7 +1,2 @@
-import Stripe from "stripe"
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2022-11-15",
-})
-
-export default stripe
+// Stripe is not used in this project — disabled for safety
+export default null
