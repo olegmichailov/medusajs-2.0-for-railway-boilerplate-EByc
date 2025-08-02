@@ -1,6 +1,4 @@
 import { Container, clx } from "@medusajs/ui"
-import Image from "next/image"
-import React from "react"
 import PlaceholderImage from "@modules/common/icons/placeholder-image"
 
 type ThumbnailProps = {
@@ -24,12 +22,13 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
 }) => {
   const imageUrl = thumbnail || images?.[0]?.url
 
-  // 👉 локальный путь (ожидаем, что в /public/products/... лежат те же имена файлов)
+  // 👉 локальный путь
   const localPath = imageUrl?.includes("products/")
     ? `/${imageUrl.split("products/")[1]}`
     : undefined
 
   const useLocal = localPath ? true : false
+  const finalSrc = useLocal ? localPath : imageUrl
 
   return (
     <Container
@@ -44,34 +43,20 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
       )}
       data-testid={dataTestid}
     >
-      <ImageOrPlaceholder image={useLocal ? localPath : imageUrl} size={size} index={index} />
+      {finalSrc ? (
+        <img
+          src={finalSrc}
+          alt="Thumbnail"
+          className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
+          draggable={false}
+          loading={index < 4 ? "eager" : "lazy"}
+        />
+      ) : (
+        <div className="w-full h-full absolute inset-0 flex items-center justify-center">
+          <PlaceholderImage size={size === "small" ? 16 : 24} />
+        </div>
+      )}
     </Container>
-  )
-}
-
-const ImageOrPlaceholder = ({
-  image,
-  size,
-  index,
-}: Pick<ThumbnailProps, "size"> & { image?: string; index: number }) => {
-  return image ? (
-    <Image
-      src={image}
-      alt="Thumbnail"
-      className="absolute inset-0 object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
-      draggable={false}
-      loading={index < 4 ? "eager" : "lazy"}
-      placeholder="blur"
-      blurDataURL="/placeholder.png"
-      quality={70}
-      priority={index < 4}
-      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
-      fill
-    />
-  ) : (
-    <div className="w-full h-full absolute inset-0 flex items-center justify-center">
-      <PlaceholderImage size={size === "small" ? 16 : 24} />
-    </div>
   )
 }
 
