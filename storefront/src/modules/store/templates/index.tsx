@@ -1,8 +1,16 @@
+// БЕЗ "use client"
 import { Suspense } from "react"
+import dynamic from "next/dynamic"
+
 import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-grid"
 import RefinementList from "@modules/store/components/refinement-list"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
-import PaginatedProducts from "./paginated-products"
+
+// ❗ Ключевой момент — dynamic import
+const PaginatedProducts = dynamic(
+  () => import("./paginated-products"),
+  { ssr: false }
+)
 
 const StoreTemplate = ({
   sortBy,
@@ -29,6 +37,7 @@ const StoreTemplate = ({
         >
           All Products
         </h1>
+
         <Suspense fallback={<SkeletonProductGrid />}>
           <PaginatedProducts
             sortBy={sort}
@@ -40,3 +49,5 @@ const StoreTemplate = ({
     </div>
   )
 }
+
+export default StoreTemplate
