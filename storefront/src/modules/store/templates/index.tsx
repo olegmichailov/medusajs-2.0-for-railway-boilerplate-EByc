@@ -40,5 +40,3 @@ const StoreTemplate = ({
     </div>
   )
 }
-
-export default StoreTemplate
