@@ -1,3 +1,4 @@
+// storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
@@ -10,6 +11,7 @@ import {
   PaymentElement,
   useStripe,
   useElements,
+  PaymentRequestButtonElement,
 } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
@@ -34,6 +36,9 @@ const Payment = ({
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
+
+  const [canUsePaymentRequest, setCanUsePaymentRequest] = useState(false)
+  const [paymentRequest, setPaymentRequest] = useState<any>(null)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -109,6 +114,29 @@ const Payment = ({
     }
   }, [availablePaymentMethods])
 
+  // 💳 Stripe Payment Request Button (Google Pay, Apple Pay, etc.)
+  useEffect(() => {
+    if (stripe && elements && cart && isStripe) {
+      const pr = stripe.paymentRequest({
+        country: "DE",
+        currency: "eur",
+        total: {
+          label: "Total",
+          amount: cart.total || 500, // в центах
+        },
+        requestPayerName: true,
+        requestPayerEmail: true,
+      })
+
+      pr.canMakePayment().then((result) => {
+        if (result) {
+          setCanUsePaymentRequest(true)
+          setPaymentRequest(pr)
+        }
+      })
+    }
+  }, [stripe, elements, cart, isStripe])
+
   return (
     <div className="bg-white">
       <div className="flex flex-row items-center justify-between mb-6">
@@ -167,6 +195,16 @@ const Payment = ({
                     Choose payment method:
                   </Text>
                   <PaymentElement />
+                  {canUsePaymentRequest && paymentRequest && (
+                    <div className="mt-6">
+                      <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                        Or pay with:
+                      </Text>
+                      <PaymentRequestButtonElement
+                        options={{ paymentRequest }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </>
