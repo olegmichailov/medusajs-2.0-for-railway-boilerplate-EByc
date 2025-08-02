@@ -32,7 +32,7 @@ const medusaConfig = {
     databaseLogging: false,
     redisUrl: REDIS_URL,
     workerMode: WORKER_MODE,
-    cors: "https://gmorkl.de", // ✅ ЭТО ДОБАВЛЕНО: фикс CORS-ошибки
+    cors: "https://gmorkl.de",
     http: {
       adminCors: `${ADMIN_CORS},https://gmorkl.de`,
       authCors: `${AUTH_CORS},https://gmorkl.de`,
@@ -124,6 +124,7 @@ const medusaConfig = {
             options: {
               apiKey: STRIPE_API_KEY,
               webhookSecret: STRIPE_WEBHOOK_SECRET,
+              payment_element: true // ✅ ключевая строка
             },
           },
         ],
