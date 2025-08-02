@@ -11,28 +11,30 @@ const ImageGallery = ({ images }: ImageGalleryProps) => {
     <div className="flex items-start relative">
       <div className="flex flex-col flex-1 small:mx-16 gap-y-4">
         {images.map((image, index) => {
+          if (!image?.url) return null // 👈 безопасная проверка
+
           const isPriority = index === 0
+          const key = image.id ?? `image-${index}`
+
           return (
             <Container
-              key={image.id}
+              key={key}
               className="relative aspect-[29/34] w-full overflow-hidden bg-ui-bg-subtle"
-              id={image.id}
+              id={image.id ?? undefined} // 👈 безопасный id
             >
-              {!!image.url && (
-                <Image
-                  src={image.url}
-                  alt={`Product image ${index + 1}`}
-                  fill
-                  // 👇 priority только для первого
-                  priority={isPriority}
-                  // 👇 остальные только по запросу
-                  loading={isPriority ? "eager" : "lazy"}
-                  // 👇 sizes влияет на адаптивную загрузку
-                  sizes="(max-width: 576px) 100vw, (max-width: 768px) 60vw, 800px"
-                  style={{ objectFit: "cover" }}
-                  unoptimized={false} // можно убрать, если используешь свой CDN
-                />
-              )}
+              <Image
+                src={image.url}
+                alt={`Product image ${index + 1}`}
+                fill
+                // 👇 priority только для первого
+                priority={isPriority}
+                // 👇 остальные только по запросу
+                loading={isPriority ? "eager" : "lazy"}
+                // 👇 sizes влияет на адаптивную загрузку
+                sizes="(max-width: 576px) 100vw, (max-width: 768px) 60vw, 800px"
+                style={{ objectFit: "cover" }}
+                unoptimized={false} // можно убрать, если используешь свой CDN
+              />
             </Container>
           )
         })}
