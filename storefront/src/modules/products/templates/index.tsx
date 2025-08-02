@@ -1,7 +1,4 @@
-"use client"
-
 import React, { Suspense } from "react"
-
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
 import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
@@ -10,20 +7,13 @@ import RelatedProducts from "@modules/products/components/related-products"
 import ProductInfo from "@modules/products/templates/product-info"
 import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
 import { notFound } from "next/navigation"
-import ProductActionsWrapper from "./product-actions-wrapper"
+import dynamic from "next/dynamic"
 import { HttpTypes } from "@medusajs/types"
 
-// Новый ленивый импорт (если нужно добавить ещё компонентов позже)
-const LazyProductInfo = ({ product }: { product: HttpTypes.StoreProduct }) => (
-  <Suspense fallback={<div className="h-10">Loading product info...</div>}>
-    <ProductInfo product={product} />
-  </Suspense>
-)
-
-const LazyProductTabs = ({ product }: { product: HttpTypes.StoreProduct }) => (
-  <Suspense fallback={<div className="h-10">Loading tabs...</div>}>
-    <ProductTabs product={product} />
-  </Suspense>
+// 👉 Только ProductActionsWrapper клиентский, подгружается динамически
+const ProductActionsWrapper = dynamic(
+  () => import("./product-actions-wrapper"),
+  { ssr: false }
 )
 
 type ProductTemplateProps = {
@@ -49,16 +39,16 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
       >
         {/* Левая колонка — инфо */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
-          <LazyProductInfo product={product} />
-          <LazyProductTabs product={product} />
+          <ProductInfo product={product} />
+          <ProductTabs product={product} />
         </div>
 
-        {/* Галерея изображений с приоритетом на первые 2 изображения */}
+        {/* Галерея изображений */}
         <div className="block w-full relative">
           <ImageGallery
             images={product?.images || []}
             preloadFirst
-            preloadCount={2} // <= это важное изменение
+            preloadCount={2}
           />
         </div>
 
