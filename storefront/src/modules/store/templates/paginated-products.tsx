@@ -136,11 +136,11 @@ export default function PaginatedProducts({
             <button
               key={col}
               onClick={() => setColumns(col)}
-              className={w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
+              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
                 columns === col
                   ? "bg-black text-white border-black"
                   : "bg-white text-black border-gray-300 hover:border-black"
-              }}
+              }`}
             >
               {col}
             </button>
@@ -149,7 +149,7 @@ export default function PaginatedProducts({
       </div>
 
       <ul
-        className={grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0}
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
         {products.map((p, i) => (
