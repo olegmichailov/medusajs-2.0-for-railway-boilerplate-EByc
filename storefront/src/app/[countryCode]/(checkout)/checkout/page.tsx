@@ -1,3 +1,5 @@
+// storefront/src/app/[countryCode]/(checkout)/checkout/page.tsx
+
 "use server"
 
 import { notFound } from "next/navigation"
@@ -58,9 +60,19 @@ export default async function CheckoutPage() {
   const cart = await fetchCartWithSessions()
   const customer = await getCustomer()
 
+  // ВАЖНО! Получаем только если есть сессии!
+  const paymentSession = cart?.payment_collection?.payment_sessions?.find(
+    (s) => s.provider_id === "stripe" && s.data?.client_secret
+  )
+
+  // Не даём рендериться Stripe раньше времени
+  if (!paymentSession && cart?.payment_collection?.payment_sessions?.length) {
+    return <div>Loading payment session...</div>
+  }
+
   return (
     <div className="grid grid-cols-1 small:grid-cols-[1fr_416px] content-container gap-x-40 py-12">
-      <Wrapper cart={cart}>
+      <Wrapper cart={cart} paymentSession={paymentSession}>
         <CheckoutForm cart={cart} customer={customer} />
       </Wrapper>
       <CheckoutSummary cart={cart} />
