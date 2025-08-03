@@ -20,25 +20,26 @@ const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const paymentSession = cart?.payment_collection?.payment_sessions?.find(
+  const paymentSession = cart.payment_collection?.payment_sessions?.find(
     (s) => s.status === "pending"
   )
 
-  if (!paymentSession) {
-    return <div className="text-gray-500 text-sm">Initializing payment...</div>
-  }
+  const isStripeValid =
+    isStripe(paymentSession?.provider_id) &&
+    stripePromise &&
+    paymentSession?.data?.client_secret
 
-  if (isStripe(paymentSession.provider_id) && stripePromise) {
-    const clientSecret = paymentSession?.data?.client_secret
-    if (!clientSecret) {
-      return <div className="text-gray-500 text-sm">Waiting for Stripe session...</div>
-    }
+  const isPaypalValid =
+    isPaypal(paymentSession?.provider_id) &&
+    paypalClientId &&
+    cart?.currency_code
 
+  if (isStripeValid) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
           paymentSession={paymentSession}
-          stripeKey={stripeKey}
+          stripeKey={stripeKey!}
           stripePromise={stripePromise}
         >
           {children}
@@ -47,12 +48,12 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  if (isPaypal(paymentSession.provider_id) && paypalClientId && cart) {
+  if (isPaypalValid) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": paypalClientId,
-          currency: cart?.currency_code.toUpperCase(),
+          "client-id": paypalClientId!,
+          currency: cart.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
@@ -62,7 +63,12 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  return <div className="text-gray-500 text-sm">No supported payment session found.</div>
+  // Временно не отображаем форму, если сессия Stripe или Paypal некорректна
+  return (
+    <div className="text-sm text-red-500">
+      Unable to load payment session. Please refresh or contact support.
+    </div>
+  )
 }
 
 export default Wrapper
