@@ -228,6 +228,23 @@ export async function initiatePaymentSession(
     .catch(medusaError)
 }
 
+/**
+ * ВАЖНО: Создание payment sessions для текущей корзины
+ */
+export async function createPaymentSessions(cartId: string) {
+  if (!cartId) {
+    throw new Error("No existing cart found, cannot create payment sessions")
+  }
+
+  return sdk.store.cart
+    .createPaymentSessions(cartId, {}, getAuthHeaders())
+    .then(({ cart }) => {
+      revalidateTag("cart")
+      return cart
+    })
+    .catch(medusaError)
+}
+
 export async function applyPromotions(codes: string[]) {
   const cartId = getCartId()
   if (!cartId) {
