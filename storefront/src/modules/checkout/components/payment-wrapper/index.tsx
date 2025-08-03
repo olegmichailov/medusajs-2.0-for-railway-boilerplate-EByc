@@ -1,49 +1,78 @@
 "use client"
 
-import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
-import { Elements } from "@stripe/react-stripe-js"
+import { loadStripe } from "@stripe/stripe-js"
+import React, { createContext } from "react"
+import StripeWrapper from "./stripe-wrapper"
+import { PayPalScriptProvider } from "@paypal/react-paypal-js"
 import { HttpTypes } from "@medusajs/types"
+import { isPaypal, isStripe } from "@lib/constants"
 
-type StripeWrapperProps = {
-  paymentSession: HttpTypes.StorePaymentSession
-  stripeKey?: string
-  stripePromise: Promise<Stripe | null> | null
+type WrapperProps = {
+  cart: HttpTypes.StoreCart
   children: React.ReactNode
 }
 
-const StripeWrapper: React.FC<StripeWrapperProps> = ({
-  paymentSession,
-  stripeKey,
-  stripePromise,
-  children,
-}) => {
-  const options: StripeElementsOptions = {
-    clientSecret: paymentSession!.data?.client_secret as string | undefined,
-  }
+export const StripeContext = createContext(false)
 
-  if (!stripeKey) {
-    throw new Error(
-      "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
+const stripeKey = process.env.NEXT_PUBLIC_STRIPE_KEY
+const stripePromise = stripeKey ? loadStripe(stripeKey) : null
+
+const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+
+const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
+  // Находим Stripe сессию, если есть
+  const paymentSession =
+    cart.payment_collection?.payment_sessions?.find(
+      (s) => s.status === "pending" && isStripe(s.provider_id)
+    ) ?? null
+
+  // Показываем Stripe, только если сессия есть и есть client_secret!
+  if (
+    paymentSession &&
+    isStripe(paymentSession.provider_id) &&
+    stripePromise &&
+    paymentSession.data?.client_secret
+  ) {
+    return (
+      <StripeContext.Provider value={true}>
+        <StripeWrapper
+          paymentSession={paymentSession}
+          stripeKey={stripeKey}
+          stripePromise={stripePromise}
+        >
+          {children}
+        </StripeWrapper>
+      </StripeContext.Provider>
     )
   }
 
-  if (!stripePromise) {
-    throw new Error(
-      "Stripe promise is missing. Make sure you have provided a valid Stripe key."
+  // Показываем PayPal, если это paypal session и client id задан
+  const paypalSession =
+    cart.payment_collection?.payment_sessions?.find(
+      (s) => s.status === "pending" && isPaypal(s.provider_id)
+    ) ?? null
+
+  if (
+    paypalSession &&
+    paypalClientId &&
+    cart?.currency_code
+  ) {
+    return (
+      <PayPalScriptProvider
+        options={{
+          "client-id": paypalClientId,
+          currency: cart.currency_code.toUpperCase(),
+          intent: "authorize",
+          components: "buttons",
+        }}
+      >
+        {children}
+      </PayPalScriptProvider>
     )
   }
 
-  if (!paymentSession?.data?.client_secret) {
-    throw new Error(
-      "Stripe client secret is missing. Cannot initialize Stripe."
-    )
-  }
-
-  return (
-    <Elements options={options} stripe={stripePromise}>
-      {children}
-    </Elements>
-  )
+  // В остальных случаях — просто children (например, при оплате Gift Card или если сессии нет)
+  return <div>{children}</div>
 }
 
-export default StripeWrapper
+export default Wrapper
