@@ -34,7 +34,7 @@ export async function getOrSetCart(countryCode: string) {
   }
 
   if (!cart) {
-    const cartResp = await sdk.store.cart.create({ region_id: region.id })
+    const cartResp = await sdk.store.cart.create({ region_id: region.id }, {}, getAuthHeaders())
     cart = cartResp.cart
     setCartId(cart.id)
     revalidateTag("cart")
@@ -225,7 +225,18 @@ export async function initiatePaymentSession(
 
 export async function createPaymentSessions(cartId: string) {
   return await sdk.store.cart
-    .createPaymentSessions(cartId, {}, getAuthHeaders())
+    .createPaymentSessions(
+      cartId,
+      {
+        context: {
+          "x-publishable-key": process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+          "x-customer-id": "anonymous",
+          "x-currency": "eur",
+          "x-country": "de",
+        },
+      },
+      getAuthHeaders()
+    )
     .then(({ cart }) => {
       revalidateTag("cart")
       return cart
@@ -246,48 +257,14 @@ export async function applyPromotions(codes: string[]) {
     .catch(medusaError)
 }
 
-export async function applyGiftCard(code: string) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, { gift_cards: [{ code }] }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
-}
+export async function applyGiftCard(code: string) {}
 
-export async function removeDiscount(code: string) {
-  // const cartId = getCartId()
-  // if (!cartId) return "No cartId cookie found"
-  // try {
-  //   await deleteDiscount(cartId, code)
-  //   revalidateTag("cart")
-  // } catch (error: any) {
-  //   throw error
-  // }
-}
+export async function removeDiscount(code: string) {}
 
 export async function removeGiftCard(
   codeToRemove: string,
   giftCards: any[]
-  // giftCards: GiftCard[]
-) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, {
-  //       gift_cards: [...giftCards]
-  //         .filter((gc) => gc.code !== codeToRemove)
-  //         .map((gc) => ({ code: gc.code })),
-  //     }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
-}
+) {}
 
 export async function submitPromotionForm(
   currentState: unknown,
