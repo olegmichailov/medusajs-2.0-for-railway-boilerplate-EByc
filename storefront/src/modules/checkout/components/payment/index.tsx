@@ -1,135 +1,301 @@
 "use client"
-import React, { useContext, useEffect, useState } from "react"
-import { useRouter, usePathname } from "next/navigation"
-import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js"
-import { StripePaymentElementChangeEvent } from "@stripe/stripe-js"
-import { StripeContext } from "../payment-wrapper/stripe-wrapper"
-import { initiatePaymentSession } from "@lib/data/cart"
 
-// (Assuming useCart provides cart and checkout state like availablePaymentMethods, etc.)
-import { useCart } from "@lib/context/cart" 
+import { Button } from "@medusajs/ui"
+import { OnApproveActions, OnApproveData } from "@paypal/paypal-js"
+import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
+import { useElements, useStripe } from "@stripe/react-stripe-js"
+import React, { useState } from "react"
+import ErrorMessage from "../error-message"
+import Spinner from "@modules/common/icons/spinner"
+import { placeOrder } from "@lib/data/cart"
+import { HttpTypes } from "@medusajs/types"
+import { isManual, isPaypal, isStripe } from "@lib/constants"
 
-interface PaymentProps {
-  isOpen: boolean          // whether this Payment step is currently active/open
-  availablePaymentMethods: string[]  // list of available payment provider IDs (from region)
-  paidByGiftcard?: boolean // if the cart is fully paid by gift card
-  onPaymentCompleted?: () => void    // callback when payment step is completed (optional, likely handled in review step)
+type PaymentButtonProps = {
+  cart: HttpTypes.StoreCart
+  "data-testid": string
 }
 
-const Payment: React.FC<PaymentProps> = ({ isOpen, availablePaymentMethods, paidByGiftcard }) => {
-  const { cart } = useCart()
-  const router = useRouter()
-  const pathname = usePathname()
+const PaymentButton: React.FC<PaymentButtonProps> = ({
+  cart,
+  "data-testid": dataTestId,
+}) => {
+  const notReady =
+    !cart ||
+    !cart.shipping_address ||
+    !cart.billing_address ||
+    !cart.email ||
+    (cart.shipping_methods?.length ?? 0) < 1
 
-  // Stripe integration state
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [stripeComplete, setStripeComplete] = useState(false)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("")
+  // TODO: Add this once gift cards are implemented
+  // const paidByGiftcard =
+  //   cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
 
-  // Stripe context to know if Elements is ready
-  const stripeReady = useContext(StripeContext)
-  const stripe = stripeReady ? useStripe() : null
-  const elements = stripeReady ? useElements() : null
+  // if (paidByGiftcard) {
+  //   return <GiftCardPaymentButton />
+  // }
 
-  // Detect if a Stripe payment session is already active for this cart
-  const activeSession = cart?.payment_collection?.payment_sessions?.find(
-    (session: any) => session.provider_id === "pp_stripe_stripe"
-  )
+  const paymentSession = cart.payment_collection?.payment_sessions?.[0]
 
-  // Handle changes in the Payment Element (e.g. selecting payment method or form completion)
-  const handlePaymentElementChange = (event: StripePaymentElementChangeEvent) => {
-    if (event.value?.type) {
-      setSelectedPaymentMethod(event.value.type)
-    }
-    setStripeComplete(event.complete)
-    if (event.complete) {
-      setError(null)
-    }
+  switch (true) {
+    case isStripe(paymentSession?.provider_id):
+      return (
+        <StripePaymentButton
+          notReady={notReady}
+          cart={cart}
+          data-testid={dataTestId}
+        />
+      )
+    case isManual(paymentSession?.provider_id):
+      return (
+        <ManualTestPaymentButton notReady={notReady} data-testid={dataTestId} />
+      )
+    case isPaypal(paymentSession?.provider_id):
+      return (
+        <PayPalPaymentButton
+          notReady={notReady}
+          cart={cart}
+          data-testid={dataTestId}
+        />
+      )
+    default:
+      return <Button disabled>Select a payment method</Button>
   }
+}
 
-  // Create or ensure a Stripe Payment Session when entering the Payment step
-  const initStripe = async () => {
-    try {
-      await initiatePaymentSession(cart, { provider_id: "pp_stripe_stripe" })
-    } catch (err) {
-      console.error("Failed to initialize Stripe session:", err)
-      setError("Failed to initialize payment. Please try again.")
-    }
-  }
+const GiftCardPaymentButton = () => {
+  const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    // When the Payment step opens and no Stripe session exists, initialize it
-    if (!activeSession && isOpen) {
-      initStripe()
-    }
-  }, [activeSession, isOpen, cart])
-
-  // Helper to preserve existing query params and append/replace one
-  const createQueryString = (name: string, value: string) => {
-    const params = new URLSearchParams(window.location.search)
-    params.set(name, value)
-    return params.toString()
-  }
-
-  // Handle clicking the "Continue to review" button
-  const handleSubmit = async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      // Ensure Stripe.js is ready
-      if (!stripe || !elements) {
-        setError("Payment processing not ready. Please try again.")
-        return
-      }
-      // Submit the payment method details from the Payment Element (does not confirm payment yet)
-      await elements.submit().catch((err) => {
-        console.error(err)
-        setError(err.message || "An error occurred with the payment")
-        return
-      })
-      // Upon successful submission, proceed to the Review step
-      router.push(pathname + "?" + createQueryString("step", "review"), { scroll: false })
-    } catch (err: any) {
-      setError(err.message || "Unable to proceed. Please try again.")
-    } finally {
-      setIsLoading(false)
-    }
+  const handleOrder = async () => {
+    setSubmitting(true)
+    await placeOrder()
   }
 
   return (
-    <div className="payment-step">
-      {!paidByGiftcard && !!availablePaymentMethods?.length && stripeReady && (
-        <div className="mt-5 transition-all duration-150 ease-in-out">
-          <PaymentElement 
-            onChange={handlePaymentElementChange} 
-            options={{ layout: "accordion" }} 
-          />
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-4 text-red-500">
-          {error}
-        </div>
-      )}
-
-      <button
-        type="button"
-        className="btn btn-primary mt-6"
-        onClick={handleSubmit}
-        disabled={
-          isLoading || 
-          !stripeComplete || 
-          !stripe || 
-          !elements || 
-          (!selectedPaymentMethod && !paidByGiftcard)
-        }
-      >
-        {isLoading ? "Processing..." : "Continue to review"}
-      </button>
-    </div>
+    <Button
+      onClick={handleOrder}
+      isLoading={submitting}
+      data-testid="submit-order-button"
+    >
+      Place order
+    </Button>
   )
 }
 
-export default Payment
+const StripePaymentButton = ({
+  cart,
+  notReady,
+  "data-testid": dataTestId,
+}: {
+  cart: HttpTypes.StoreCart
+  notReady: boolean
+  "data-testid"?: string
+}) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const onPaymentCompleted = async () => {
+    await placeOrder()
+      .catch((err) => {
+        setErrorMessage(err.message)
+      })
+      .finally(() => {
+        setSubmitting(false)
+      })
+  }
+
+  const stripe = useStripe()
+  const elements = useElements()
+  const card = elements?.getElement("card")
+
+  const session = cart.payment_collection?.payment_sessions?.find(
+    (s) => s.status === "pending"
+  )
+
+  const disabled = !stripe || !elements ? true : false
+
+  const handlePayment = async () => {
+    setSubmitting(true)
+
+    if (!stripe || !elements || !card || !cart) {
+      setSubmitting(false)
+      return
+    }
+
+    await stripe
+      .confirmCardPayment(session?.data.client_secret as string, {
+        payment_method: {
+          card: card,
+          billing_details: {
+            name:
+              cart.billing_address?.first_name +
+              " " +
+              cart.billing_address?.last_name,
+            address: {
+              city: cart.billing_address?.city ?? undefined,
+              country: cart.billing_address?.country_code ?? undefined,
+              line1: cart.billing_address?.address_1 ?? undefined,
+              line2: cart.billing_address?.address_2 ?? undefined,
+              postal_code: cart.billing_address?.postal_code ?? undefined,
+              state: cart.billing_address?.province ?? undefined,
+            },
+            email: cart.email,
+            phone: cart.billing_address?.phone ?? undefined,
+          },
+        },
+      })
+      .then(({ error, paymentIntent }) => {
+        if (error) {
+          const pi = error.payment_intent
+
+          if (
+            (pi && pi.status === "requires_capture") ||
+            (pi && pi.status === "succeeded")
+          ) {
+            onPaymentCompleted()
+          }
+
+          setErrorMessage(error.message || null)
+          return
+        }
+
+        if (
+          (paymentIntent && paymentIntent.status === "requires_capture") ||
+          paymentIntent.status === "succeeded"
+        ) {
+          return onPaymentCompleted()
+        }
+
+        return
+      })
+  }
+
+  return (
+    <>
+      <Button
+        disabled={disabled || notReady}
+        onClick={handlePayment}
+        size="large"
+        isLoading={submitting}
+        data-testid={dataTestId}
+      >
+        Place order
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="stripe-payment-error-message"
+      />
+    </>
+  )
+}
+
+const PayPalPaymentButton = ({
+  cart,
+  notReady,
+  "data-testid": dataTestId,
+}: {
+  cart: HttpTypes.StoreCart
+  notReady: boolean
+  "data-testid"?: string
+}) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const onPaymentCompleted = async () => {
+    await placeOrder()
+      .catch((err) => {
+        setErrorMessage(err.message)
+      })
+      .finally(() => {
+        setSubmitting(false)
+      })
+  }
+
+  const session = cart.payment_collection?.payment_sessions?.find(
+    (s) => s.status === "pending"
+  )
+
+  const handlePayment = async (
+    _data: OnApproveData,
+    actions: OnApproveActions
+  ) => {
+    actions?.order
+      ?.authorize()
+      .then((authorization) => {
+        if (authorization.status !== "COMPLETED") {
+          setErrorMessage(`An error occurred, status: ${authorization.status}`)
+          return
+        }
+        onPaymentCompleted()
+      })
+      .catch(() => {
+        setErrorMessage(`An unknown error occurred, please try again.`)
+        setSubmitting(false)
+      })
+  }
+
+  const [{ isPending, isResolved }] = usePayPalScriptReducer()
+
+  if (isPending) {
+    return <Spinner />
+  }
+
+  if (isResolved) {
+    return (
+      <>
+        <PayPalButtons
+          style={{ layout: "horizontal" }}
+          createOrder={async () => session?.data.id as string}
+          onApprove={handlePayment}
+          disabled={notReady || submitting || isPending}
+          data-testid={dataTestId}
+        />
+        <ErrorMessage
+          error={errorMessage}
+          data-testid="paypal-payment-error-message"
+        />
+      </>
+    )
+  }
+}
+
+const ManualTestPaymentButton = ({ notReady }: { notReady: boolean }) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const onPaymentCompleted = async () => {
+    await placeOrder()
+      .catch((err) => {
+        setErrorMessage(err.message)
+      })
+      .finally(() => {
+        setSubmitting(false)
+      })
+  }
+
+  const handlePayment = () => {
+    setSubmitting(true)
+
+    onPaymentCompleted()
+  }
+
+  return (
+    <>
+      <Button
+        disabled={notReady}
+        isLoading={submitting}
+        onClick={handlePayment}
+        size="large"
+        data-testid="submit-order-button"
+      >
+        Place order
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="manual-payment-error-message"
+      />
+    </>
+  )
+}
+
+export default PaymentButton
