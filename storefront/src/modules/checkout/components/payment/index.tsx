@@ -1,13 +1,15 @@
-"use client"
-
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
-import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { CardElement } from "@stripe/react-stripe-js"
-import { StripeCardElementOptions } from "@stripe/stripe-js"
+import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
+import {
+  PaymentElement,
+  useStripe,
+  useElements,
+  PaymentRequestButtonElement,
+} from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -28,18 +30,18 @@ const Payment = ({
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cardBrand, setCardBrand] = useState<string | null>(null)
-  const [cardComplete, setCardComplete] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
+
+  const [canUsePaymentRequest, setCanUsePaymentRequest] = useState(false)
+  const [paymentRequest, setPaymentRequest] = useState<any>(null)
 
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
 
   const isOpen = searchParams.get("step") === "payment"
-
   const isStripe = isStripeFunc(activeSession?.provider_id)
   const stripeReady = useContext(StripeContext)
 
@@ -49,28 +51,13 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  const useOptions: StripeCardElementOptions = useMemo(() => {
-    return {
-      style: {
-        base: {
-          fontFamily: "Inter, sans-serif",
-          color: "#424270",
-          "::placeholder": {
-            color: "rgb(107 114 128)",
-          },
-        },
-      },
-      classes: {
-        base: "pt-3 pb-1 block w-full h-11 px-4 mt-0 bg-ui-bg-field border rounded-md appearance-none focus:outline-none focus:ring-0 focus:shadow-borders-interactive-with-active border-ui-border-base hover:bg-ui-bg-field-hover transition-all duration-300 ease-in-out",
-      },
-    }
-  }, [])
+  const stripe = useStripe()
+  const elements = useElements()
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
       const params = new URLSearchParams(searchParams)
       params.set(name, value)
-
       return params.toString()
     },
     [searchParams]
@@ -85,7 +72,7 @@ const Payment = ({
   const handleSubmit = async () => {
     setIsLoading(true)
     try {
-      const shouldInputCard =
+      const shouldInitSession =
         isStripeFunc(selectedPaymentMethod) && !activeSession
 
       if (!activeSession) {
@@ -94,7 +81,7 @@ const Payment = ({
         })
       }
 
-      if (!shouldInputCard) {
+      if (!shouldInitSession) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
           {
@@ -112,6 +99,29 @@ const Payment = ({
   useEffect(() => {
     setError(null)
   }, [isOpen])
+
+  // Stripe PaymentRequestButton (Apple Pay/Google Pay)
+  useEffect(() => {
+    if (stripe && elements && cart && isStripe) {
+      const pr = stripe.paymentRequest({
+        country: cart?.shipping_address?.country_code?.toUpperCase() || "DE",
+        currency: cart?.currency_code || "eur",
+        total: {
+          label: "Total",
+          amount: cart.total || 500,
+        },
+        requestPayerName: true,
+        requestPayerEmail: true,
+      })
+
+      pr.canMakePayment().then((result) => {
+        if (result) {
+          setCanUsePaymentRequest(true)
+          setPaymentRequest(pr)
+        }
+      })
+    }
+  }, [stripe, elements, cart, isStripe])
 
   return (
     <div className="bg-white">
@@ -143,7 +153,7 @@ const Payment = ({
       </div>
       <div>
         <div className={isOpen ? "block" : "hidden"}>
-          {!paidByGiftcard && availablePaymentMethods?.length && (
+          {!paidByGiftcard && availablePaymentMethods?.length > 0 && (
             <>
               <RadioGroup
                 value={selectedPaymentMethod}
@@ -164,23 +174,23 @@ const Payment = ({
                     )
                   })}
               </RadioGroup>
+
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
+                    Выберите способ оплаты:
                   </Text>
-
-                  <CardElement
-                    options={useOptions as StripeCardElementOptions}
-                    onChange={(e) => {
-                      setCardBrand(
-                        e.brand &&
-                          e.brand.charAt(0).toUpperCase() + e.brand.slice(1)
-                      )
-                      setError(e.error?.message || null)
-                      setCardComplete(e.complete)
-                    }}
-                  />
+                  <PaymentElement />
+                  {canUsePaymentRequest && paymentRequest && (
+                    <div className="mt-6">
+                      <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                        Или оплатить через:
+                      </Text>
+                      <PaymentRequestButtonElement
+                        options={{ paymentRequest }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -210,15 +220,10 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={
-              (isStripe && !cardComplete) ||
-              (!selectedPaymentMethod && !paidByGiftcard)
-            }
+            disabled={!selectedPaymentMethod && !paidByGiftcard}
             data-testid="submit-payment-button"
           >
-            {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
-              : "Continue to review"}
+            Continue to review
           </Button>
         </div>
 
@@ -250,11 +255,7 @@ const Payment = ({
                       <CreditCard />
                     )}
                   </Container>
-                  <Text>
-                    {isStripeFunc(selectedPaymentMethod) && cardBrand
-                      ? cardBrand
-                      : "Another step will appear"}
-                  </Text>
+                  <Text>Provided via Stripe</Text>
                 </div>
               </div>
             </div>
