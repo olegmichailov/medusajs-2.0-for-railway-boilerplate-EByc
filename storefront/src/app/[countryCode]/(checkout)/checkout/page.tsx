@@ -1,17 +1,18 @@
 "use server"
 
-import { Metadata } from "next"
 import { notFound } from "next/navigation"
+import { enrichLineItems, retrieveCart, createPaymentSessions } from "@lib/data/cart"
+import { getCustomer } from "@lib/data/customer"
+import { HttpTypes } from "@medusajs/types"
 
 import Wrapper from "@modules/checkout/components/payment-wrapper"
 import CheckoutForm from "@modules/checkout/templates/checkout-form"
 import CheckoutSummary from "@modules/checkout/templates/checkout-summary"
-import { enrichLineItems, retrieveCart, createPaymentSessions } from "@lib/data/cart"
-import { HttpTypes } from "@medusajs/types"
-import { getCustomer } from "@lib/data/customer"
 
-export const metadata: Metadata = {
-  title: "Checkout",
+export async function generateMetadata() {
+  return {
+    title: "Checkout",
+  }
 }
 
 const fetchCartWithSessions = async () => {
@@ -26,7 +27,6 @@ const fetchCartWithSessions = async () => {
     cart.items = enrichedItems as HttpTypes.StoreCartLineItem[]
   }
 
-  // Создаём сессии оплаты, если их нет или они неактивны
   const hasValidSessions =
     cart.payment_collection?.payment_sessions?.length &&
     cart.payment_collection.payment_sessions.some((s) => s.status === "pending")
@@ -39,7 +39,7 @@ const fetchCartWithSessions = async () => {
     }
   }
 
-  return await retrieveCart() // получаем обновлённую корзину с сессиями
+  return await retrieveCart()
 }
 
 export default async function Checkout() {
