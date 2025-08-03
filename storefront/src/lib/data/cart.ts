@@ -12,6 +12,7 @@ import { getRegion } from "./regions"
 
 export async function retrieveCart() {
   const cartId = getCartId()
+
   if (!cartId) return null
 
   return await sdk.store.cart
@@ -33,8 +34,13 @@ export async function getOrSetCart(countryCode: string) {
     revalidateTag("cart")
   }
 
-  if (cart && cart.region_id !== region.id) {
-    await sdk.store.cart.update(cart.id, { region_id: region.id }, {}, getAuthHeaders())
+  if (cart && cart?.region_id !== region.id) {
+    await sdk.store.cart.update(
+      cart.id,
+      { region_id: region.id },
+      {},
+      getAuthHeaders()
+    )
     revalidateTag("cart")
   }
 
@@ -71,11 +77,16 @@ export async function addToCart({
   await sdk.store.cart
     .createLineItem(
       cart.id,
-      { variant_id: variantId, quantity },
+      {
+        variant_id: variantId,
+        quantity,
+      },
       {},
       getAuthHeaders()
     )
-    .then(() => revalidateTag("cart"))
+    .then(() => {
+      revalidateTag("cart")
+    })
     .catch(medusaError)
 }
 
@@ -93,7 +104,9 @@ export async function updateLineItem({
 
   await sdk.store.cart
     .updateLineItem(cartId, lineId, { quantity }, {}, getAuthHeaders())
-    .then(() => revalidateTag("cart"))
+    .then(() => {
+      revalidateTag("cart")
+    })
     .catch(medusaError)
 }
 
@@ -105,7 +118,9 @@ export async function deleteLineItem(lineId: string) {
 
   await sdk.store.cart
     .deleteLineItem(cartId, lineId, getAuthHeaders())
-    .then(() => revalidateTag("cart"))
+    .then(() => {
+      revalidateTag("cart")
+    })
     .catch(medusaError)
   revalidateTag("cart")
 }
@@ -118,7 +133,7 @@ export async function enrichLineItems(
 
   const queryParams = {
     ids: lineItems.map((lineItem) => lineItem.product_id!),
-    regionId,
+    regionId: regionId,
   }
   const products = await getProductsById(queryParams)
   if (!lineItems?.length || !products) return []
@@ -145,8 +160,15 @@ export async function setShippingMethod({
   shippingMethodId: string
 }) {
   return sdk.store.cart
-    .addShippingMethod(cartId, { option_id: shippingMethodId }, {}, getAuthHeaders())
-    .then(() => revalidateTag("cart"))
+    .addShippingMethod(
+      cartId,
+      { option_id: shippingMethodId },
+      {},
+      getAuthHeaders()
+    )
+    .then(() => {
+      revalidateTag("cart")
+    })
     .catch(medusaError)
 }
 
@@ -166,35 +188,60 @@ export async function initiatePaymentSession(
     .catch(medusaError)
 }
 
-/**
- * ВОССТАНОВЛЕННЫЙ РАБОЧИЙ СПОСОБ СОЗДАНИЯ ПЛАТЁЖНЫХ СЕССИЙ!
- */
+// === ВАЖНО! Только эта версия createPaymentSessions ===
 export async function createPaymentSessions(cartId: string) {
-  if (!cartId) throw new Error("No existing cart found, cannot create payment sessions")
+  if (!cartId) {
+    throw new Error("No existing cart found, cannot create payment sessions")
+  }
 
-  return sdk.store.cart
-    .createPaymentSessions(cartId, {}, getAuthHeaders())
-    .then(({ cart }) => {
-      revalidateTag("cart")
-      return cart
-    })
-    .catch(medusaError)
+  const baseUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || "https://backend-production-feff.up.railway.app"
+  const apiKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY
+
+  if (!apiKey) throw new Error("No Medusa publishable key in env vars!")
+
+  const res = await fetch(`${baseUrl}/store/carts/${cartId}/payment-sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-publishable-api-key": apiKey,
+    },
+    credentials: "include",
+    cache: "no-store",
+  })
+
+  if (!res.ok) {
+    throw new Error(`Failed to create payment sessions: ${await res.text()}`)
+  }
+
+  const { cart } = await res.json()
+  revalidateTag("cart")
+  return cart
 }
 
 export async function applyPromotions(codes: string[]) {
   const cartId = getCartId()
   if (!cartId) throw new Error("No existing cart found")
+
   await updateCart({ promo_codes: codes })
-    .then(() => revalidateTag("cart"))
+    .then(() => {
+      revalidateTag("cart")
+    })
     .catch(medusaError)
 }
 
-// Остальные функции (giftcard, removeDiscount и т.д.) можно оставить пустыми/заглушками — они не влияют на Stripe/Apple Pay
 export async function applyGiftCard(code: string) {}
-export async function removeDiscount(code: string) {}
-export async function removeGiftCard(codeToRemove: string, giftCards: any[]) {}
 
-export async function submitPromotionForm(currentState: unknown, formData: FormData) {
+export async function removeDiscount(code: string) {}
+
+export async function removeGiftCard(
+  codeToRemove: string,
+  giftCards: any[]
+) {}
+
+export async function submitPromotionForm(
+  currentState: unknown,
+  formData: FormData
+) {
   const code = formData.get("code") as string
   try {
     await applyPromotions([code])
@@ -208,6 +255,7 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
     if (!formData) throw new Error("No form data found when setting addresses")
     const cartId = getCartId()
     if (!cartId) throw new Error("No existing cart found when setting addresses")
+
     const data = {
       shipping_address: {
         first_name: formData.get("shipping_address.first_name"),
@@ -244,7 +292,10 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
   } catch (e: any) {
     return e.message
   }
-  redirect(`/${formData.get("shipping_address.country_code")}/checkout?step=delivery`)
+
+  redirect(
+    `/${formData.get("shipping_address.country_code")}/checkout?step=delivery`
+  )
 }
 
 export async function placeOrder() {
@@ -264,12 +315,14 @@ export async function placeOrder() {
     removeCartId()
     redirect(`/${countryCode}/order/confirmed/${cartRes?.order.id}`)
   }
+
   return cartRes.cart
 }
 
 export async function updateRegion(countryCode: string, currentPath: string) {
   const cartId = getCartId()
   const region = await getRegion(countryCode)
+
   if (!region) throw new Error(`Region not found for country code: ${countryCode}`)
 
   if (cartId) {
@@ -279,5 +332,6 @@ export async function updateRegion(countryCode: string, currentPath: string) {
 
   revalidateTag("regions")
   revalidateTag("products")
+
   redirect(`/${countryCode}${currentPath}`)
 }
