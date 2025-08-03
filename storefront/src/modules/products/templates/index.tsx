@@ -1,7 +1,4 @@
-"use client"
-
 import React, { Suspense } from "react"
-
 import ImageGallery from "@modules/products/components/image-gallery"
 import ProductActions from "@modules/products/components/product-actions"
 import ProductOnboardingCta from "@modules/products/components/product-onboarding-cta"
@@ -10,7 +7,14 @@ import RelatedProducts from "@modules/products/components/related-products"
 import ProductInfo from "@modules/products/templates/product-info"
 import SkeletonRelatedProducts from "@modules/skeletons/templates/skeleton-related-products"
 import { notFound } from "next/navigation"
+import dynamic from "next/dynamic"
 import { HttpTypes } from "@medusajs/types"
+
+// 👉 Только ProductActionsWrapper клиентский, подгружается динамически
+const ProductActionsWrapper = dynamic(
+  () => import("./product-actions-wrapper"),
+  { ssr: false }
+)
 
 type ProductTemplateProps = {
   product: HttpTypes.StoreProduct
@@ -33,40 +37,31 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка (Product Info + Tabs) */}
-        <div className="hidden small:flex flex-col sticky top-48 py-0 max-w-[300px] w-full gap-y-6">
+        {/* Левая колонка — инфо */}
+        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <ProductInfo product={product} />
           <ProductTabs product={product} />
         </div>
 
-        {/* Центр (Галерея) */}
+        {/* Галерея изображений */}
         <div className="block w-full relative">
-          {/* Заголовок на мобилке */}
-          <div className="block small:hidden mb-4">
-            <h1 className="text-2xl font-medium">{product.title}</h1>
-          </div>
-
-          {/* Галерея изображений */}
-          <ImageGallery images={product?.images || []} />
-
-          {/* Описание и табы на мобилке */}
-          <div className="block small:hidden mt-6">
-            <div className="text-ui-fg-base text-small-regular">
-              {product.description && (
-                <div className="border-t border-ui-border-base pt-6">
-                  <h3 className="text-base font-medium mb-2">Description</h3>
-                  <p>{product.description}</p>
-                </div>
-              )}
-            </div>
-            <ProductTabs product={product} />
-          </div>
+          <ImageGallery
+            images={product?.images || []}
+            preloadFirst
+            preloadCount={2}
+          />
         </div>
 
-        {/* Правая колонка (Кнопка Add to Cart) */}
+        {/* Правая колонка — CTA и Add to Cart */}
         <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
-          <ProductActions product={product} region={region} />
+          <Suspense
+            fallback={
+              <ProductActions disabled={true} product={product} region={region} />
+            }
+          >
+            <ProductActionsWrapper id={product.id} region={region} />
+          </Suspense>
         </div>
       </div>
 
