@@ -102,6 +102,16 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
+  // Для дебага — какие способы доступны
+  useEffect(() => {
+    if (availablePaymentMethods?.length) {
+      console.log(
+        "Available payment methods:",
+        availablePaymentMethods.map((m) => m.provider_id)
+      )
+    }
+  }, [availablePaymentMethods])
+
   // Stripe PaymentRequestButton (Apple Pay/Google Pay)
   useEffect(() => {
     if (stripe && elements && cart && isStripe) {
