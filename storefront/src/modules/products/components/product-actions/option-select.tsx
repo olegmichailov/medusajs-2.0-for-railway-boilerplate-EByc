@@ -1,5 +1,3 @@
-"use client"
-
 import { HttpTypes } from "@medusajs/types"
 import { clx } from "@medusajs/ui"
 import React, { useEffect } from "react"
@@ -21,37 +19,31 @@ const OptionSelect: React.FC<OptionSelectProps> = ({
   "data-testid": dataTestId,
   disabled,
 }) => {
-  const filteredOptions = option.values?.map((v) => v.value).filter(Boolean)
+  const filteredOptions = option.values?.map((v) => v.value).filter(Boolean) || []
 
-  const displayLabel =
-    option.title?.toLowerCase() === "size"
-      ? "Size"
-      : option.title || title || "Option"
-
-  // Automatically select the only option if there's just one
+  // Автоматически выбираем значение, если оно единственное
   useEffect(() => {
-    if (
-      filteredOptions &&
-      filteredOptions.length === 1 &&
-      current !== filteredOptions[0]
-    ) {
-      updateOption(option.title ?? "", filteredOptions[0]!)
+    if (filteredOptions.length === 1 && current !== filteredOptions[0]) {
+      updateOption(option.title ?? "", filteredOptions[0])
     }
   }, [filteredOptions, current, updateOption, option.title])
 
-  if (!filteredOptions || filteredOptions.length === 0) return null
+  // Не рендерим блок вообще, если только один вариант
+  if (filteredOptions.length === 1) {
+    return null
+  }
 
   return (
     <div className="flex flex-col gap-y-3">
-      <span className="text-sm font-medium tracking-wide uppercase">{displayLabel}</span>
+      <span className="text-sm">Select {title}</span>
       <div
         className="flex flex-wrap justify-between gap-2"
         data-testid={dataTestId}
       >
         {filteredOptions.map((v) => (
           <button
-            key={v}
             onClick={() => updateOption(option.title ?? "", v ?? "")}
+            key={v}
             className={clx(
               "border-ui-border-base bg-ui-bg-subtle border text-small-regular h-10 rounded-rounded p-2 flex-1",
               {
