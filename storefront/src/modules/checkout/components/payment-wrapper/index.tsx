@@ -1,68 +1,49 @@
 "use client"
 
-import { loadStripe } from "@stripe/stripe-js"
-import React from "react"
-import StripeWrapper from "./stripe-wrapper"
-import { PayPalScriptProvider } from "@paypal/react-paypal-js"
-import { createContext } from "react"
+import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
+import { Elements } from "@stripe/react-stripe-js"
 import { HttpTypes } from "@medusajs/types"
-import { isPaypal, isStripe } from "@lib/constants"
 
-type WrapperProps = {
-  cart: HttpTypes.StoreCart
+type StripeWrapperProps = {
+  paymentSession: HttpTypes.StorePaymentSession
+  stripeKey?: string
+  stripePromise: Promise<Stripe | null> | null
   children: React.ReactNode
 }
 
-export const StripeContext = createContext(false)
+const StripeWrapper: React.FC<StripeWrapperProps> = ({
+  paymentSession,
+  stripeKey,
+  stripePromise,
+  children,
+}) => {
+  const options: StripeElementsOptions = {
+    clientSecret: paymentSession!.data?.client_secret as string | undefined,
+  }
 
-const stripeKey = process.env.NEXT_PUBLIC_STRIPE_KEY
-const stripePromise = stripeKey ? loadStripe(stripeKey) : null
+  if (!stripeKey) {
+    throw new Error(
+      "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
+    )
+  }
 
-const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+  if (!stripePromise) {
+    throw new Error(
+      "Stripe promise is missing. Make sure you have provided a valid Stripe key."
+    )
+  }
 
-const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const paymentSession = cart.payment_collection?.payment_sessions?.find(
-    (s) => s.status === "pending"
+  if (!paymentSession?.data?.client_secret) {
+    throw new Error(
+      "Stripe client secret is missing. Cannot initialize Stripe."
+    )
+  }
+
+  return (
+    <Elements options={options} stripe={stripePromise}>
+      {children}
+    </Elements>
   )
-
-  if (
-    isStripe(paymentSession?.provider_id) &&
-    paymentSession &&
-    stripePromise
-  ) {
-    return (
-      <StripeContext.Provider value={true}>
-        <StripeWrapper
-          paymentSession={paymentSession}
-          stripeKey={stripeKey}
-          stripePromise={stripePromise}
-        >
-          {children}
-        </StripeWrapper>
-      </StripeContext.Provider>
-    )
-  }
-
-  if (
-    isPaypal(paymentSession?.provider_id) &&
-    paypalClientId !== undefined &&
-    cart
-  ) {
-    return (
-      <PayPalScriptProvider
-        options={{
-          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
-          currency: cart?.currency_code.toUpperCase(),
-          intent: "authorize",
-          components: "buttons",
-        }}
-      >
-        {children}
-      </PayPalScriptProvider>
-    )
-  }
-
-  return <div>{children}</div>
 }
 
-export default Wrapper
+export default StripeWrapper
