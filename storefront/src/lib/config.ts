@@ -1,7 +1,6 @@
 import Medusa from "@medusajs/js-sdk"
 
 let MEDUSA_BACKEND_URL = "http://localhost:9000"
-
 if (process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL) {
   MEDUSA_BACKEND_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 }
@@ -21,11 +20,12 @@ export const sdk = {
     cart: {
       ...baseSdk.store.cart,
       createPaymentSessions: async (cartId: string) => {
+        // ⬇️ 100% актуальный путь для создания сессии оплаты!
         return fetch(`${MEDUSA_BACKEND_URL}/store/carts/${cartId}/payment-sessions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-publishable-api-key": publishableKey, // <-- ЭТО ОБЯЗАТЕЛЬНО
+            "x-publishable-api-key": publishableKey,
           },
         }).then((res) => {
           if (!res.ok) {
