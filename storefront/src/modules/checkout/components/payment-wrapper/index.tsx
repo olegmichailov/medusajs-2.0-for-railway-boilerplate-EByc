@@ -1,9 +1,10 @@
 "use client"
 
 import { loadStripe } from "@stripe/stripe-js"
-import React, { createContext } from "react"
+import React from "react"
 import StripeWrapper from "./stripe-wrapper"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
+import { createContext } from "react"
 import { HttpTypes } from "@medusajs/types"
 import { isPaypal, isStripe } from "@lib/constants"
 
@@ -50,7 +51,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": paypalClientId || "test",
+          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
           currency: cart?.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
@@ -61,7 +62,6 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  // Default wrapper (no specific payment context needed)
   return <div>{children}</div>
 }
 
