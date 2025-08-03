@@ -1,4 +1,3 @@
-// storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
@@ -105,6 +104,7 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
+  // Показываем, какие способы доступны — удобно для дебага
   useEffect(() => {
     if (availablePaymentMethods?.length) {
       console.log(
@@ -114,15 +114,15 @@ const Payment = ({
     }
   }, [availablePaymentMethods])
 
-  // 💳 Stripe Payment Request Button (Google Pay, Apple Pay, etc.)
+  // Stripe PaymentRequestButton (Apple Pay/Google Pay)
   useEffect(() => {
     if (stripe && elements && cart && isStripe) {
       const pr = stripe.paymentRequest({
-        country: "DE",
-        currency: "eur",
+        country: cart?.shipping_address?.country_code?.toUpperCase() || "DE",
+        currency: cart?.currency_code || "eur",
         total: {
           label: "Total",
-          amount: cart.total || 500, // в центах
+          amount: cart.total || 500,
         },
         requestPayerName: true,
         requestPayerEmail: true,
@@ -192,13 +192,13 @@ const Payment = ({
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Choose payment method:
+                    Выберите способ оплаты:
                   </Text>
                   <PaymentElement />
                   {canUsePaymentRequest && paymentRequest && (
                     <div className="mt-6">
                       <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                        Or pay with:
+                        Или оплатить через:
                       </Text>
                       <PaymentRequestButtonElement
                         options={{ paymentRequest }}
