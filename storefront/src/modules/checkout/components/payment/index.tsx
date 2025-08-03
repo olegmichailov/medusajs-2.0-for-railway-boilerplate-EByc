@@ -12,6 +12,7 @@ import {
   useElements,
   PaymentRequestButtonElement,
 } from "@stripe/react-stripe-js"
+
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
 import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
@@ -44,7 +45,7 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
 
-  const isStripe = isStripeFunc(activeSession?.provider_id)
+  const isStripe = isStripeFunc(selectedPaymentMethod)
   const stripeReady = useContext(StripeContext)
 
   const paidByGiftcard =
@@ -86,7 +87,9 @@ const Payment = ({
       if (!shouldInitSession) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
-          { scroll: false }
+          {
+            scroll: false,
+          }
         )
       }
     } catch (err: any) {
@@ -100,7 +103,14 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
-  // Stripe Payment Request Button (Apple Pay, Google Pay)
+  useEffect(() => {
+    if (availablePaymentMethods?.length) {
+      // Можно удалить, если не нужен лог
+      // console.log("Available payment methods:", availablePaymentMethods.map((m) => m.provider_id))
+    }
+  }, [availablePaymentMethods])
+
+  // Stripe Payment Request Button (Google Pay, Apple Pay, etc.)
   useEffect(() => {
     if (stripe && elements && cart && isStripe) {
       const pr = stripe.paymentRequest({
@@ -113,6 +123,7 @@ const Payment = ({
         requestPayerName: true,
         requestPayerEmail: true,
       })
+
       pr.canMakePayment().then((result) => {
         if (result) {
           setCanUsePaymentRequest(true)
@@ -159,15 +170,19 @@ const Payment = ({
                 onChange={(value: string) => setSelectedPaymentMethod(value)}
               >
                 {availablePaymentMethods
-                  .sort((a, b) => a.provider_id.localeCompare(b.provider_id))
-                  .map((paymentMethod) => (
-                    <PaymentContainer
-                      paymentInfoMap={paymentInfoMap}
-                      paymentProviderId={paymentMethod.id}
-                      key={paymentMethod.id}
-                      selectedPaymentOptionId={selectedPaymentMethod}
-                    />
-                  ))}
+                  .sort((a, b) => {
+                    return a.provider_id > b.provider_id ? 1 : -1
+                  })
+                  .map((paymentMethod) => {
+                    return (
+                      <PaymentContainer
+                        paymentInfoMap={paymentInfoMap}
+                        paymentProviderId={paymentMethod.id}
+                        key={paymentMethod.id}
+                        selectedPaymentOptionId={selectedPaymentMethod}
+                      />
+                    )
+                  })}
               </RadioGroup>
 
               {isStripe && stripeReady && (
@@ -181,7 +196,9 @@ const Payment = ({
                       <Text className="txt-medium-plus text-ui-fg-base mb-1">
                         Or pay with:
                       </Text>
-                      <PaymentRequestButtonElement options={{ paymentRequest }} />
+                      <PaymentRequestButtonElement
+                        options={{ paymentRequest }}
+                      />
                     </div>
                   )}
                 </div>
