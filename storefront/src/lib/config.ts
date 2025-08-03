@@ -1,19 +1,19 @@
 import Medusa from "@medusajs/js-sdk"
 
-// Defaults to standard port for Medusa server
 let MEDUSA_BACKEND_URL = "http://localhost:9000"
 
 if (process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL) {
   MEDUSA_BACKEND_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
 }
 
+const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY!
+
 const baseSdk = new Medusa({
   baseUrl: MEDUSA_BACKEND_URL,
   debug: process.env.NODE_ENV === "development",
-  publishableKey: process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY,
+  publishableKey: publishableKey,
 })
 
-// Расширяем функциональность: вручную добавляем метод createPaymentSessions
 export const sdk = {
   ...baseSdk,
   store: {
@@ -25,6 +25,7 @@ export const sdk = {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-publishable-api-key": publishableKey, // <-- ЭТО ОБЯЗАТЕЛЬНО
           },
         }).then((res) => {
           if (!res.ok) {
