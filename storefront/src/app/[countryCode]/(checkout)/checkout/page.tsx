@@ -1,10 +1,12 @@
+"use server"
+
 import { Metadata } from "next"
 import { notFound } from "next/navigation"
 
 import Wrapper from "@modules/checkout/components/payment-wrapper"
 import CheckoutForm from "@modules/checkout/templates/checkout-form"
 import CheckoutSummary from "@modules/checkout/templates/checkout-summary"
-import { enrichLineItems, retrieveCart } from "@lib/data/cart"
+import { enrichLineItems, retrieveCart, createPaymentSessions } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { getCustomer } from "@lib/data/customer"
 
@@ -12,22 +14,36 @@ export const metadata: Metadata = {
   title: "Checkout",
 }
 
-const fetchCart = async () => {
+const fetchCartWithSessions = async () => {
   const cart = await retrieveCart()
+
   if (!cart) {
     return notFound()
   }
 
   if (cart?.items?.length) {
-    const enrichedItems = await enrichLineItems(cart?.items, cart?.region_id!)
+    const enrichedItems = await enrichLineItems(cart.items, cart.region_id!)
     cart.items = enrichedItems as HttpTypes.StoreCartLineItem[]
   }
 
-  return cart
+  // Создаём сессии оплаты, если их нет или они неактивны
+  const hasValidSessions =
+    cart.payment_collection?.payment_sessions?.length &&
+    cart.payment_collection.payment_sessions.some((s) => s.status === "pending")
+
+  if (!hasValidSessions && cart.id) {
+    try {
+      await createPaymentSessions(cart.id)
+    } catch (error) {
+      console.error("Failed to create payment sessions", error)
+    }
+  }
+
+  return await retrieveCart() // получаем обновлённую корзину с сессиями
 }
 
 export default async function Checkout() {
-  const cart = await fetchCart()
+  const cart = await fetchCartWithSessions()
   const customer = await getCustomer()
 
   return (
