@@ -24,22 +24,16 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     (s) => s.status === "pending"
   )
 
-  const isStripeValid =
+  if (
     isStripe(paymentSession?.provider_id) &&
-    stripePromise &&
-    paymentSession?.data?.client_secret
-
-  const isPaypalValid =
-    isPaypal(paymentSession?.provider_id) &&
-    paypalClientId &&
-    cart?.currency_code
-
-  if (isStripeValid) {
+    paymentSession &&
+    stripePromise
+  ) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
           paymentSession={paymentSession}
-          stripeKey={stripeKey!}
+          stripeKey={stripeKey}
           stripePromise={stripePromise}
         >
           {children}
@@ -48,12 +42,16 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  if (isPaypalValid) {
+  if (
+    isPaypal(paymentSession?.provider_id) &&
+    paypalClientId !== undefined &&
+    cart
+  ) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": paypalClientId!,
-          currency: cart.currency_code.toUpperCase(),
+          "client-id": paypalClientId || "test",
+          currency: cart?.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
@@ -63,12 +61,8 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  // Временно не отображаем форму, если сессия Stripe или Paypal некорректна
-  return (
-    <div className="text-sm text-red-500">
-      Unable to load payment session. Please refresh or contact support.
-    </div>
-  )
+  // Default wrapper (no specific payment context needed)
+  return <div>{children}</div>
 }
 
 export default Wrapper
