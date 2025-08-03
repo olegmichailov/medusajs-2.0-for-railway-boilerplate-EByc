@@ -22,9 +22,7 @@ export async function generateMetadata() {
 const fetchCartWithSessions = async () => {
   let cart = await retrieveCart()
 
-  if (!cart) {
-    return notFound()
-  }
+  if (!cart) return notFound()
 
   if (cart?.items?.length) {
     const enrichedItems = await enrichLineItems(
@@ -34,19 +32,17 @@ const fetchCartWithSessions = async () => {
     cart.items = enrichedItems as HttpTypes.StoreCartLineItem[]
   }
 
+  // Всегда гарантируем, что есть актуальные платежные сессии
   const hasValidSessions =
-    cart.payment_session ||
-    (cart.payment_collection?.payment_sessions?.length &&
-      cart.payment_collection.payment_sessions.some(
-        (s) => s.status === "pending"
-      ))
+    cart.payment_collection?.payment_sessions?.some((s) => s.status === "pending")
 
   if (!hasValidSessions && cart.id) {
     try {
       await createPaymentSessions(cart.id)
-      cart = await retrieveCart()
+      cart = await retrieveCart() // рефреш cart
     } catch (error) {
       console.error("❌ Failed to create payment sessions", error)
+      // можно прокинуть ошибку в UI, если нужно
     }
   }
 
