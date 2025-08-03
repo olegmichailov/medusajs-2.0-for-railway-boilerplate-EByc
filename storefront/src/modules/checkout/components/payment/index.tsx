@@ -114,7 +114,13 @@ const Payment = ({
 
   // Stripe PaymentRequestButton (Apple Pay/Google Pay)
   useEffect(() => {
-    if (stripe && elements && cart && isStripe) {
+    if (
+      stripe &&
+      elements &&
+      cart &&
+      isStripe &&
+      activeSession?.data?.client_secret
+    ) {
       const pr = stripe.paymentRequest({
         country: cart?.shipping_address?.country_code?.toUpperCase() || "DE",
         currency: cart?.currency_code || "eur",
@@ -133,7 +139,7 @@ const Payment = ({
         }
       })
     }
-  }, [stripe, elements, cart, isStripe])
+  }, [stripe, elements, cart, isStripe, activeSession])
 
   return (
     <div className="bg-white">
@@ -187,24 +193,26 @@ const Payment = ({
                   })}
               </RadioGroup>
 
-              {isStripe && stripeReady && (
-                <div className="mt-5 transition-all duration-150 ease-in-out">
-                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Выберите способ оплаты:
-                  </Text>
-                  <PaymentElement />
-                  {canUsePaymentRequest && paymentRequest && (
-                    <div className="mt-6">
-                      <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                        Или оплатить через:
-                      </Text>
-                      <PaymentRequestButtonElement
-                        options={{ paymentRequest }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+              {isStripe &&
+                stripeReady &&
+                activeSession?.data?.client_secret && (
+                  <div className="mt-5 transition-all duration-150 ease-in-out">
+                    <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                      Выберите способ оплаты:
+                    </Text>
+                    <PaymentElement />
+                    {canUsePaymentRequest && paymentRequest && (
+                      <div className="mt-6">
+                        <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                          Или оплатить через:
+                        </Text>
+                        <PaymentRequestButtonElement
+                          options={{ paymentRequest }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
             </>
           )}
 
