@@ -1,3 +1,5 @@
+// storefront/src/modules/products/components/product-preview.tsx
+
 "use client"
 
 import { Text } from "@medusajs/ui"
@@ -9,7 +11,7 @@ import { HttpTypes } from "@medusajs/types"
 
 export default function ProductPreview({
   product,
-  isFeatured = false,
+  isFeatured,
   region,
 }: {
   product: HttpTypes.StoreProduct
@@ -22,10 +24,7 @@ export default function ProductPreview({
   })
 
   return (
-    <LocalizedClientLink
-      href={`/products/${product?.handle || ""}`}
-      className="group pointer-events-auto"
-    >
+    <LocalizedClientLink href={`/products/${product.handle}`} className="group">
       <div data-testid="product-wrapper">
         <Thumbnail
           thumbnail={product.thumbnail}
@@ -34,10 +33,7 @@ export default function ProductPreview({
           isFeatured={isFeatured}
         />
         <div className="flex txt-compact-medium mt-2 justify-between px-1">
-          <Text
-            className="text-ui-fg-subtle text-sm sm:text-base"
-            data-testid="product-title"
-          >
+          <Text className="text-ui-fg-subtle text-sm sm:text-base" data-testid="product-title">
             {product.title}
           </Text>
           <div className="flex items-center gap-x-1 text-sm sm:text-base">
