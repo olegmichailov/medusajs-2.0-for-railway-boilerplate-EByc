@@ -154,32 +154,27 @@ export async function enrichLineItems(
 ) {
   if (!lineItems) return []
 
-  // Prepare query parameters
   const queryParams = {
     ids: lineItems.map((lineItem) => lineItem.product_id!),
     regionId: regionId,
   }
 
-  // Fetch products by their IDs
   const products = await getProductsById(queryParams)
-  // If there are no line items or products, return an empty array
+
   if (!lineItems?.length || !products) {
     return []
   }
 
-  // Enrich line items with product and variant information
   const enrichedItems = lineItems.map((item) => {
     const product = products.find((p: any) => p.id === item.product_id)
     const variant = product?.variants?.find(
       (v: any) => v.id === item.variant_id
     )
 
-    // If product or variant is not found, return the original item
     if (!product || !variant) {
       return item
     }
 
-    // If product and variant are found, enrich the item
     return {
       ...item,
       variant: {
@@ -224,6 +219,16 @@ export async function initiatePaymentSession(
     .then((resp) => {
       revalidateTag("cart")
       return resp
+    })
+    .catch(medusaError)
+}
+
+export async function createPaymentSessions(cartId: string) {
+  return await sdk.store.cart
+    .createPaymentSessions(cartId, {}, getAuthHeaders())
+    .then(({ cart }) => {
+      revalidateTag("cart")
+      return cart
     })
     .catch(medusaError)
 }
@@ -296,7 +301,6 @@ export async function submitPromotionForm(
   }
 }
 
-// TODO: Pass a POJO instead of a form entity here
 export async function setAddresses(currentState: unknown, formData: FormData) {
   try {
     if (!formData) {
@@ -373,11 +377,6 @@ export async function placeOrder() {
   return cartRes.cart
 }
 
-/**
- * Updates the countrycode param and revalidates the regions cache
- * @param regionId
- * @param countryCode
- */
 export async function updateRegion(countryCode: string, currentPath: string) {
   const cartId = getCartId()
   const region = await getRegion(countryCode)
