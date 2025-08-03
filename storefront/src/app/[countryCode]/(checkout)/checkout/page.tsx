@@ -1,11 +1,7 @@
 "use server"
 
 import { notFound } from "next/navigation"
-import {
-  enrichLineItems,
-  retrieveCart,
-  createPaymentSessions,
-} from "@lib/data/cart"
+import { enrichLineItems, retrieveCart, createPaymentSessions } from "@lib/data/cart"
 import { getCustomer } from "@lib/data/customer"
 import { HttpTypes } from "@medusajs/types"
 
@@ -26,7 +22,6 @@ const fetchCartWithSessions = async () => {
     return notFound()
   }
 
-  // обогащаем товары данными о продуктах
   if (cart?.items?.length) {
     const enrichedItems = await enrichLineItems(cart.items, cart.region_id!)
     cart.items = enrichedItems as HttpTypes.StoreCartLineItem[]
@@ -34,36 +29,29 @@ const fetchCartWithSessions = async () => {
 
   const hasValidSessions =
     cart.payment_collection?.payment_sessions?.length &&
-    cart.payment_collection.payment_sessions.some(
-      (s) => s.status === "pending"
-    )
+    cart.payment_collection.payment_sessions.some((s) => s.status === "pending")
 
-  // если нет валидных сессий, создаем их
   if (!hasValidSessions && cart.id) {
     try {
+      console.log("📦 No valid payment session. Creating now...")
       await createPaymentSessions(cart.id)
-      cart = await retrieveCart()
-
-      const sessionsStillMissing =
-        !cart.payment_collection?.payment_sessions?.some(
-          (s) => s.status === "pending"
-        )
-
-      if (sessionsStillMissing) {
-        console.warn(
-          "⚠️ No valid payment sessions even after creation",
-          cart.payment_collection
-        )
-      }
     } catch (error) {
       console.error("❌ Failed to create payment sessions", error)
+    }
+
+    // Повторно получаем cart после создания сессий
+    cart = await retrieveCart()
+    if (!cart?.payment_collection?.payment_sessions?.some((s) => s.status === "pending")) {
+      console.error("❌ Still no valid Stripe session after creation.")
+    } else {
+      console.log("✅ Stripe session successfully created.")
     }
   }
 
   return cart
 }
 
-export default async function CheckoutPage() {
+export default async function Checkout() {
   const cart = await fetchCartWithSessions()
   const customer = await getCustomer()
 
