@@ -16,7 +16,7 @@ export async function generateMetadata() {
 }
 
 const fetchCartWithSessions = async () => {
-  const cart = await retrieveCart()
+  let cart = await retrieveCart()
 
   if (!cart) {
     return notFound()
@@ -34,12 +34,13 @@ const fetchCartWithSessions = async () => {
   if (!hasValidSessions && cart.id) {
     try {
       await createPaymentSessions(cart.id)
+      cart = await retrieveCart() // повторно получаем cart с созданными сессиями
     } catch (error) {
-      console.error("Failed to create payment sessions", error)
+      console.error("❌ Failed to create payment sessions", error)
     }
   }
 
-  return await retrieveCart()
+  return cart
 }
 
 export default async function Checkout() {
