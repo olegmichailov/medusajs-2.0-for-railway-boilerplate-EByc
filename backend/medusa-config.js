@@ -21,7 +21,7 @@ import {
   MINIO_SECRET_KEY,
   MINIO_BUCKET,
   MEILISEARCH_HOST,
-  MEILISEARCH_API_KEY
+  MEILISEARCH_ADMIN_KEY
 } from 'lib/constants';
 
 loadEnv(process.env.NODE_ENV, process.cwd());
@@ -32,10 +32,11 @@ const medusaConfig = {
     databaseLogging: false,
     redisUrl: REDIS_URL,
     workerMode: WORKER_MODE,
+    cors: "https://gmorkl.de",
     http: {
-      adminCors: ADMIN_CORS,
-      authCors: AUTH_CORS,
-      storeCors: STORE_CORS,
+      adminCors: `${ADMIN_CORS},https://gmorkl.de`,
+      authCors: `${AUTH_CORS},https://gmorkl.de`,
+      storeCors: `${STORE_CORS},https://gmorkl.de`,
       jwtSecret: JWT_SECRET,
       cookieSecret: COOKIE_SECRET
     }
@@ -57,7 +58,7 @@ const medusaConfig = {
               endPoint: MINIO_ENDPOINT,
               accessKey: MINIO_ACCESS_KEY,
               secretKey: MINIO_SECRET_KEY,
-              bucket: MINIO_BUCKET // Optional, default: medusa-media
+              bucket: MINIO_BUCKET
             }
           }] : [{
             resolve: '@medusajs/file-local',
@@ -123,32 +124,34 @@ const medusaConfig = {
             options: {
               apiKey: STRIPE_API_KEY,
               webhookSecret: STRIPE_WEBHOOK_SECRET,
-              automatic_payment_methods: true // ✅ добавлено аккуратно
+              payment_element: true,
+              automatic_payment_methods: true, // <------ ВОТ ЭТА СТРОКА!
             },
           },
         ],
       },
-    }] : []),
-    ...(MEILISEARCH_HOST && MEILISEARCH_API_KEY ? [{
+    }] : [])
+  ],
+  plugins: [
+    ...(MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
       resolve: '@rokmohar/medusa-plugin-meilisearch',
       options: {
         config: {
           host: MEILISEARCH_HOST,
-          apiKey: MEILISEARCH_API_KEY
+          apiKey: MEILISEARCH_ADMIN_KEY
         },
         settings: {
           products: {
             indexSettings: {
               searchableAttributes: ['title', 'description', 'variant_sku'],
-              displayedAttributes: ['title', 'description', 'variant_sku', 'thumbnail', 'handle']
+              displayedAttributes: ['id', 'title', 'description', 'variant_sku', 'thumbnail', 'handle'],
             },
-            primaryKey: 'id'
+            primaryKey: 'id',
           }
         }
       }
     }] : [])
-  ],
-  plugins: []
+  ]
 };
 
 console.log(JSON.stringify(medusaConfig, null, 2));
