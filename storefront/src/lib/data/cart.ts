@@ -12,17 +12,13 @@ import { getRegion } from "./regions"
 
 export async function retrieveCart() {
   const cartId = getCartId()
-
   if (!cartId) {
     return null
   }
-
   return await sdk.store.cart
     .retrieve(cartId, {}, { next: { tags: ["cart"] }, ...getAuthHeaders() })
     .then(({ cart }) => cart)
-    .catch(() => {
-      return null
-    })
+    .catch(() => null)
 }
 
 export async function getOrSetCart(countryCode: string) {
@@ -58,7 +54,6 @@ export async function updateCart(data: HttpTypes.StoreUpdateCart) {
   if (!cartId) {
     throw new Error("No existing cart found, please create one before updating")
   }
-
   return sdk.store.cart
     .update(cartId, data, {}, getAuthHeaders())
     .then(({ cart }) => {
@@ -169,11 +164,9 @@ export async function enrichLineItems(
     const variant = product?.variants?.find(
       (v: any) => v.id === item.variant_id
     )
-
     if (!product || !variant) {
       return item
     }
-
     return {
       ...item,
       variant: {
@@ -231,7 +224,7 @@ export async function createPaymentSessions(cartId: string) {
     throw new Error("No existing cart found, cannot create payment sessions")
   }
 
-  // Фоллбек на fetch — работает с любым бэкендом
+  // Используй переменную окружения или дефолтный backend
   const baseUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || "https://backend-production-feff.up.railway.app"
   const res = await fetch(`${baseUrl}/store/carts/${cartId}/payment-sessions`, {
     method: "POST",
