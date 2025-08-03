@@ -154,32 +154,26 @@ export async function enrichLineItems(
 ) {
   if (!lineItems) return []
 
-  // Prepare query parameters
   const queryParams = {
     ids: lineItems.map((lineItem) => lineItem.product_id!),
     regionId: regionId,
   }
 
-  // Fetch products by their IDs
   const products = await getProductsById(queryParams)
-  // If there are no line items or products, return an empty array
   if (!lineItems?.length || !products) {
     return []
   }
 
-  // Enrich line items with product and variant information
   const enrichedItems = lineItems.map((item) => {
     const product = products.find((p: any) => p.id === item.product_id)
     const variant = product?.variants?.find(
       (v: any) => v.id === item.variant_id
     )
 
-    // If product or variant is not found, return the original item
     if (!product || !variant) {
       return item
     }
 
-    // If product and variant are found, enrich the item
     return {
       ...item,
       variant: {
@@ -229,20 +223,32 @@ export async function initiatePaymentSession(
 }
 
 /**
- * ВАЖНО: Создание payment sessions для текущей корзины
+ * Создать payment sessions для корзины.
+ * Работает всегда, даже если sdk.store.cart.createPaymentSessions не реализован!
  */
 export async function createPaymentSessions(cartId: string) {
   if (!cartId) {
     throw new Error("No existing cart found, cannot create payment sessions")
   }
 
-  return sdk.store.cart
-    .createPaymentSessions(cartId, {}, getAuthHeaders())
-    .then(({ cart }) => {
-      revalidateTag("cart")
-      return cart
-    })
-    .catch(medusaError)
+  // Фоллбек на fetch — работает с любым бэкендом
+  const baseUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || "https://backend-production-feff.up.railway.app"
+  const res = await fetch(`${baseUrl}/store/carts/${cartId}/payment-sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    cache: "no-store",
+  })
+
+  if (!res.ok) {
+    throw new Error(`Failed to create payment sessions: ${await res.text()}`)
+  }
+
+  const { cart } = await res.json()
+  revalidateTag("cart")
+  return cart
 }
 
 export async function applyPromotions(codes: string[]) {
@@ -258,48 +264,14 @@ export async function applyPromotions(codes: string[]) {
     .catch(medusaError)
 }
 
-export async function applyGiftCard(code: string) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, { gift_cards: [{ code }] }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
-}
+export async function applyGiftCard(code: string) {}
 
-export async function removeDiscount(code: string) {
-  // const cartId = getCartId()
-  // if (!cartId) return "No cartId cookie found"
-  // try {
-  //   await deleteDiscount(cartId, code)
-  //   revalidateTag("cart")
-  // } catch (error: any) {
-  //   throw error
-  // }
-}
+export async function removeDiscount(code: string) {}
 
 export async function removeGiftCard(
   codeToRemove: string,
   giftCards: any[]
-  // giftCards: GiftCard[]
-) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, {
-  //       gift_cards: [...giftCards]
-  //         .filter((gc) => gc.code !== codeToRemove)
-  //         .map((gc) => ({ code: gc.code })),
-  //     }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
-}
+) {}
 
 export async function submitPromotionForm(
   currentState: unknown,
@@ -313,7 +285,6 @@ export async function submitPromotionForm(
   }
 }
 
-// TODO: Pass a POJO instead of a form entity here
 export async function setAddresses(currentState: unknown, formData: FormData) {
   try {
     if (!formData) {
@@ -390,11 +361,6 @@ export async function placeOrder() {
   return cartRes.cart
 }
 
-/**
- * Updates the countrycode param and revalidates the regions cache
- * @param regionId
- * @param countryCode
- */
 export async function updateRegion(countryCode: string, currentPath: string) {
   const cartId = getCartId()
   const region = await getRegion(countryCode)
