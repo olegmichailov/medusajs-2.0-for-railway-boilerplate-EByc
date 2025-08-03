@@ -1,5 +1,4 @@
 import { Container, clx } from "@medusajs/ui"
-import React from "react"
 import PlaceholderImage from "@modules/common/icons/placeholder-image"
 
 type ThumbnailProps = {
@@ -9,7 +8,6 @@ type ThumbnailProps = {
   isFeatured?: boolean
   className?: string
   "data-testid"?: string
-  priority?: boolean
   index?: number
 }
 
@@ -20,17 +18,17 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   isFeatured,
   className,
   "data-testid": dataTestid,
-  priority = false,
   index = 0,
 }) => {
-  const imageUrl = thumbnail || images?.[0]?.url || "/placeholder.png"
+  const imageUrl = thumbnail || images?.[0]?.url
 
-  const localPath = imageUrl.includes("products/")
+  // 👉 локальный путь
+  const localPath = imageUrl?.includes("products/")
     ? `/${imageUrl.split("products/")[1]}`
     : undefined
 
-  const useLocal = !!localPath
-  const finalUrl = useLocal ? localPath : imageUrl
+  const useLocal = localPath ? true : false
+  const finalSrc = useLocal ? localPath : imageUrl
 
   return (
     <Container
@@ -45,42 +43,20 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
       )}
       data-testid={dataTestid}
     >
-      <ImageOrPlaceholder
-        image={finalUrl}
-        size={size}
-        priority={priority}
-        index={index}
-      />
+      {finalSrc ? (
+        <img
+          src={finalSrc}
+          alt="Thumbnail"
+          className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
+          draggable={false}
+          loading={index < 4 ? "eager" : "lazy"}
+        />
+      ) : (
+        <div className="w-full h-full absolute inset-0 flex items-center justify-center">
+          <PlaceholderImage size={size === "small" ? 16 : 24} />
+        </div>
+      )}
     </Container>
-  )
-}
-
-const ImageOrPlaceholder = ({
-  image,
-  size,
-  priority,
-  index,
-}: {
-  image?: string
-  size?: string
-  priority?: boolean
-  index?: number
-}) => {
-  if (!image || typeof image !== "string" || image.trim() === "") {
-    return (
-      <div className="w-full h-full absolute inset-0 flex items-center justify-center">
-        <PlaceholderImage size={size === "small" ? 16 : 24} />
-      </div>
-    )
-  }
-
-  return (
-    <img
-      src={image}
-      alt="Thumbnail"
-      className="absolute inset-0 object-cover object-center w-full h-full transition-transform duration-[1200ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:scale-[1.015]"
-      draggable={false}
-    />
   )
 }
 
