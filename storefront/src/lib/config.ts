@@ -1,17 +1,15 @@
-import Medusa from "@medusajs/js-sdk"
+// storefront/src/lib/config.ts
 
-let MEDUSA_BACKEND_URL = "http://localhost:9000"
-if (process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL) {
-  MEDUSA_BACKEND_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
-}
+import Medusa from "@medusajs/js-sdk";
 
-const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY!
+let MEDUSA_BACKEND_URL = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || "http://localhost:9000";
+const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY!;
 
 const baseSdk = new Medusa({
   baseUrl: MEDUSA_BACKEND_URL,
   debug: process.env.NODE_ENV === "development",
   publishableKey: publishableKey,
-})
+});
 
 export const sdk = {
   ...baseSdk,
@@ -20,20 +18,20 @@ export const sdk = {
     cart: {
       ...baseSdk.store.cart,
       createPaymentSessions: async (cartId: string) => {
-        // ⬇️ 100% актуальный путь для создания сессии оплаты!
+        // ВОТ КАК БЫЛО (без body/context)
         return fetch(`${MEDUSA_BACKEND_URL}/store/carts/${cartId}/payment-sessions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-publishable-api-key": publishableKey,
+            "x-publishable-api-key": publishableKey, // обязательно
           },
         }).then((res) => {
           if (!res.ok) {
-            throw new Error("Failed to create payment sessions")
+            throw new Error("Failed to create payment sessions");
           }
-          return res.json()
-        })
+          return res.json();
+        });
       },
     },
   },
-}
+};
