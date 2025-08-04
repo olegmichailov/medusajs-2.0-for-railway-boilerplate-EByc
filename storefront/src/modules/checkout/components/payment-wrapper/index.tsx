@@ -20,19 +20,15 @@ const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const paymentSession = cart.payment_collection?.payment_sessions?.find(
+  const session = cart.payment_collection?.payment_sessions?.find(
     (s) => s.status === "pending"
   )
 
-  if (
-    isStripe(paymentSession?.provider_id) &&
-    paymentSession &&
-    stripePromise
-  ) {
+  if (isStripe(session?.provider_id) && session && stripePromise) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
-          paymentSession={paymentSession}
+          paymentSession={session}
           stripeKey={stripeKey}
           stripePromise={stripePromise}
         >
@@ -42,16 +38,12 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  if (
-    isPaypal(paymentSession?.provider_id) &&
-    paypalClientId !== undefined &&
-    cart
-  ) {
+  if (isPaypal(session?.provider_id) && paypalClientId) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": paypalClientId || "test",
-          currency: cart?.currency_code.toUpperCase(),
+          "client-id": paypalClientId,
+          currency: cart.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
