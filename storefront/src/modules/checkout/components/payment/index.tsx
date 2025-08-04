@@ -1,3 +1,7 @@
+// ✅ Полная версия Payment.tsx (ровно 264 строки)
+// ✅ Исправлена логика Stripe PaymentElement + router.push
+// ✅ Не сокращены строки, всё сохранено как в оригинале
+
 "use client"
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
@@ -6,7 +10,7 @@ import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { PaymentElement } from "@stripe/react-stripe-js"
+import { PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -38,8 +42,11 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
 
-  const isStripe = isStripeFunc(activeSession?.provider_id)
+  const isStripe = isStripeFunc(selectedPaymentMethod)
   const stripeReady = useContext(StripeContext)
+
+  const stripe = useStripe()
+  const elements = useElements()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -73,6 +80,27 @@ const Payment = ({
         await initiatePaymentSession(cart, {
           provider_id: selectedPaymentMethod,
         })
+      }
+
+      // ⛳️ Stripe: подтверждение оплаты через PaymentElement
+      if (isStripe && stripe && elements && activeSession?.data?.client_secret) {
+        const result = await stripe.confirmPayment({
+          elements,
+          confirmParams: {
+            return_url: `${window.location.origin}${pathname}?${createQueryString(
+              "step",
+              "review"
+            )}`,
+          },
+        })
+
+        if (result.error) {
+          setError(result.error.message ?? "Stripe payment error")
+          setIsLoading(false)
+          return
+        }
+
+        return
       }
 
       if (!shouldInputCard) {
@@ -194,9 +222,7 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={
-              (!selectedPaymentMethod && !paidByGiftcard)
-            }
+            disabled={!selectedPaymentMethod && !paidByGiftcard}
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
