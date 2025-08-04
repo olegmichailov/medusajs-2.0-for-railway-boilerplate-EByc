@@ -1,7 +1,3 @@
-// ✅ Полная версия Payment.tsx (ровно 264 строки)
-// ✅ Исправлена логика Stripe PaymentElement + router.push
-// ✅ Не сокращены строки, всё сохранено как в оригинале
-
 "use client"
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
@@ -10,7 +6,8 @@ import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
+import { CardElement } from "@stripe/react-stripe-js"
+import { StripeCardElementOptions } from "@stripe/stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -32,6 +29,7 @@ const Payment = ({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cardBrand, setCardBrand] = useState<string | null>(null)
+  const [cardComplete, setCardComplete] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
@@ -42,17 +40,31 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
 
-  const isStripe = isStripeFunc(selectedPaymentMethod)
+  const isStripe = isStripeFunc(activeSession?.provider_id)
   const stripeReady = useContext(StripeContext)
-
-  const stripe = useStripe()
-  const elements = useElements()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
 
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
+
+  const useOptions: StripeCardElementOptions = useMemo(() => {
+    return {
+      style: {
+        base: {
+          fontFamily: "Inter, sans-serif",
+          color: "#424270",
+          "::placeholder": {
+            color: "rgb(107 114 128)",
+          },
+        },
+      },
+      classes: {
+        base: "pt-3 pb-1 block w-full h-11 px-4 mt-0 bg-ui-bg-field border rounded-md appearance-none focus:outline-none focus:ring-0 focus:shadow-borders-interactive-with-active border-ui-border-base hover:bg-ui-bg-field-hover transition-all duration-300 ease-in-out",
+      },
+    }
+  }, [])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -80,27 +92,6 @@ const Payment = ({
         await initiatePaymentSession(cart, {
           provider_id: selectedPaymentMethod,
         })
-      }
-
-      // ⛳️ Stripe: подтверждение оплаты через PaymentElement
-      if (isStripe && stripe && elements && activeSession?.data?.client_secret) {
-        const result = await stripe.confirmPayment({
-          elements,
-          confirmParams: {
-            return_url: `${window.location.origin}${pathname}?${createQueryString(
-              "step",
-              "review"
-            )}`,
-          },
-        })
-
-        if (result.error) {
-          setError(result.error.message ?? "Stripe payment error")
-          setIsLoading(false)
-          return
-        }
-
-        return
       }
 
       if (!shouldInputCard) {
@@ -176,21 +167,18 @@ const Payment = ({
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your payment details:
+                    Enter your card details:
                   </Text>
 
-                  <PaymentElement
-                    onReady={() => {
-                      setCardBrand("Stripe")
-                    }}
-                    onBlur={() => {}}
-                    onFocus={() => {}}
+                  <CardElement
+                    options={useOptions as StripeCardElementOptions}
                     onChange={(e) => {
-                      if (e.error) {
-                        setError(e.error.message)
-                      } else {
-                        setError(null)
-                      }
+                      setCardBrand(
+                        e.brand &&
+                          e.brand.charAt(0).toUpperCase() + e.brand.slice(1)
+                      )
+                      setError(e.error?.message || null)
+                      setCardComplete(e.complete)
                     }}
                   />
                 </div>
@@ -222,11 +210,14 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={!selectedPaymentMethod && !paidByGiftcard}
+            disabled={
+              (isStripe && !cardComplete) ||
+              (!selectedPaymentMethod && !paidByGiftcard)
+            }
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter payment details"
+              ? " Enter card details"
               : "Continue to review"}
           </Button>
         </div>
