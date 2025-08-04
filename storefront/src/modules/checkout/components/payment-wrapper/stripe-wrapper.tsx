@@ -1,47 +1,62 @@
-"use client"
+'use client'
 
-import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
-import { Elements } from "@stripe/react-stripe-js"
-import { HttpTypes } from "@medusajs/types"
+import React, { useEffect, useState } from 'react'
+import { Elements } from '@stripe/react-stripe-js'
+import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js'
+import { useCart } from 'medusa-react'
+
+import Spinner from '@modules/common/icons/spinner'
+import Payment from './Payment'
+
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY as string
+)
 
 type StripeWrapperProps = {
-  paymentSession: HttpTypes.StorePaymentSession
-  stripeKey?: string
-  stripePromise: Promise<Stripe | null> | null
-  children: React.ReactNode
+  cartId: string
+  region: string
 }
 
-const StripeWrapper: React.FC<StripeWrapperProps> = ({
-  paymentSession,
-  stripeKey,
-  stripePromise,
-  children,
-}) => {
+const StripeWrapper: React.FC<StripeWrapperProps> = ({ cartId, region }) => {
+  const { cart } = useCart()
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+
+  useEffect(() => {
+    const initPayment = async () => {
+      if (!cart?.id) return
+
+      const response = await fetch('/api/stripe/payment-intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cart_id: cart.id }),
+      })
+
+      const data = await response.json()
+      setClientSecret(data.client_secret)
+    }
+
+    initPayment()
+  }, [cart?.id])
+
+  if (!stripePromise || !clientSecret) {
+    return (
+      <div className="flex justify-center py-10">
+        <Spinner />
+      </div>
+    )
+  }
+
   const options: StripeElementsOptions = {
-    clientSecret: paymentSession!.data?.client_secret as string | undefined,
-  }
-
-  if (!stripeKey) {
-    throw new Error(
-      "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
-    )
-  }
-
-  if (!stripePromise) {
-    throw new Error(
-      "Stripe promise is missing. Make sure you have provided a valid Stripe key."
-    )
-  }
-
-  if (!paymentSession?.data?.client_secret) {
-    throw new Error(
-      "Stripe client secret is missing. Cannot initialize Stripe."
-    )
+    clientSecret,
+    appearance: {
+      theme: 'flat',
+      labels: 'floating',
+    },
   }
 
   return (
-    <Elements options={options} stripe={stripePromise}>
-      {children}
+    <Elements stripe={stripePromise} options={options}>
+      <Payment />
     </Elements>
   )
 }
