@@ -1,63 +1,45 @@
-'use client'
+"use client"
 
-import React, { useEffect, useState } from 'react'
-import { Elements } from '@stripe/react-stripe-js'
-import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js'
-import { useCart } from 'medusa-react'
+import React, { createContext, useEffect, useState } from "react"
+import { loadStripe } from "@stripe/stripe-js"
+import { Elements } from "@stripe/react-stripe-js"
 
-import Spinner from '@modules/common/icons/spinner'
-import Payment from './Payment'
-
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY as string
-)
-
-type StripeWrapperProps = {
-  cartId: string
-  region: string
+interface StripeWrapperProps {
+  children: React.ReactNode
+  clientSecret?: string
 }
 
-const StripeWrapper: React.FC<StripeWrapperProps> = ({ cartId, region }) => {
-  const { cart } = useCart()
-  const [clientSecret, setClientSecret] = useState<string | null>(null)
+export const StripeContext = createContext(false)
+
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "")
+
+const StripeWrapper: React.FC<StripeWrapperProps> = ({ children, clientSecret }) => {
+  const [stripeReady, setStripeReady] = useState(false)
+  const [options, setOptions] = useState<any>(null)
 
   useEffect(() => {
-    const initPayment = async () => {
-      if (!cart?.id) return
+    if (!clientSecret) return
 
-      const response = await fetch('/api/stripe/payment-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cart_id: cart.id }),
-      })
+    setOptions({
+      clientSecret,
+      appearance: {
+        theme: "flat",
+      },
+    })
 
-      const data = await response.json()
-      setClientSecret(data.client_secret)
-    }
+    setStripeReady(true)
+  }, [clientSecret])
 
-    initPayment()
-  }, [cart?.id])
-
-  if (!stripePromise || !clientSecret) {
-    return (
-      <div className="flex justify-center py-10">
-        <Spinner />
-      </div>
-    )
-  }
-
-  const options: StripeElementsOptions = {
-    clientSecret,
-    appearance: {
-      theme: 'flat',
-      labels: 'floating',
-    },
+  if (!clientSecret || !options) {
+    return <>{children}</>
   }
 
   return (
-    <Elements stripe={stripePromise} options={options}>
-      <Payment />
-    </Elements>
+    <StripeContext.Provider value={stripeReady}>
+      <Elements stripe={stripePromise} options={options}>
+        {children}
+      </Elements>
+    </StripeContext.Provider>
   )
 }
 
