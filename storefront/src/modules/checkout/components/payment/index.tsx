@@ -1,4 +1,4 @@
-"use client"
+use client
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -6,7 +6,7 @@ import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { CardElement } from "@stripe/react-stripe-js"
+import { CardElement, PaymentRequestButtonElement, useStripe } from "@stripe/react-stripe-js"
 import { StripeCardElementOptions } from "@stripe/stripe-js"
 
 import Divider from "@modules/common/components/divider"
@@ -34,9 +34,14 @@ const Payment = ({
     activeSession?.provider_id ?? ""
   )
 
+  const [paymentRequest, setPaymentRequest] = useState<any>(null)
+  const [canShowPaymentRequest, setCanShowPaymentRequest] = useState(false)
+
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+
+  const stripe = useStripe()
 
   const isOpen = searchParams.get("step") === "payment"
 
@@ -61,10 +66,35 @@ const Payment = ({
         },
       },
       classes: {
-        base: "pt-3 pb-1 block w-full h-11 px-4 mt-0 bg-ui-bg-field border rounded-md appearance-none focus:outline-none focus:ring-0 focus:shadow-borders-interactive-with-active border-ui-border-base hover:bg-ui-bg-field-hover transition-all duration-300 ease-in-out",
+        base:
+          "pt-3 pb-1 block w-full h-11 px-4 mt-0 bg-ui-bg-field border rounded-md appearance-none focus:outline-none focus:ring-0 focus:shadow-borders-interactive-with-active border-ui-border-base",
       },
     }
   }, [])
+
+  // Stripe PaymentRequestButton setup
+  useEffect(() => {
+    if (stripe && isStripe && cart) {
+      const pr = stripe.paymentRequest({
+        country: "DE", // смените на вашу страну
+        currency: cart.region?.currency_code || "eur",
+        total: {
+          label: "Total",
+          amount: cart.total,
+        },
+        requestPayerName: true,
+        requestPayerEmail: true,
+      })
+      pr.canMakePayment().then((result: any) => {
+        if (result) {
+          setPaymentRequest(pr)
+          setCanShowPaymentRequest(true)
+        } else {
+          setCanShowPaymentRequest(false)
+        }
+      })
+    }
+  }, [stripe, isStripe, cart])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -164,10 +194,26 @@ const Payment = ({
                     )
                   })}
               </RadioGroup>
+              {/* Stripe Payment Request Button for Google Pay */}
+              {isStripe && stripeReady && canShowPaymentRequest && paymentRequest && (
+                <div className="mt-5 transition-all duration-150 ease-in-out">
+                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                    Оплата через Google Pay или Apple Pay:
+                  </Text>
+                  <PaymentRequestButtonElement
+                    options={{ paymentRequest }}
+                    className="w-full h-12"
+                  />
+                  <Text className="txt-small text-ui-fg-subtle mt-2">
+                    Если кнопка не отображается, ваш браузер или устройство не поддерживает Google Pay/Apple Pay.
+                  </Text>
+                </div>
+              )}
+              {/* Stripe CardElement Fallback */}
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
+                    Введите данные карты:
                   </Text>
 
                   <CardElement
@@ -217,8 +263,8 @@ const Payment = ({
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
-              : "Continue to review"}
+              ? "Введите данные карты"
+              : "Продолжить к обзору"}
           </Button>
         </div>
 
