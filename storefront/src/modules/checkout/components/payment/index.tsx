@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useContext, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
@@ -10,7 +10,6 @@ import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js"
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
 import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
-import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession } from "@lib/data/cart"
 import ErrorMessage from "@modules/checkout/components/error-message"
 
@@ -37,16 +36,12 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
   const isStripe = isStripeFunc(selectedPaymentMethod)
-  const stripeReady = useContext(StripeContext)
 
   const stripe = useStripe()
   const elements = useElements()
 
-  const paidByGiftcard =
-    cart?.gift_cards?.length > 0 && cart?.total === 0
-
-  const paymentReady =
-    (activeSession && cart?.shipping_methods?.length > 0) || paidByGiftcard
+  const paidByGiftcard = cart?.gift_cards?.length > 0 && cart?.total === 0
+  const paymentReady = (activeSession && cart?.shipping_methods?.length > 0) || paidByGiftcard
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -146,9 +141,7 @@ const Payment = ({
                   onChange={(value: string) => setSelectedPaymentMethod(value)}
                 >
                   {availablePaymentMethods
-                    .sort((a, b) =>
-                      a.provider_id > b.provider_id ? 1 : -1
-                    )
+                    .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
                     .map((pm) => (
                       <PaymentContainer
                         key={pm.id}
@@ -159,7 +152,7 @@ const Payment = ({
                     ))}
                 </RadioGroup>
 
-                {isStripe && stripeReady && (
+                {isStripe && stripe && elements && (
                   <div className="mt-6">
                     <Text className="txt-medium-plus text-ui-fg-base mb-2">
                       Choose payment method:
@@ -190,7 +183,7 @@ const Payment = ({
               className="mt-6"
               onClick={handleSubmit}
               isLoading={isLoading}
-              disabled={!selectedPaymentMethod || (isStripe && !stripeReady)}
+              disabled={!selectedPaymentMethod || (isStripe && (!stripe || !elements))}
             >
               Continue to review
             </Button>
@@ -204,8 +197,7 @@ const Payment = ({
                     Payment method
                   </Text>
                   <Text className="txt-medium text-ui-fg-subtle">
-                    {paymentInfoMap[selectedPaymentMethod]?.title ||
-                      selectedPaymentMethod}
+                    {paymentInfoMap[selectedPaymentMethod]?.title || selectedPaymentMethod}
                   </Text>
                 </div>
                 <div className="flex flex-col w-1/3">
@@ -214,9 +206,7 @@ const Payment = ({
                   </Text>
                   <div className="flex gap-2 txt-medium text-ui-fg-subtle items-center">
                     <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
-                      {paymentInfoMap[selectedPaymentMethod]?.icon || (
-                        <CreditCard />
-                      )}
+                      {paymentInfoMap[selectedPaymentMethod]?.icon || <CreditCard />}
                     </Container>
                     <Text>Confirmed via Stripe</Text>
                   </div>
