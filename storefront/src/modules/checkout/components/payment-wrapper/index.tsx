@@ -1,17 +1,12 @@
 "use client"
 
 import { loadStripe } from "@stripe/stripe-js"
-import React, {
-  createContext,
-  useEffect,
-  useState,
-  useCallback,
-} from "react"
+import React from "react"
 import StripeWrapper from "./stripe-wrapper"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
+import { createContext } from "react"
 import { HttpTypes } from "@medusajs/types"
 import { isPaypal, isStripe } from "@lib/constants"
-import { sdk } from "@lib/config"
 
 type WrapperProps = {
   cart: HttpTypes.StoreCart
@@ -26,44 +21,13 @@ const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const [paymentSession, setPaymentSession] = useState<
-    HttpTypes.StorePaymentSession | null
-  >(null)
-
-  const initializeStripeSession = useCallback(async () => {
-    if (!cart?.id) return
-    try {
-      const updatedCart = await sdk.store.carts.createPaymentSessions(cart.id)
-      const sessions =
-        updatedCart?.cart?.payment_collection?.payment_sessions || []
-      const stripeSession = sessions.find((s) => isStripe(s.provider_id))
-      if (stripeSession) {
-        setPaymentSession(stripeSession)
-      }
-    } catch (err) {
-      console.error("Error initializing Stripe session", err)
-    }
-  }, [cart?.id])
-
-  useEffect(() => {
-    if (!paymentSession && isStripe(cart?.payment_session?.provider_id)) {
-      initializeStripeSession()
-    } else if (
-      !paymentSession &&
-      cart?.payment_collection?.payment_sessions?.length
-    ) {
-      const session = cart.payment_collection.payment_sessions.find((s) =>
-        isStripe(s.provider_id)
-      )
-      if (session) {
-        setPaymentSession(session)
-      }
-    }
-  }, [cart, initializeStripeSession, paymentSession])
+  const paymentSession = cart.payment_collection?.payment_sessions?.find(
+    (s) => s.status === "pending"
+  )
 
   if (
     isStripe(paymentSession?.provider_id) &&
-    paymentSession?.data?.client_secret &&
+    paymentSession &&
     stripePromise
   ) {
     return (
@@ -80,15 +44,15 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
   }
 
   if (
-    isPaypal(cart?.payment_session?.provider_id) &&
+    isPaypal(paymentSession?.provider_id) &&
     paypalClientId !== undefined &&
     cart
   ) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": paypalClientId,
-          currency: cart?.currency_code?.toUpperCase() || "USD",
+          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
+          currency: cart?.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
@@ -98,7 +62,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  return <>{children}</>
+  return <div>{children}</div>
 }
 
 export default Wrapper
