@@ -4,7 +4,6 @@ import React, { useMemo } from "react"
 import { loadStripe } from "@stripe/stripe-js"
 import { Elements } from "@stripe/react-stripe-js"
 import PaymentElementForm from "@modules/checkout/components/payment/payment-element-form"
-import { StripeContext } from "./stripe-context"
 import { HttpTypes } from "@medusajs/types"
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_KEY!)
@@ -26,23 +25,27 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
     () => ({
       clientSecret,
       appearance: {
-        theme: "stripe",
+        theme: "flat",
         labels: "floating",
+        variables: {
+          fontFamily: "Barlow Condensed, sans-serif",
+          borderRadius: "4px",
+          colorPrimary: "#000000",
+        },
       },
     }),
     [clientSecret]
   )
 
-  if (!clientSecret) {
-    return null // или загрузчик
-  }
+  if (!clientSecret) return null
 
   return (
-    <StripeContext.Provider value={true}>
-      <Elements stripe={stripePromise} options={options}>
-        <PaymentElementForm cart={cart} paymentMethods={paymentMethods} />
-      </Elements>
-    </StripeContext.Provider>
+    <Elements stripe={stripePromise} options={options}>
+      <PaymentElementForm
+        cart={cart}
+        paymentMethods={paymentMethods}
+      />
+    </Elements>
   )
 }
 
