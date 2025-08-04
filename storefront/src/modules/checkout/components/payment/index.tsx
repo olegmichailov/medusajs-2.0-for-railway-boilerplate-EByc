@@ -1,17 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useContext, useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { RadioGroup } from "@headlessui/react"
-import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
-import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
-import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js"
-
-import Divider from "@modules/common/components/divider"
-import PaymentContainer from "@modules/checkout/components/payment-container"
-import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
-import { initiatePaymentSession } from "@lib/data/cart"
 import ErrorMessage from "@modules/checkout/components/error-message"
+import { CheckCircleSolid } from "@medusajs/icons"
+import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
+import { PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js"
+import { StripePaymentElementChangeEvent } from "@stripe/stripe-js"
+import Divider from "@modules/common/components/divider"
+import { StripeContext } from "@modules/checkout/components/payment-wrapper"
+import { initiatePaymentSession } from "@lib/data/cart"
 
 const Payment = ({
   cart,
@@ -21,90 +19,95 @@ const Payment = ({
   availablePaymentMethods: any[]
 }) => {
   const activeSession = cart.payment_collection?.payment_sessions?.find(
-    (s: any) => s.status === "pending"
+    (paymentSession: any) => paymentSession.status === "pending"
   )
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
-    activeSession?.provider_id ?? ""
-  )
+  const [stripeComplete, setStripeComplete] = useState(false)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("")
 
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
 
   const isOpen = searchParams.get("step") === "payment"
-  const isStripe = isStripeFunc(selectedPaymentMethod)
+  const stripeReady = useContext(StripeContext)
+  const stripe = stripeReady ? useStripe() : null
+  const elements = stripeReady ? useElements() : null
 
-  const stripe = useStripe()
-  const elements = useElements()
+  const paidByGiftcard =
+    cart?.gift_cards && cart.gift_cards.length > 0 && cart.total === 0
 
-  const paidByGiftcard = cart?.gift_cards?.length > 0 && cart?.total === 0
-  const paymentReady = (activeSession && cart?.shipping_methods?.length > 0) || paidByGiftcard
+  const paymentReady =
+    (activeSession && cart.shipping_methods.length !== 0) || paidByGiftcard
 
+  // Preserve other query params while setting a new step param
   const createQueryString = useCallback(
     (name: string, value: string) => {
-      const params = new URLSearchParams(searchParams)
+      const params = new URLSearchParams(searchParams.toString())
       params.set(name, value)
       return params.toString()
     },
     [searchParams]
   )
 
-  const handleEdit = () => {
-    router.push(pathname + "?" + createQueryString("step", "payment"), {
-      scroll: false,
-    })
+  const handlePaymentElementChange = async (
+    event: StripePaymentElementChangeEvent
+  ) => {
+    if (event.value.type) {
+      setSelectedPaymentMethod(event.value.type)
+    }
+    setStripeComplete(event.complete)
+    if (event.complete) {
+      setError(null)
+    }
   }
 
   const handleSubmit = async () => {
     setIsLoading(true)
     setError(null)
-
     try {
-      const shouldCreate = !activeSession
-
-      if (shouldCreate) {
-        await initiatePaymentSession(cart, {
-          provider_id: selectedPaymentMethod,
-        })
+      if (!stripe || !elements) {
+        setError("Payment processing not ready. Please try again.")
+        return
       }
-
-      if (isStripe && stripe && elements) {
-        const { error: stripeError } = await stripe.confirmPayment({
-          elements,
-          confirmParams: {
-            return_url: `${window.location.origin}${pathname}?${createQueryString("step", "review")}`,
-          },
-          redirect: "if_required",
-        })
-
-        if (stripeError) {
-          throw new Error(stripeError.message)
-        }
-
-        router.push(pathname + "?" + createQueryString("step", "review"), {
-          scroll: false,
-        })
-      } else {
-        router.push(pathname + "?" + createQueryString("step", "review"), {
-          scroll: false,
-        })
-      }
+      await elements.submit().catch((err) => {
+        console.error(err)
+        setError(err.message || "An error occurred with the payment")
+        return
+      })
+      router.push(pathname + "?" + createQueryString("step", "review"), {
+        scroll: false,
+      })
     } catch (err: any) {
-      setError(err.message || "Payment failed. Try another method.")
+      setError(err.message)
     } finally {
       setIsLoading(false)
     }
   }
 
+  const initStripe = async () => {
+    try {
+      await initiatePaymentSession(cart, {
+        // TODO: change the provider ID if using a different ID in medusa-config.ts
+        provider_id: "pp_stripe_stripe",
+      })
+    } catch (err) {
+      console.error("Failed to initialize Stripe session:", err)
+      setError("Failed to initialize payment. Please try again.")
+    }
+  }
+
   useEffect(() => {
-    setError(null)
-  }, [isOpen])
+    if (!activeSession && isOpen) {
+      initStripe()
+    }
+  }, [cart, isOpen, activeSession])
 
   return (
     <div className="bg-white">
+      {/* Payment Step Header */}
       <div className="flex flex-row items-center justify-between mb-6">
         <Heading
           level="h2"
@@ -122,8 +125,14 @@ const Payment = ({
         {!isOpen && paymentReady && (
           <Text>
             <button
-              onClick={handleEdit}
+              onClick={() =>
+                router.push(
+                  pathname + "?" + createQueryString("step", "payment"),
+                  { scroll: false }
+                )
+              }
               className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover"
+              data-testid="edit-payment-button"
             >
               Edit
             </button>
@@ -131,102 +140,57 @@ const Payment = ({
         )}
       </div>
 
+      {/* Payment Step Content */}
       <div>
-        {isOpen ? (
-          <>
-            {!paidByGiftcard && availablePaymentMethods?.length > 0 && (
-              <>
-                <RadioGroup
-                  value={selectedPaymentMethod}
-                  onChange={(value: string) => setSelectedPaymentMethod(value)}
-                >
-                  {availablePaymentMethods
-                    .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
-                    .map((pm) => (
-                      <PaymentContainer
-                        key={pm.id}
-                        paymentInfoMap={paymentInfoMap}
-                        paymentProviderId={pm.id}
-                        selectedPaymentOptionId={selectedPaymentMethod}
-                      />
-                    ))}
-                </RadioGroup>
-
-                {isStripe && stripe && elements && (
-                  <div className="mt-6">
-                    <Text className="txt-medium-plus text-ui-fg-base mb-2">
-                      Choose payment method:
-                    </Text>
-                    <div className="border rounded-md p-4">
-                      <PaymentElement />
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {paidByGiftcard && (
-              <div className="flex flex-col w-1/3">
-                <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                  Payment method
-                </Text>
-                <Text className="txt-medium text-ui-fg-subtle">
-                  Gift card
-                </Text>
+        {/* Open (active) Payment form */}
+        <div className={isOpen ? "block" : "hidden"}>
+          {!paidByGiftcard &&
+            availablePaymentMethods?.length &&
+            stripeReady && (
+              <div className="mt-5 transition-all duration-150 ease-in-out">
+                <PaymentElement
+                  onChange={handlePaymentElementChange}
+                  options={{ layout: "accordion" }}
+                />
               </div>
             )}
 
-            <ErrorMessage error={error} />
+          {error && (
+            <ErrorMessage
+              error={error}
+              data-testid="payment-error"
+              className="mt-4"
+            />
+          )}
 
-            <Button
-              size="large"
-              className="mt-6"
-              onClick={handleSubmit}
-              isLoading={isLoading}
-              disabled={!selectedPaymentMethod || (isStripe && (!stripe || !elements))}
-            >
-              Continue to review
-            </Button>
-          </>
-        ) : (
-          <>
-            {paymentReady && activeSession ? (
-              <div className="flex items-start gap-x-1 w-full">
-                <div className="flex flex-col w-1/3">
-                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Payment method
-                  </Text>
-                  <Text className="txt-medium text-ui-fg-subtle">
-                    {paymentInfoMap[selectedPaymentMethod]?.title || selectedPaymentMethod}
-                  </Text>
-                </div>
-                <div className="flex flex-col w-1/3">
-                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Payment details
-                  </Text>
-                  <div className="flex gap-2 txt-medium text-ui-fg-subtle items-center">
-                    <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
-                      {paymentInfoMap[selectedPaymentMethod]?.icon || <CreditCard />}
-                    </Container>
-                    <Text>Confirmed via Stripe</Text>
-                  </div>
-                </div>
-              </div>
-            ) : paidByGiftcard ? (
-              <div className="flex flex-col w-1/3">
-                <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                  Payment method
-                </Text>
-                <Text className="txt-medium text-ui-fg-subtle">
-                  Gift card
-                </Text>
-              </div>
-            ) : null}
-          </>
-        )}
+          <Button
+            size="large"
+            className="mt-6"
+            onClick={handleSubmit}
+            isLoading={isLoading}
+            disabled={
+              !stripeComplete ||
+              !stripe ||
+              !elements ||
+              (!selectedPaymentMethod && !paidByGiftcard)
+            }
+            data-testid="submit-payment-button"
+          >
+            Continue to review
+          </Button>
+        </div>
+
+        {/* Collapsed (completed) Payment summary */}
+        <div
+          className={
+            !isOpen && paymentReady && activeSession && selectedPaymentMethod
+              ? "block"
+              : "hidden"
+          }
+        >
+          <Text>Another step may appear</Text>
+        </div>
       </div>
-
-      <Divider className="mt-8" />
     </div>
   )
 }
