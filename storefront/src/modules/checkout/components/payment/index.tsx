@@ -1,4 +1,4 @@
-"use client"
+use client
 
 import { useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -74,9 +74,9 @@ const Payment = ({
 
   // Stripe PaymentRequestButton setup
   useEffect(() => {
-    if (stripe && isStripe && cart) {
+    if (stripe && isStripe && cart && activeSession?.status === "pending") {
       const pr = stripe.paymentRequest({
-        country: "DE", // смените на вашу страну
+        country: "DE", // Смените на нужную страну
         currency: cart.region?.currency_code || "eur",
         total: {
           label: "Total",
@@ -93,8 +93,10 @@ const Payment = ({
           setCanShowPaymentRequest(false)
         }
       })
+    } else {
+      setCanShowPaymentRequest(false)
     }
-  }, [stripe, isStripe, cart])
+  }, [stripe, isStripe, cart, activeSession])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -142,6 +144,9 @@ const Payment = ({
   useEffect(() => {
     setError(null)
   }, [isOpen])
+
+  // Проверяем готовность Stripe (stripeReady) и наличие client_secret
+  const stripeSessionReady = isStripe && stripeReady && activeSession?.data?.client_secret
 
   return (
     <div className="bg-white">
@@ -195,7 +200,7 @@ const Payment = ({
                   })}
               </RadioGroup>
               {/* Stripe Payment Request Button for Google Pay */}
-              {isStripe && stripeReady && canShowPaymentRequest && paymentRequest && (
+              {stripeSessionReady && canShowPaymentRequest && paymentRequest && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
                     Оплата через Google Pay или Apple Pay:
@@ -210,7 +215,7 @@ const Payment = ({
                 </div>
               )}
               {/* Stripe CardElement Fallback */}
-              {isStripe && stripeReady && (
+              {stripeSessionReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
                     Введите данные карты:
@@ -257,7 +262,7 @@ const Payment = ({
             onClick={handleSubmit}
             isLoading={isLoading}
             disabled={
-              (isStripe && !cardComplete) ||
+              (stripeSessionReady && !cardComplete) ||
               (!selectedPaymentMethod && !paidByGiftcard)
             }
             data-testid="submit-payment-button"
