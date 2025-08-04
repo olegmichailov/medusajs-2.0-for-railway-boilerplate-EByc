@@ -37,15 +37,6 @@ export default async function CheckoutForm({
     (session) => session.provider_id === "stripe"
   )
 
-  const options = stripePaymentSession?.data?.client_secret
-    ? {
-        clientSecret: stripePaymentSession.data.client_secret,
-        appearance: {
-          theme: "stripe",
-        },
-      }
-    : undefined
-
   return (
     <div>
       <div className="w-full grid grid-cols-1 gap-y-8">
@@ -57,14 +48,25 @@ export default async function CheckoutForm({
           <Shipping cart={cart} availableShippingMethods={shippingMethods} />
         </div>
 
-        {/* Stripe Elements wrapper */}
         <div>
-          {options ? (
-            <Elements stripe={stripePromise} options={options}>
-              <StripeWrapper cart={cart} paymentMethods={paymentMethods} />
+          {stripePaymentSession?.data?.client_secret ? (
+            <Elements
+              stripe={stripePromise}
+              options={{
+                clientSecret: stripePaymentSession.data.client_secret,
+                appearance: { theme: "stripe" },
+              }}
+            >
+              <StripeWrapper
+                cart={cart}
+                paymentMethods={paymentMethods}
+              />
             </Elements>
           ) : (
-            <Payment cart={cart} availablePaymentMethods={paymentMethods} />
+            <Payment
+              cart={cart}
+              availablePaymentMethods={paymentMethods}
+            />
           )}
         </div>
 
