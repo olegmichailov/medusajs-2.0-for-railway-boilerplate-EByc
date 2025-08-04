@@ -1,12 +1,12 @@
 "use client"
 
+import React, { createContext } from "react"
 import { loadStripe } from "@stripe/stripe-js"
-import React from "react"
-import StripeWrapper from "./stripe-wrapper"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
-import { createContext } from "react"
-import { HttpTypes } from "@medusajs/types"
+
+import StripeWrapper from "./stripe-wrapper"
 import { isPaypal, isStripe } from "@lib/constants"
+import { HttpTypes } from "@medusajs/types"
 
 type WrapperProps = {
   cart: HttpTypes.StoreCart
@@ -17,7 +17,6 @@ export const StripeContext = createContext(false)
 
 const stripeKey = process.env.NEXT_PUBLIC_STRIPE_KEY
 const stripePromise = stripeKey ? loadStripe(stripeKey) : null
-
 const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
@@ -45,14 +44,14 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
 
   if (
     isPaypal(paymentSession?.provider_id) &&
-    paypalClientId !== undefined &&
+    paypalClientId &&
     cart
   ) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
-          currency: cart?.currency_code.toUpperCase(),
+          "client-id": paypalClientId,
+          currency: cart.currency_code?.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
@@ -62,7 +61,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  return <div>{children}</div>
+  return <>{children}</>
 }
 
 export default Wrapper
