@@ -5,9 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
-import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { CardElement } from "@stripe/react-stripe-js"
-import { StripeCardElementOptions } from "@stripe/stripe-js"
+import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
+import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -28,8 +27,6 @@ const Payment = ({
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cardBrand, setCardBrand] = useState<string | null>(null)
-  const [cardComplete, setCardComplete] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
@@ -39,9 +36,11 @@ const Payment = ({
   const pathname = usePathname()
 
   const isOpen = searchParams.get("step") === "payment"
+  const isStripe = isStripeFunc(selectedPaymentMethod)
 
-  const isStripe = isStripeFunc(activeSession?.provider_id)
   const stripeReady = useContext(StripeContext)
+  const stripe = useStripe()
+  const elements = useElements()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -49,28 +48,10 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  const useOptions: StripeCardElementOptions = useMemo(() => {
-    return {
-      style: {
-        base: {
-          fontFamily: "Inter, sans-serif",
-          color: "#424270",
-          "::placeholder": {
-            color: "rgb(107 114 128)",
-          },
-        },
-      },
-      classes: {
-        base: "pt-3 pb-1 block w-full h-11 px-4 mt-0 bg-ui-bg-field border rounded-md appearance-none focus:outline-none focus:ring-0 focus:shadow-borders-interactive-with-active border-ui-border-base hover:bg-ui-bg-field-hover transition-all duration-300 ease-in-out",
-      },
-    }
-  }, [])
-
   const createQueryString = useCallback(
     (name: string, value: string) => {
       const params = new URLSearchParams(searchParams)
       params.set(name, value)
-
       return params.toString()
     },
     [searchParams]
@@ -84,26 +65,40 @@ const Payment = ({
 
   const handleSubmit = async () => {
     setIsLoading(true)
-    try {
-      const shouldInputCard =
-        isStripeFunc(selectedPaymentMethod) && !activeSession
+    setError(null)
 
-      if (!activeSession) {
+    try {
+      const shouldCreate = !activeSession
+
+      if (shouldCreate) {
         await initiatePaymentSession(cart, {
           provider_id: selectedPaymentMethod,
         })
       }
 
-      if (!shouldInputCard) {
-        return router.push(
-          pathname + "?" + createQueryString("step", "review"),
-          {
-            scroll: false,
-          }
-        )
+      if (isStripe && stripe && elements) {
+        const { error: stripeError } = await stripe.confirmPayment({
+          elements,
+          confirmParams: {
+            return_url: `${window.location.origin}${pathname}?${createQueryString("step", "review")}`,
+          },
+          redirect: "if_required",
+        })
+
+        if (stripeError) {
+          throw new Error(stripeError.message)
+        }
+
+        return router.push(pathname + "?" + createQueryString("step", "review"), {
+          scroll: false,
+        })
+      } else {
+        return router.push(pathname + "?" + createQueryString("step", "review"), {
+          scroll: false,
+        })
       }
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message || "Payment failed. Try another method.")
     } finally {
       setIsLoading(false)
     }
@@ -164,23 +159,15 @@ const Payment = ({
                     )
                   })}
               </RadioGroup>
-              {isStripe && stripeReady && (
-                <div className="mt-5 transition-all duration-150 ease-in-out">
-                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
-                  </Text>
 
-                  <CardElement
-                    options={useOptions as StripeCardElementOptions}
-                    onChange={(e) => {
-                      setCardBrand(
-                        e.brand &&
-                          e.brand.charAt(0).toUpperCase() + e.brand.slice(1)
-                      )
-                      setError(e.error?.message || null)
-                      setCardComplete(e.complete)
-                    }}
-                  />
+              {isStripe && stripeReady && (
+                <div className="mt-6">
+                  <Text className="txt-medium-plus text-ui-fg-base mb-2">
+                    Choose payment method:
+                  </Text>
+                  <div className="border rounded-md p-4">
+                    <PaymentElement />
+                  </div>
                 </div>
               )}
             </>
@@ -210,15 +197,10 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={
-              (isStripe && !cardComplete) ||
-              (!selectedPaymentMethod && !paidByGiftcard)
-            }
+            disabled={!selectedPaymentMethod || (isStripe && !stripeReady)}
             data-testid="submit-payment-button"
           >
-            {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
-              : "Continue to review"}
+            Continue to review
           </Button>
         </div>
 
@@ -250,11 +232,7 @@ const Payment = ({
                       <CreditCard />
                     )}
                   </Container>
-                  <Text>
-                    {isStripeFunc(selectedPaymentMethod) && cardBrand
-                      ? cardBrand
-                      : "Another step will appear"}
-                  </Text>
+                  <Text>Confirmed via Stripe</Text>
                 </div>
               </div>
             </div>
