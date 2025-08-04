@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { listCartShippingMethods } from "@lib/data/fulfillment"
 import { listCartPaymentMethods } from "@lib/data/payment"
 import { HttpTypes } from "@medusajs/types"
@@ -7,29 +8,42 @@ import Addresses from "@modules/checkout/components/addresses"
 import Payment from "@modules/checkout/components/payment"
 import Review from "@modules/checkout/components/review"
 import Shipping from "@modules/checkout/components/shipping"
+import { loadStripe, Stripe } from "@stripe/stripe-js"
 import { Elements } from "@stripe/react-stripe-js"
-import { loadStripe } from "@stripe/stripe-js"
 import StripeWrapper from "@modules/checkout/components/payment-wrapper/stripe-wrapper"
 
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
-)
-
-export default async function CheckoutForm({
+export default function CheckoutForm({
   cart,
   customer,
 }: {
   cart: HttpTypes.StoreCart | null
   customer: HttpTypes.StoreCustomer | null
 }) {
-  if (!cart) {
-    return null
-  }
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
+  const [shippingMethods, setShippingMethods] = useState<HttpTypes.StoreShippingOption[] | null>(null)
+  const [paymentMethods, setPaymentMethods] = useState<HttpTypes.StorePaymentCollection[] | null>(null)
 
-  const shippingMethods = await listCartShippingMethods(cart.id)
-  const paymentMethods = await listCartPaymentMethods(cart.region?.id ?? "")
+  useEffect(() => {
+    const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    if (publishableKey) {
+      setStripePromise(loadStripe(publishableKey))
+    }
 
-  if (!shippingMethods || !paymentMethods) {
+    const loadData = async () => {
+      if (cart?.id && cart?.region?.id) {
+        const [shipping, payment] = await Promise.all([
+          listCartShippingMethods(cart.id),
+          listCartPaymentMethods(cart.region.id),
+        ])
+        setShippingMethods(shipping)
+        setPaymentMethods(payment)
+      }
+    }
+
+    loadData()
+  }, [cart?.id, cart?.region?.id])
+
+  if (!cart || !shippingMethods || !paymentMethods) {
     return null
   }
 
@@ -49,17 +63,26 @@ export default async function CheckoutForm({
         </div>
 
         <div>
-          {stripePaymentSession?.data?.client_secret ? (
+          {stripePromise && stripePaymentSession?.data?.client_secret ? (
             <Elements
               stripe={stripePromise}
               options={{
                 clientSecret: stripePaymentSession.data.client_secret,
-                appearance: { theme: "stripe" },
+                appearance: {
+                  theme: "flat",
+                  labels: "floating",
+                  variables: {
+                    fontFamily: "Barlow Condensed, sans-serif",
+                    borderRadius: "4px",
+                    colorPrimary: "#000000",
+                  },
+                },
               }}
             >
               <StripeWrapper
                 cart={cart}
                 paymentMethods={paymentMethods}
+                paymentSession={stripePaymentSession}
               />
             </Elements>
           ) : (
