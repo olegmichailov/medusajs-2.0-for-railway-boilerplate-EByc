@@ -1,50 +1,47 @@
 "use client"
 
-import React, { useMemo } from "react"
-import { loadStripe } from "@stripe/stripe-js"
+import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
 import { Elements } from "@stripe/react-stripe-js"
-import PaymentElementForm from "@modules/checkout/components/payment/payment-element-form"
 import { HttpTypes } from "@medusajs/types"
 
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_KEY!)
-
 type StripeWrapperProps = {
-  cart: HttpTypes.StoreCart
-  paymentMethods: HttpTypes.StorePaymentCollection[]
   paymentSession: HttpTypes.StorePaymentSession
+  stripeKey?: string
+  stripePromise: Promise<Stripe | null> | null
+  children: React.ReactNode
 }
 
 const StripeWrapper: React.FC<StripeWrapperProps> = ({
-  cart,
-  paymentMethods,
   paymentSession,
+  stripeKey,
+  stripePromise,
+  children,
 }) => {
-  const clientSecret = paymentSession?.data?.client_secret
+  const options: StripeElementsOptions = {
+    clientSecret: paymentSession!.data?.client_secret as string | undefined,
+  }
 
-  const options = useMemo(
-    () => ({
-      clientSecret,
-      appearance: {
-        theme: "flat",
-        labels: "floating",
-        variables: {
-          fontFamily: "Barlow Condensed, sans-serif",
-          borderRadius: "4px",
-          colorPrimary: "#000000",
-        },
-      },
-    }),
-    [clientSecret]
-  )
+  if (!stripeKey) {
+    throw new Error(
+      "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
+    )
+  }
 
-  if (!clientSecret) return null
+  if (!stripePromise) {
+    throw new Error(
+      "Stripe promise is missing. Make sure you have provided a valid Stripe key."
+    )
+  }
+
+  if (!paymentSession?.data?.client_secret) {
+    throw new Error(
+      "Stripe client secret is missing. Cannot initialize Stripe."
+    )
+  }
 
   return (
-    <Elements stripe={stripePromise} options={options}>
-      <PaymentElementForm
-        cart={cart}
-        paymentMethods={paymentMethods}
-      />
+    <Elements options={options} stripe={stripePromise}>
+      {children}
     </Elements>
   )
 }
