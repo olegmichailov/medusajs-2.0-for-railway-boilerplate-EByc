@@ -4,9 +4,7 @@
   "private": true,
   "author": "Kasper Fabricius Kristensen <kasper@medusajs.com> & Victor Gerbrands <victor@medusajs.com> (https://www.medusajs.com)",
   "description": "Next.js Starter to be used with Medusa server",
-  "keywords": [
-    "medusa-storefront"
-  ],
+  "keywords": ["medusa-storefront"],
   "scripts": {
     "wait": "await-backend",
     "launcher": "launch-storefront",
@@ -34,7 +32,7 @@
     "@paypal/paypal-js": "^5.0.6",
     "@paypal/react-paypal-js": "^7.8.1",
     "@stripe/react-stripe-js": "1.11.0",
-    "@stripe/stripe-js": "1.56.0",
+    "@stripe/stripe-js": "^1.56.0",
     "algoliasearch": "^4.20.0",
     "axios": "^1.6.7",
     "lodash": "^4.17.21",
