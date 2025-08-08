@@ -5,14 +5,17 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
-import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { PaymentElement, useStripe } from "@stripe/react-stripe-js"
+import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
+import { PaymentElement } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
 import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
+
+// «Безопасный» useStripe — не падает вне <Elements>
+import { useStripeSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
   cart,
@@ -28,7 +31,6 @@ const Payment = ({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cardBrand, setCardBrand] = useState<string | null>(null)
-
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
@@ -41,7 +43,7 @@ const Payment = ({
 
   const isStripe = isStripeFunc(activeSession?.provider_id)
   const stripeReady = useContext(StripeContext)
-  const stripe = useStripe()
+  const stripe = useStripeSafe()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -49,11 +51,7 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  /**
-   * ПОСЛЕ РЕДИРЕКТА (Klarna/Sofort/Revolut Pay и др.)
-   * Stripe возвращает нас с ?payment_intent_client_secret=...
-   * Здесь проверяем статус PI и, если он успешный/processing/requires_capture, дожимаем заказ.
-   */
+  // обработка возврата после редиректа
   useEffect(() => {
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
@@ -66,11 +64,7 @@ const Payment = ({
       .retrievePaymentIntent(clientSecret)
       .then(async ({ paymentIntent, error }) => {
         if (cancelled) return
-        if (error) {
-          console.error("Stripe retrievePaymentIntent error:", error)
-          return
-        }
-        if (!paymentIntent) return
+        if (error || !paymentIntent) return
 
         if (
           paymentIntent.status === "succeeded" ||
@@ -80,13 +74,11 @@ const Payment = ({
           try {
             await placeOrder()
           } catch (e: any) {
-            console.error("placeOrder after redirect failed:", e)
             setError(e?.message || "Failed to complete order after redirect.")
           }
         }
       })
-      .catch((e) => console.error(e))
-
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -122,7 +114,9 @@ const Payment = ({
       if (!shouldInputCard) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
-          { scroll: false }
+          {
+            scroll: false,
+          }
         )
       }
     } catch (err: any) {
@@ -167,7 +161,7 @@ const Payment = ({
 
       <div>
         <div className={isOpen ? "block" : "hidden"}>
-          {!paidByGiftcard && availablePaymentMethods?.length && (
+          {!paidByGiftcard && !!availablePaymentMethods?.length && (
             <>
               <RadioGroup
                 value={selectedPaymentMethod}
@@ -185,21 +179,13 @@ const Payment = ({
                   ))}
               </RadioGroup>
 
-              {/* Payment Element (универсальный UI Stripe) */}
+              {/* Рендерим PaymentElement только когда есть контекст Stripe */}
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your payment details:
+                    Enter your card details:
                   </Text>
-
-                  <PaymentElement
-                    onChange={() => {
-                      // PaymentElement сам управляет своей валидацией.
-                      // cardBrand можно получить через events, но в summary
-                      // оставим "Another step will appear", как и было.
-                      setCardBrand(null)
-                    }}
-                  />
+                  <PaymentElement />
                 </div>
               )}
             </>
@@ -229,13 +215,11 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={
-              (!selectedPaymentMethod && !paidByGiftcard) // PaymentElement сам валидирует
-            }
+            disabled={!selectedPaymentMethod && !paidByGiftcard}
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter payment details"
+              ? " Enter card details"
               : "Continue to review"}
           </Button>
         </div>
@@ -264,15 +248,10 @@ const Payment = ({
                   data-testid="payment-details-summary"
                 >
                   <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
-                    {paymentInfoMap[selectedPaymentMethod]?.icon || (
-                      <CreditCard />
-                    )}
+                    {/* иконка */}
+                    <CreditCard />
                   </Container>
-                  <Text>
-                    {isStripeFunc(selectedPaymentMethod) && cardBrand
-                      ? cardBrand
-                      : "Another step will appear"}
-                  </Text>
+                  <Text>Another step will appear</Text>
                 </div>
               </div>
             </div>
@@ -291,6 +270,7 @@ const Payment = ({
           ) : null}
         </div>
       </div>
+
       <Divider className="mt-8" />
     </div>
   )
