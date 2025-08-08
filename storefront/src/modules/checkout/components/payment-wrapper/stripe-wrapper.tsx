@@ -11,6 +11,11 @@ type StripeWrapperProps = {
   children: React.ReactNode
 }
 
+/**
+ * Монтирует Stripe Elements c client_secret PaymentIntent'а.
+ * Это Payment Element (универсальный UI), который сам отображает доступные методы,
+ * включая кошельки (Apple/Google Pay), если разрешены и доступны для браузера/домена.
+ */
 const StripeWrapper: React.FC<StripeWrapperProps> = ({
   paymentSession,
   stripeKey,
@@ -18,7 +23,8 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
   children,
 }) => {
   const options: StripeElementsOptions = {
-    clientSecret: paymentSession!.data?.client_secret as string | undefined,
+    clientSecret: paymentSession?.data?.client_secret as string | undefined,
+    // Можно настраивать appearance/locale здесь при желании
   }
 
   if (!stripeKey) {
