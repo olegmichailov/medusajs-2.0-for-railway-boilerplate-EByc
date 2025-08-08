@@ -11,7 +11,7 @@ import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { isManual, isPaypal, isStripe } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
-import { usePathname } from "next/navigation" // <-- добавили
+import { usePathname } from "next/navigation" // <-- добавлено
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -29,14 +29,23 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     !cart.email ||
     (cart.shipping_methods?.length ?? 0) < 1
 
+  // TODO: Add this once gift cards are implemented
+  // const paidByGiftcard =
+  //   cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
+
+  // if (paidByGiftcard) {
+  //   return <GiftCardPaymentButton />
+  // }
+
   const paymentSession = cart.payment_collection?.payment_sessions?.[0]
   const stripeEnabled = useContext(StripeContext)
 
-  const path = usePathname()                           // <-- добавили
-  const onCheckoutPage = path?.includes("/checkout")   // <-- добавили
+  const path = usePathname()                         // <-- добавлено
+  const onCheckoutPage = !!path?.includes("/checkout") // <-- добавлено
 
   switch (true) {
-    case isStripe(paymentSession?.provider_id) && stripeEnabled && onCheckoutPage: // <-- изменили
+    // Stripe-кнопка рендерится ТОЛЬКО внутри <Elements> и ТОЛЬКО на /checkout
+    case isStripe(paymentSession?.provider_id) && stripeEnabled && onCheckoutPage:
       return (
         <StripePaymentButton
           notReady={notReady}
@@ -60,8 +69,9 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
       )
 
     default:
+      // Вне checkout (например, /cart) — безопасная заглушка
       return (
-        <Button disabled={true} size="large">
+        <Button disabled size="large">
           Select a payment method
         </Button>
       )
