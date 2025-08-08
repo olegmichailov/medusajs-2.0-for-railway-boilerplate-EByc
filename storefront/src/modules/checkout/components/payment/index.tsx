@@ -6,8 +6,7 @@ import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import { Button, Container, Heading, Text, Tooltip, clx } from "@medusajs/ui"
-import { CardElement } from "@stripe/react-stripe-js"
-import { StripeCardElementOptions } from "@stripe/stripe-js"
+import { PaymentElement } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -49,7 +48,7 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  const useOptions: StripeCardElementOptions = useMemo(() => {
+  const useOptions: StripePaymentElementOptions = useMemo(() => {
     return {
       style: {
         base: {
@@ -170,8 +169,8 @@ const Payment = ({
                     Enter your card details:
                   </Text>
 
-                  <CardElement
-                    options={useOptions as StripeCardElementOptions}
+                  <PaymentElement
+                    options={useOptions as StripePaymentElementOptions}
                     onChange={(e) => {
                       setCardBrand(
                         e.brand &&
