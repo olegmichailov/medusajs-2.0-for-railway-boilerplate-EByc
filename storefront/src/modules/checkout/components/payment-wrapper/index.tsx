@@ -1,10 +1,9 @@
 "use client"
 
 import { loadStripe } from "@stripe/stripe-js"
-import React from "react"
+import React, { createContext } from "react"
 import StripeWrapper from "./stripe-wrapper"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
-import { createContext } from "react"
 import { HttpTypes } from "@medusajs/types"
 import { isPaypal, isStripe } from "@lib/constants"
 
@@ -13,6 +12,10 @@ type WrapperProps = {
   children: React.ReactNode
 }
 
+/**
+ * Этот контекст говорит "внутри ли мы Stripe Elements" на странице checkout.
+ * Нужен, чтобы Stripe-кнопка не пыталась работать вне checkout (например, в /cart).
+ */
 export const StripeContext = createContext(false)
 
 const stripeKey = process.env.NEXT_PUBLIC_STRIPE_KEY
@@ -25,11 +28,8 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     (s) => s.status === "pending"
   )
 
-  if (
-    isStripe(paymentSession?.provider_id) &&
-    paymentSession &&
-    stripePromise
-  ) {
+  // Stripe Payment Element (включая методы-редиректы, Apple/Google Pay)
+  if (isStripe(paymentSession?.provider_id) && paymentSession && stripePromise) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
@@ -43,15 +43,12 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  if (
-    isPaypal(paymentSession?.provider_id) &&
-    paypalClientId !== undefined &&
-    cart
-  ) {
+  // PayPal (если у тебя включен)
+  if (isPaypal(paymentSession?.provider_id) && paypalClientId && cart) {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
+          "client-id": paypalClientId,
           currency: cart?.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
@@ -62,6 +59,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
+  // Остальные случаи — просто пробрасываем детей
   return <div>{children}</div>
 }
 
