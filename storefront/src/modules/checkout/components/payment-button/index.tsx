@@ -4,12 +4,13 @@ import { Button } from "@medusajs/ui"
 import { OnApproveActions, OnApproveData } from "@paypal/paypal-js"
 import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
 import { useElements, useStripe } from "@stripe/react-stripe-js"
-import React, { useState } from "react"
+import React, { useContext, useState } from "react"
 import ErrorMessage from "../error-message"
 import Spinner from "@modules/common/icons/spinner"
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { isManual, isPaypal, isStripe } from "@lib/constants"
+import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -36,9 +37,10 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
   // }
 
   const paymentSession = cart.payment_collection?.payment_sessions?.[0]
+  const stripeEnabled = useContext(StripeContext)
 
   switch (true) {
-    case isStripe(paymentSession?.provider_id):
+    case isStripe(paymentSession?.provider_id) && stripeEnabled:
       return (
         <StripePaymentButton
           notReady={notReady}
@@ -46,10 +48,12 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
           data-testid={dataTestId}
         />
       )
+
     case isManual(paymentSession?.provider_id):
       return (
         <ManualTestPaymentButton notReady={notReady} data-testid={dataTestId} />
       )
+
     case isPaypal(paymentSession?.provider_id):
       return (
         <PayPalPaymentButton
@@ -58,8 +62,14 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
           data-testid={dataTestId}
         />
       )
+
     default:
-      return <Button disabled>Select a payment method</Button>
+      // Вне Elements (например, /cart) — показываем безопасную заглушку
+      return (
+        <Button disabled={true} size="large">
+          Select a payment method
+        </Button>
+      )
   }
 }
 
@@ -111,7 +121,7 @@ const StripePaymentButton = ({
     (s) => s.status === "pending"
   )
 
-  const disabled = !stripe || !elements ? true : false
+  const disabled = !stripe || !elements || notReady
 
   const handlePayment = async () => {
     setSubmitting(true)
@@ -157,14 +167,14 @@ const StripePaymentButton = ({
       return
     }
 
-    // Для redirect-методов браузер уйдёт → после возврата заказ автодожмётся в Payment (useEffect).
+    // Для redirect-методов: браузер уйдёт → после возврата заказ автодожмётся (логика в Payment/index.tsx)
     setSubmitting(false)
   }
 
   return (
     <>
       <Button
-        disabled={disabled || notReady}
+        disabled={disabled}
         onClick={handlePayment}
         size="large"
         isLoading={submitting}
