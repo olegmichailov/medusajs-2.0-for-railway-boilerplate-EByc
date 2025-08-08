@@ -11,7 +11,7 @@ import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { isManual, isPaypal, isStripe } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
-import { usePathname } from "next/navigation" // <-- добавлено
+import { usePathname } from "next/navigation"
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -22,6 +22,13 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
   cart,
   "data-testid": dataTestId,
 }) => {
+  // РЕНДЕРИМ КНОПКУ ТОЛЬКО НА /checkout
+  const path = usePathname()
+  const onCheckoutPage = !!path?.includes("/checkout")
+  if (!onCheckoutPage) {
+    return null
+  }
+
   const notReady =
     !cart ||
     !cart.shipping_address ||
@@ -29,23 +36,11 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     !cart.email ||
     (cart.shipping_methods?.length ?? 0) < 1
 
-  // TODO: Add this once gift cards are implemented
-  // const paidByGiftcard =
-  //   cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
-
-  // if (paidByGiftcard) {
-  //   return <GiftCardPaymentButton />
-  // }
-
   const paymentSession = cart.payment_collection?.payment_sessions?.[0]
   const stripeEnabled = useContext(StripeContext)
 
-  const path = usePathname()                         // <-- добавлено
-  const onCheckoutPage = !!path?.includes("/checkout") // <-- добавлено
-
   switch (true) {
-    // Stripe-кнопка рендерится ТОЛЬКО внутри <Elements> и ТОЛЬКО на /checkout
-    case isStripe(paymentSession?.provider_id) && stripeEnabled && onCheckoutPage:
+    case isStripe(paymentSession?.provider_id) && stripeEnabled:
       return (
         <StripePaymentButton
           notReady={notReady}
@@ -69,7 +64,6 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
       )
 
     default:
-      // Вне checkout (например, /cart) — безопасная заглушка
       return (
         <Button disabled size="large">
           Select a payment method
@@ -122,10 +116,6 @@ const StripePaymentButton = ({
   const stripe = useStripe()
   const elements = useElements()
 
-  const session = cart.payment_collection?.payment_sessions?.find(
-    (s) => s.status === "pending"
-  )
-
   const disabled = !stripe || !elements || notReady
 
   const handlePayment = async () => {
@@ -172,7 +162,7 @@ const StripePaymentButton = ({
       return
     }
 
-    // Для redirect-методов: браузер уйдёт → после возврата заказ автодожмётся (логика в Payment/index.tsx)
+    // redirect-методы: по возврату заказ автодожмётся (см. Payment/index.tsx)
     setSubmitting(false)
   }
 
