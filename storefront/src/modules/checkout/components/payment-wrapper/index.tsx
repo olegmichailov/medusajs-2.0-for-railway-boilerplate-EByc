@@ -1,10 +1,9 @@
 "use client"
 
 import { loadStripe } from "@stripe/stripe-js"
-import React from "react"
+import React, { createContext } from "react"
 import StripeWrapper from "./stripe-wrapper"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
-import { createContext } from "react"
 import { HttpTypes } from "@medusajs/types"
 import { isPaypal, isStripe } from "@lib/constants"
 
@@ -25,15 +24,16 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     (s) => s.status === "pending"
   )
 
-  if (
+  const isStripeSession =
     isStripe(paymentSession?.provider_id) &&
-    paymentSession &&
-    stripePromise
-  ) {
+    !!stripePromise &&
+    !!paymentSession?.data?.client_secret // <-- строго проверяем client_secret
+
+  if (isStripeSession) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
-          paymentSession={paymentSession}
+          paymentSession={paymentSession!}
           stripeKey={stripeKey}
           stripePromise={stripePromise}
         >
@@ -51,7 +51,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     return (
       <PayPalScriptProvider
         options={{
-          "client-id": process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "test",
+          "client-id": paypalClientId || "test",
           currency: cart?.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
@@ -62,6 +62,7 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
+  // По умолчанию — без провайдеров. Это важно для страниц вроде /cart.
   return <div>{children}</div>
 }
 
