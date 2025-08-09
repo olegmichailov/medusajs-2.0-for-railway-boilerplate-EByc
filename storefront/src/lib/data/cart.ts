@@ -6,7 +6,7 @@ import { HttpTypes } from "@medusajs/types"
 import { omit } from "lodash"
 import { revalidateTag } from "next/cache"
 import { redirect } from "next/navigation"
-import { getAuthHeaders, getCartId, removeCartId, setCartId } from "./cookies"
+import { getAuthHeaders, getCartId, removeCartId, setCartId, touchCartCookie } from "./cookies"
 import { getProductsById } from "./products"
 import { getRegion } from "./regions"
 
@@ -16,6 +16,9 @@ export async function retrieveCart() {
   if (!cartId) {
     return null
   }
+
+  // ВАЖНО: перепишем cookie с нужными атрибутами (SameSite=None, Secure, path=/)
+  touchCartCookie()
 
   return await sdk.store.cart
     .retrieve(cartId, {}, { next: { tags: ["cart"] }, ...getAuthHeaders() })
@@ -89,10 +92,7 @@ export async function addToCart({
   await sdk.store.cart
     .createLineItem(
       cart.id,
-      {
-        variant_id: variantId,
-        quantity,
-      },
+      { variant_id: variantId, quantity },
       {},
       getAuthHeaders()
     )
@@ -154,32 +154,24 @@ export async function enrichLineItems(
 ) {
   if (!lineItems) return []
 
-  // Prepare query parameters
   const queryParams = {
     ids: lineItems.map((lineItem) => lineItem.product_id!),
-    regionId: regionId,
+    regionId,
   }
 
-  // Fetch products by their IDs
   const products = await getProductsById(queryParams)
-  // If there are no line items or products, return an empty array
   if (!lineItems?.length || !products) {
     return []
   }
 
-  // Enrich line items with product and variant information
   const enrichedItems = lineItems.map((item) => {
     const product = products.find((p: any) => p.id === item.product_id)
-    const variant = product?.variants?.find(
-      (v: any) => v.id === item.variant_id
-    )
+    const variant = product?.variants?.find((v: any) => v.id === item.variant_id)
 
-    // If product or variant is not found, return the original item
     if (!product || !variant) {
       return item
     }
 
-    // If product and variant are found, enrich the item
     return {
       ...item,
       variant: {
@@ -214,10 +206,7 @@ export async function setShippingMethod({
 
 export async function initiatePaymentSession(
   cart: HttpTypes.StoreCart,
-  data: {
-    provider_id: string
-    context?: Record<string, unknown>
-  }
+  data: { provider_id: string; context?: Record<string, unknown> }
 ) {
   return sdk.store.payment
     .initiatePaymentSession(cart, data, {}, getAuthHeaders())
@@ -241,51 +230,20 @@ export async function applyPromotions(codes: string[]) {
     .catch(medusaError)
 }
 
-export async function applyGiftCard(code: string) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, { gift_cards: [{ code }] }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
+export async function applyGiftCard(_code: string) {
+  // не используется
 }
 
-export async function removeDiscount(code: string) {
-  // const cartId = getCartId()
-  // if (!cartId) return "No cartId cookie found"
-  // try {
-  //   await deleteDiscount(cartId, code)
-  //   revalidateTag("cart")
-  // } catch (error: any) {
-  //   throw error
-  // }
+export async function removeDiscount(_code: string) {
+  // не используется
 }
 
-export async function removeGiftCard(
-  codeToRemove: string,
-  giftCards: any[]
-  // giftCards: GiftCard[]
-) {
-  //   const cartId = getCartId()
-  //   if (!cartId) return "No cartId cookie found"
-  //   try {
-  //     await updateCart(cartId, {
-  //       gift_cards: [...giftCards]
-  //         .filter((gc) => gc.code !== codeToRemove)
-  //         .map((gc) => ({ code: gc.code })),
-  //     }).then(() => {
-  //       revalidateTag("cart")
-  //     })
-  //   } catch (error: any) {
-  //     throw error
-  //   }
+export async function removeGiftCard(_codeToRemove: string, _giftCards: any[]) {
+  // не используется
 }
 
 export async function submitPromotionForm(
-  currentState: unknown,
+  _currentState: unknown,
   formData: FormData
 ) {
   const code = formData.get("code") as string
@@ -296,16 +254,12 @@ export async function submitPromotionForm(
   }
 }
 
-// TODO: Pass a POJO instead of a form entity here
-export async function setAddresses(currentState: unknown, formData: FormData) {
+export async function setAddresses(_currentState: unknown, formData: FormData) {
   try {
-    if (!formData) {
-      throw new Error("No form data found when setting addresses")
-    }
+    if (!formData) throw new Error("No form data found when setting addresses")
+
     const cartId = getCartId()
-    if (!cartId) {
-      throw new Error("No existing cart found when setting addresses")
-    }
+    if (!cartId) throw new Error("No existing cart found when setting addresses")
 
     const data = {
       shipping_address: {
@@ -326,7 +280,7 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
     const sameAsBilling = formData.get("same_as_billing")
     if (sameAsBilling === "on") data.billing_address = data.shipping_address
 
-    if (sameAsBilling !== "on")
+    if (sameAsBilling !== "on") {
       data.billing_address = {
         first_name: formData.get("billing_address.first_name"),
         last_name: formData.get("billing_address.last_name"),
@@ -339,6 +293,8 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
         province: formData.get("billing_address.province"),
         phone: formData.get("billing_address.phone"),
       }
+    }
+
     await updateCart(data)
   } catch (e: any) {
     return e.message
@@ -373,11 +329,6 @@ export async function placeOrder() {
   return cartRes.cart
 }
 
-/**
- * Updates the countrycode param and revalidates the regions cache
- * @param regionId
- * @param countryCode
- */
 export async function updateRegion(countryCode: string, currentPath: string) {
   const cartId = getCartId()
   const region = await getRegion(countryCode)
