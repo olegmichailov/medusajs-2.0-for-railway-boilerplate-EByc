@@ -21,21 +21,23 @@ export const removeAuthToken = () => {
   cookies().set("_medusa_jwt", "", { maxAge: -1 })
 }
 
-/** ===== cart_id — ХИРУРГИЧЕСКАЯ ПРАВКА =====
- * Возврат с внешних платёжных страниц — это кросс-сайт редирект.
- * Чтобы кука не «терялась», она должна быть SameSite=None; Secure и с path="/".
+/** ===== cart_id — ХИРУРГИЧЕСКИЙ ФИКС =====
+ * Кросс-сайтовый возврат из Klarna/Revolut/и др. требует SameSite=None; Secure; path="/".
+ * В dev на http://localhost кука с Secure не поставится, поэтому делаем условие.
  */
+const isProd = process.env.NODE_ENV === "production"
+
 export const getCartId = () => {
   return cookies().get("_medusa_cart_id")?.value
 }
 
 export const setCartId = (cartId: string) => {
   cookies().set("_medusa_cart_id", cartId, {
-    maxAge: 60 * 60 * 24 * 30, // 30 дней (можно вернуть 7, если хочешь)
+    maxAge: 60 * 60 * 24 * 30,  // 30 дней
     httpOnly: true,
-    sameSite: "none",          // <-- ключевой фикс
-    secure: true,              // SameSite=None требует Secure
-    path: "/",                 // доступна на всех маршрутах
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
+    path: "/",
   })
 }
 
@@ -43,8 +45,8 @@ export const removeCartId = () => {
   cookies().set("_medusa_cart_id", "", {
     maxAge: 0,
     httpOnly: true,
-    sameSite: "none",
-    secure: true,
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
     path: "/",
   })
 }
