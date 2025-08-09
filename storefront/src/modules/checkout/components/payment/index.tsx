@@ -13,8 +13,6 @@ import PaymentContainer from "@modules/checkout/components/payment-container"
 import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
-
-// безопасный хук Stripe (не падает вне <Elements>)
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
@@ -40,7 +38,6 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
 
-  // ВАЖНО: ориентируемся на выбранный метод, а не только на активную сессию
   const choseStripe = isStripeFunc(selectedPaymentMethod)
   const stripeReady = useContext(StripeContext)
   const stripe = useStripeSafe()
@@ -51,11 +48,7 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  /**
-   * --- ФИКС 1: корректная обработка возврата/отмены redirect-методов ---
-   * Если пришли с параметрами ?payment_intent=...&redirect_status=canceled|failed,
-   * аккуратно чистим их и возвращаем на step=payment, чтобы избежать 404.
-   */
+  // --- ФИКС: корректно обрабатываем отмену/ошибку редирект-методов ---
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -72,21 +65,19 @@ const Payment = ({
       ].forEach((k) => params.delete(k))
       params.set("step", "payment")
       router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+      // ВАЖНО: сразу перерисовываем серверные компоненты (шапка/сайдбар видят актуальную корзину)
+      router.refresh()
       return
     }
   }, [searchParams, pathname, router])
 
-  /**
-   * --- ФИКС 2: auto-init payment session для Stripe ---
-   * Чтобы PaymentElement (вкладки Card/Klarna/RevolutPay и т.п.) появлялся СРАЗУ
-   * после выбора Stripe, инициируем сессию, если её ещё нет.
-   */
+  // --- Авто-создание stripe-сессии, чтобы PaymentElement появился сразу ---
   useEffect(() => {
     let cancelled = false
     const run = async () => {
       if (!cart) return
       if (!choseStripe) return
-      if (activeSession) return // уже есть сессия
+      if (activeSession) return
       try {
         await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
       } catch (e: any) {
@@ -100,11 +91,7 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
-  /**
-   * --- ФИКС 3: успешный редирект (PI уже подтверждён) ---
-   * Если попали обратно со `payment_intent_client_secret`,
-   * завершаем заказ без участия пользователя.
-   */
+  // --- Успешный возврат со stripe (PI уже подтвержден) ---
   useEffect(() => {
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
@@ -229,13 +216,11 @@ const Payment = ({
                   ))}
               </RadioGroup>
 
-              {/* Показываем PaymentElement сразу после выбора Stripe */}
               {choseStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
                     Enter your payment details:
                   </Text>
-                  {/* layout: "tabs" — чтобы сразу были видны Card / Klarna / Revolut Pay и т.п. */}
                   <PaymentElement options={{ layout: "tabs" }} />
                 </div>
               )}
