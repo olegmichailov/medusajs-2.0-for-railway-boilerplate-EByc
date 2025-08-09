@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useCallback, useContext, useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -14,7 +14,7 @@ import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
 
-// «Безопасный» useStripe — не падает вне <Elements>
+// твой safe-hook оставляю как есть
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
@@ -30,7 +30,6 @@ const Payment = ({
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cardBrand, setCardBrand] = useState<string | null>(null)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
@@ -51,12 +50,29 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  // обработка возврата после редиректа
+  // --- МИНИ-ФИКС №1: корректная обработка возврата/отмены ---
   useEffect(() => {
+    const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
       searchParams.get("setup_intent_client_secret")
 
+    // отмена любых redirect-методов → вернуть на шаг оплаты, убрать stripe-параметры
+    if (redirectStatus === "canceled") {
+      const params = new URLSearchParams(searchParams.toString())
+      ;[
+        "payment_intent",
+        "payment_intent_client_secret",
+        "setup_intent",
+        "setup_intent_client_secret",
+        "redirect_status",
+      ].forEach((k) => params.delete(k))
+      params.set("step", "payment")
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+      return
+    }
+
+    // дальше — только успех/обработка/захват
     if (!stripe || !clientSecret) return
 
     let cancelled = false
@@ -82,7 +98,7 @@ const Payment = ({
     return () => {
       cancelled = true
     }
-  }, [stripe, searchParams])
+  }, [stripe, searchParams, pathname, router])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -179,13 +195,13 @@ const Payment = ({
                   ))}
               </RadioGroup>
 
-              {/* Рендерим PaymentElement только когда есть контекст Stripe */}
+              {/* МИНИ-ФИКС №2: показать все доступные методы сразу */}
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
+                    Enter your payment details:
                   </Text>
-                  <PaymentElement />
+                  <PaymentElement options={{ layout: "tabs" }} />
                 </div>
               )}
             </>
@@ -219,7 +235,7 @@ const Payment = ({
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
+              ? " Enter payment details"
               : "Continue to review"}
           </Button>
         </div>
@@ -248,7 +264,6 @@ const Payment = ({
                   data-testid="payment-details-summary"
                 >
                   <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
-                    {/* иконка */}
                     <CreditCard />
                   </Container>
                   <Text>Another step will appear</Text>
