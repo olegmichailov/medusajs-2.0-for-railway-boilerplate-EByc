@@ -14,7 +14,7 @@ import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
 
-// твой safe-hook оставляю как есть
+// безопасный хук (не падает вне <Elements>)
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
@@ -50,15 +50,15 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  // --- МИНИ-ФИКС №1: корректная обработка возврата/отмены ---
+  // МИНИ-ФИКС №1: корректная обработка возврата/отмены/неуспеха редирект-методов
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
       searchParams.get("setup_intent_client_secret")
 
-    // отмена любых redirect-методов → вернуть на шаг оплаты, убрать stripe-параметры
-    if (redirectStatus === "canceled") {
+    // Отмена/неуспех на стороне провайдера → вернём на шаг оплаты и очистим хвосты в URL
+    if (redirectStatus === "canceled" || redirectStatus === "failed") {
       const params = new URLSearchParams(searchParams.toString())
       ;[
         "payment_intent",
@@ -66,13 +66,15 @@ const Payment = ({
         "setup_intent",
         "setup_intent_client_secret",
         "redirect_status",
+        "source",
+        "state",
       ].forEach((k) => params.delete(k))
       params.set("step", "payment")
       router.replace(`${pathname}?${params.toString()}`, { scroll: false })
       return
     }
 
-    // дальше — только успех/обработка/захват
+    // Успех/в обработке/требует захвата → дожимаем заказ
     if (!stripe || !clientSecret) return
 
     let cancelled = false
@@ -92,6 +94,26 @@ const Payment = ({
           } catch (e: any) {
             setError(e?.message || "Failed to complete order after redirect.")
           }
+          return
+        }
+
+        // Ещё один вариант "отмены/неуспеха" от Stripe
+        if (
+          paymentIntent.status === "requires_payment_method" ||
+          paymentIntent.status === "canceled"
+        ) {
+          const params = new URLSearchParams(searchParams.toString())
+          ;[
+            "payment_intent",
+            "payment_intent_client_secret",
+            "setup_intent",
+            "setup_intent_client_secret",
+            "redirect_status",
+            "source",
+            "state",
+          ].forEach((k) => params.delete(k))
+          params.set("step", "payment")
+          router.replace(`${pathname}?${params.toString()}`, { scroll: false })
         }
       })
       .catch(() => {})
@@ -99,6 +121,16 @@ const Payment = ({
       cancelled = true
     }
   }, [stripe, searchParams, pathname, router])
+
+  // МИНИ-ФИКС №1.1: если способ не выбран, а Stripe доступен — подставим его по умолчанию
+  useEffect(() => {
+    if (!selectedPaymentMethod && Array.isArray(availablePaymentMethods)) {
+      const stripePm = availablePaymentMethods.find(
+        (m) => m.id === "stripe" || m.provider_id === "stripe"
+      )
+      if (stripePm) setSelectedPaymentMethod(stripePm.id ?? stripePm.provider_id)
+    }
+  }, [selectedPaymentMethod, availablePaymentMethods])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -130,9 +162,7 @@ const Payment = ({
       if (!shouldInputCard) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
-          {
-            scroll: false,
-          }
+          { scroll: false }
         )
       }
     } catch (err: any) {
