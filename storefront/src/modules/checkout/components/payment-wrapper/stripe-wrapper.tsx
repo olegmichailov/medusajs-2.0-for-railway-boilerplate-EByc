@@ -13,8 +13,7 @@ type StripeWrapperProps = {
 
 /**
  * Монтирует Stripe Elements c client_secret PaymentIntent'а.
- * Это Payment Element (универсальный UI), который сам отображает доступные методы,
- * включая кошельки (Apple/Google Pay), если разрешены и доступны для браузера/домена.
+ * Payment Element сам покажет доступные методы (Card, SEPA, Klarna, кошельки и т.д.)
  */
 const StripeWrapper: React.FC<StripeWrapperProps> = ({
   paymentSession,
@@ -22,9 +21,14 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
   stripePromise,
   children,
 }) => {
+  const clientSecret = paymentSession?.data?.client_secret as
+    | string
+    | undefined
+
   const options: StripeElementsOptions = {
-    clientSecret: paymentSession?.data?.client_secret as string | undefined,
-    // Можно настраивать appearance/locale здесь при желании
+    clientSecret,
+    locale: "en", // при желании "de"
+    appearance: { theme: "stripe" },
   }
 
   if (!stripeKey) {
@@ -39,14 +43,15 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
     )
   }
 
-  if (!paymentSession?.data?.client_secret) {
+  if (!clientSecret) {
     throw new Error(
       "Stripe client secret is missing. Cannot initialize Stripe."
     )
   }
 
+  // ВАЖНО: key заставляет Elements переинициализироваться при новом client_secret
   return (
-    <Elements options={options} stripe={stripePromise}>
+    <Elements key={clientSecret} options={options} stripe={stripePromise}>
       {children}
     </Elements>
   )
