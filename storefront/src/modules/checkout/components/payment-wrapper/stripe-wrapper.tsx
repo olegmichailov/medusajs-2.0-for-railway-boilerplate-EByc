@@ -12,8 +12,9 @@ type StripeWrapperProps = {
 }
 
 /**
- * Монтирует Stripe Elements с client_secret PaymentIntent'а.
- * Payment Element сам показывает доступные методы (Card, SEPA, Klarna, кошельки и т.д.)
+ * Безопасная обёртка Stripe Elements:
+ * - не бросает исключений во время рендера;
+ * - если нет данных для инициализации, просто рендерит детей как есть.
  */
 const StripeWrapper: React.FC<StripeWrapperProps> = ({
   paymentSession,
@@ -25,31 +26,30 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
     | string
     | undefined
 
+  // если что-то не готово — ничего не падает, просто возвращаем детей
+  if (!stripeKey || !stripePromise || !clientSecret) {
+    if (typeof window !== "undefined") {
+      // только в браузере, чтобы не шуметь на сервере
+      console.warn(
+        "[StripeWrapper] Elements not mounted:",
+        {
+          hasStripeKey: !!stripeKey,
+          hasStripePromise: !!stripePromise,
+          hasClientSecret: !!clientSecret,
+          provider: paymentSession?.provider_id,
+        }
+      )
+    }
+    return <>{children}</>
+  }
+
   const options: StripeElementsOptions = {
     clientSecret,
-    locale: "en", // при желании "de"
+    locale: "en",
     appearance: { theme: "stripe" },
   }
 
-  if (!stripeKey) {
-    throw new Error(
-      "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
-    )
-  }
-
-  if (!stripePromise) {
-    throw new Error(
-      "Stripe promise is missing. Make sure you have provided a valid Stripe key."
-    )
-  }
-
-  if (!clientSecret) {
-    throw new Error(
-      "Stripe client secret is missing. Cannot initialize Stripe."
-    )
-  }
-
-  // key → реинициализация Elements при новом client_secret
+  // key заставляет Elements переинициализироваться при смене client_secret
   return (
     <Elements key={clientSecret} options={options} stripe={stripePromise}>
       {children}
