@@ -13,8 +13,8 @@ type WrapperProps = {
 }
 
 /**
- * Этот контекст говорит "внутри ли мы Stripe Elements" на странице checkout.
- * Нужен, чтобы Stripe-кнопка не пыталась работать вне checkout (например, в /cart).
+ * Говорит дочерним компонентам, что мы внутри Stripe Elements на checkout.
+ * Нужен, чтобы Stripe-кнопка не работала вне checkout (например, на /cart).
  */
 export const StripeContext = createContext(false)
 
@@ -24,16 +24,18 @@ const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const paymentSession = cart.payment_collection?.payment_sessions?.find(
-    (s) => s.status === "pending"
+  const sessions = cart.payment_collection?.payment_sessions ?? []
+
+  // Ищем именно stripe-сессию С ЛЮБЫМ статусом, но с client_secret (это главное для Elements)
+  const stripeSession = sessions.find(
+    (s) => isStripe(s.provider_id) && s?.data?.client_secret
   )
 
-  // Stripe Payment Element (включая методы-редиректы, Apple/Google Pay)
-  if (isStripe(paymentSession?.provider_id) && paymentSession && stripePromise) {
+  if (stripeSession && stripePromise) {
     return (
       <StripeContext.Provider value={true}>
         <StripeWrapper
-          paymentSession={paymentSession}
+          paymentSession={stripeSession}
           stripeKey={stripeKey}
           stripePromise={stripePromise}
         >
@@ -43,13 +45,14 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  // PayPal (если у тебя включен)
-  if (isPaypal(paymentSession?.provider_id) && paypalClientId && cart) {
+  // PayPal (если включен у тебя)
+  const paypalSession = sessions.find((s) => isPaypal(s.provider_id))
+  if (paypalSession && paypalClientId && cart) {
     return (
       <PayPalScriptProvider
         options={{
           "client-id": paypalClientId,
-          currency: cart?.currency_code.toUpperCase(),
+          currency: cart.currency_code.toUpperCase(),
           intent: "authorize",
           components: "buttons",
         }}
