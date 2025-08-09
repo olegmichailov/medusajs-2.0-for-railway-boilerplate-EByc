@@ -48,8 +48,20 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
+  // ---------- NEW #A: refresh при возврате из bfcache (например, Back на Revolut) ----------
+  useEffect(() => {
+    const onPageShow = () => {
+      // заставляем серверные компоненты перечитать корзину и шапку
+      router.refresh()
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("pageshow", onPageShow)
+      return () => window.removeEventListener("pageshow", onPageShow)
+    }
+  }, [router])
+
   /**
-   * CANCEL/FAILED с редиректа — аккуратно чистим query и НЕ завершаем заказ.
+   * CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ.
    */
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
@@ -68,12 +80,31 @@ const Payment = ({
       params.set("step", "payment")
 
       router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-      router.refresh() // чтобы хедер/сайдбар увидели фактическую корзину
+      router.refresh()
+    }
+  }, [searchParams, pathname, router])
+
+  // ---------- NEW #B: сторожок «вернулись без redirect_status» (часто при Back на Revolut) ----------
+  useEffect(() => {
+    const redirectStatus = searchParams.get("redirect_status")
+    const clientSecret =
+      searchParams.get("payment_intent_client_secret") ||
+      searchParams.get("setup_intent_client_secret")
+
+    // если пришли с секретом, но без redirect_status — через 8с считаем отменой
+    if (clientSecret && !redirectStatus) {
+      const t = setTimeout(() => {
+        const params = new URLSearchParams(searchParams.toString())
+        params.set("redirect_status", "canceled")
+        router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+        router.refresh()
+      }, 8000)
+      return () => clearTimeout(t)
     }
   }, [searchParams, pathname, router])
 
   /**
-   * Авто-инициация stripe-сессии — чтобы PaymentElement появлялся сразу после выбора Stripe.
+   * Авто-инициация stripe-сессии — чтобы PaymentElement появился сразу.
    */
   useEffect(() => {
     let cancelled = false
@@ -96,8 +127,8 @@ const Payment = ({
 
   /**
    * Успешное завершение после возврата/без редиректа.
-   * ВАЖНО: placeOrder вызываем ТОЛЬКО если redirect_status отсутствует
-   * (карточный флоу) ИЛИ равен "succeeded".
+   * placeOrder вызываем ТОЛЬКО если redirect_status отсутствует
+   * (карточный флоу) ИЛИ равен "succeeded"/"completed".
    */
   useEffect(() => {
     const clientSecret =
@@ -118,7 +149,6 @@ const Payment = ({
         if (cancelled) return
         if (error || !paymentIntent) return
 
-        // завершаем только на финальных статусах
         if (
           paymentIntent.status === "succeeded" ||
           paymentIntent.status === "requires_capture" ||
