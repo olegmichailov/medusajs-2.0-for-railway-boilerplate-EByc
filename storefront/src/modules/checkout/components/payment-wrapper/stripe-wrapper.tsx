@@ -49,7 +49,7 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
     )
   }
 
-  // key заставляет Elements переинициализироваться при новом client_secret
+  // key → реинициализация Elements при новом client_secret
   return (
     <Elements key={clientSecret} options={options} stripe={stripePromise}>
       {children}
