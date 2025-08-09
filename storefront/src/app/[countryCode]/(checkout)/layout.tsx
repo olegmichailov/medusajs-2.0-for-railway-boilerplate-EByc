@@ -1,6 +1,6 @@
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import ChevronDown from "@modules/common/icons/chevron-down"
-import CartCountHydrator from "@modules/checkout/components/cart-count-hydrator" // ← добавили
+import BfcacheRefresh from "@modules/common/components/BfcacheRefresh"
 
 export default function CheckoutLayout({
   children,
@@ -9,6 +9,8 @@ export default function CheckoutLayout({
 }) {
   return (
     <div className="w-full bg-white relative small:min-h-screen">
+      <BfcacheRefresh />
+
       <div className="h-16 bg-white border-b">
         <nav className="flex h-full items-center content-container justify-between">
           <LocalizedClientLink
@@ -27,10 +29,6 @@ export default function CheckoutLayout({
           <div className="flex-1 basis-0" />
         </nav>
       </div>
-
-      {/* >>> гидратор ничего не рисует, просто следит за редиректами и обновляет данные */}
-      <CartCountHydrator />
-
       <div className="relative" data-testid="checkout-container">
         {children}
       </div>
