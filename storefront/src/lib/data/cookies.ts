@@ -1,7 +1,7 @@
 import "server-only"
 import { cookies } from "next/headers"
 
-/** ===== JWT авторизации (оставляем как было) ===== */
+/** ===== JWT авторизации (как было) ===== */
 export const getAuthHeaders = (): { authorization: string } | {} => {
   const token = cookies().get("_medusa_jwt")?.value
   if (token) return { authorization: `Bearer ${token}` }
@@ -21,23 +21,18 @@ export const removeAuthToken = () => {
   cookies().set("_medusa_jwt", "", { maxAge: -1 })
 }
 
-/** ===== cart_id — ХИРУРГИЧЕСКИЙ ФИКС =====
- * Кросс-сайтовый возврат из Klarna/Revolut/и др. требует SameSite=None; Secure; path="/".
- * В dev на http://localhost кука с Secure не поставится, поэтому делаем условие.
- */
-const isProd = process.env.NODE_ENV === "production"
-
+/** ===== cart_id: SameSite=None; Secure; path="/" ===== */
 export const getCartId = () => {
   return cookies().get("_medusa_cart_id")?.value
 }
 
 export const setCartId = (cartId: string) => {
   cookies().set("_medusa_cart_id", cartId, {
-    maxAge: 60 * 60 * 24 * 30,  // 30 дней
+    maxAge: 60 * 60 * 24 * 30, // 30 дней
     httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
-    secure: isProd,
-    path: "/",
+    sameSite: "none",          // ключевой фикс для внешних редиректов
+    secure: true,              // требуется при SameSite=None
+    path: "/",                 // доступна везде
   })
 }
 
@@ -45,8 +40,19 @@ export const removeCartId = () => {
   cookies().set("_medusa_cart_id", "", {
     maxAge: 0,
     httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
-    secure: isProd,
+    sameSite: "none",
+    secure: true,
     path: "/",
   })
+}
+
+/**
+ * Обновляет (переписывает) cart-cookie с корректными атрибутами,
+ * даже если она была установлена ранее с другими настройками.
+ */
+export const touchCartCookie = () => {
+  const id = getCartId()
+  if (id) {
+    setCartId(id) // перепишем с нужными атрибутами
+  }
 }
