@@ -11,8 +11,6 @@ import { HttpTypes } from "@medusajs/types"
 import { isManual, isPaypal, isStripe } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { usePathname } from "next/navigation"
-
-// как и было у тебя
 import { useStripeSafe, useElementsSafe } from "@lib/stripe/safe-hooks"
 
 type PaymentButtonProps = {
@@ -26,9 +24,7 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
 }) => {
   const path = usePathname()
   const onCheckoutPage = !!path?.includes("/checkout")
-  if (!onCheckoutPage) {
-    return null
-  }
+  if (!onCheckoutPage) return null
 
   const notReady =
     !cart ||
@@ -70,25 +66,6 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
   }
 }
 
-const GiftCardPaymentButton = () => {
-  const [submitting, setSubmitting] = useState(false)
-
-  const handleOrder = async () => {
-    setSubmitting(true)
-    await placeOrder()
-  }
-
-  return (
-    <Button
-      onClick={handleOrder}
-      isLoading={submitting}
-      data-testid="submit-order-button"
-    >
-      Place order
-    </Button>
-  )
-}
-
 const StripePaymentButton = ({
   cart,
   notReady,
@@ -120,9 +97,6 @@ const StripePaymentButton = ({
       return
     }
 
-    // ЕДИНЫЙ return_url → всегда на шаг оплаты, чтобы:
-    // - success вернулся с payment_intent_client_secret → placeOrder (см. Payment/index.tsx)
-    // - cancel/failed → сервер вернёт на ?step=payment без 404 (см. checkout/page.tsx)
     const result = await stripe.confirmPayment({
       elements,
       redirect: "if_required",
@@ -131,7 +105,7 @@ const StripePaymentButton = ({
           typeof window !== "undefined"
             ? window.location.origin +
               window.location.pathname.replace(/\?.*$/, "") +
-              "?step=payment"
+              "?step=review"
             : undefined,
       },
     })
