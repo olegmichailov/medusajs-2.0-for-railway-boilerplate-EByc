@@ -14,6 +14,8 @@ import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
+// STRIPE FINAL FIX: нужен elements для submit/confirm
+import { useElementsSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
   cart,
@@ -41,6 +43,27 @@ const Payment = ({
   const choseStripe = isStripeFunc(selectedPaymentMethod)
   const stripeReady = useContext(StripeContext)
   const stripe = useStripeSafe()
+  // STRIPE FINAL FIX: elements нужен для submit/confirm
+  const elements = useElementsSafe()
+
+  // STRIPE FINAL FIX: отслеживаем выбранный тип в PaymentElement
+  const [pmType, setPmType] = useState<string | null>(null)
+
+  // какие типы считаем редиректными (не ввод карты)
+  const REDIRECT_PM_SET = new Set([
+    "klarna",
+    "revolut_pay",
+    "sofort",
+    "bancontact",
+    "ideal",
+    "eps",
+    "p24",
+    "blik",
+    "twint",
+    "wechat_pay",
+    "alipay",
+    "link_redirect", // на будущее
+  ])
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -48,7 +71,7 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  // 1) Отмена/ошибка redirect-методов → остаёмся на шаге оплаты и чистим query
+  // --- корректная обработка отмены/ошибки редирект-методов ---
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -65,12 +88,12 @@ const Payment = ({
       ].forEach((k) => params.delete(k))
       params.set("step", "payment")
       router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-      router.refresh() // чтобы серверные части сразу увидели актуальную корзину
+      router.refresh() // чтобы серверные части увидели актуальную корзину
       return
     }
   }, [searchParams, pathname, router])
 
-  // 2) Автоматический старт stripe-сессии, чтобы PaymentElement показал вкладки сразу
+  // --- авто-создание stripe-сессии, чтобы PaymentElement появился сразу ---
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -90,7 +113,7 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
-  // 3) Успешный возврат из redirect-методов (PI уже подтверждён) → завершаем заказ
+  // --- успешный возврат со Stripe (PI уже подтвержден) ---
   useEffect(() => {
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
@@ -149,6 +172,43 @@ const Payment = ({
         })
       }
 
+      // STRIPE FINAL FIX:
+      // Если выбран Stripe и тип ПМ редиректный — запускаем подтверждение СЕЙЧАС,
+      // Stripe сам уводит на внешний флоу. На возврате placeOrder делается эффектом выше.
+      if (choseStripe && pmType && REDIRECT_PM_SET.has(pmType)) {
+        if (!stripe || !elements) {
+          throw new Error("Stripe is not ready yet. Please try again.")
+        }
+
+        // валидируем элементы (покажет ошибки, если что-то не заполнено)
+        const submitRes = await elements.submit()
+        if ((submitRes as any)?.error) {
+          setError((submitRes as any).error.message || "Payment validation failed")
+          setIsLoading(false)
+          return
+        }
+
+        const returnUrl =
+          typeof window !== "undefined"
+            ? `${window.location.origin}${window.location.pathname}?step=payment`
+            : undefined
+
+        const { error: confirmErr } = await stripe.confirmPayment({
+          elements,
+          // при редиректе Stripe уйдёт с текущей страницы
+          confirmParams: { return_url: returnUrl },
+        })
+
+        if (confirmErr) {
+          // сюда попадаем только если ошибка синхронная (валидация/конфиг)
+          setError(confirmErr.message || "Payment confirmation failed")
+        }
+
+        setIsLoading(false)
+        return
+      }
+
+      // для карт или не-Stripe — как было: идём на Review
       if (!shouldInputCard) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
@@ -220,8 +280,14 @@ const Payment = ({
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
                     Enter your payment details:
                   </Text>
-                  {/* чтобы сразу видеть Card / Klarna / Revolut Pay и т.д. */}
-                  <PaymentElement options={{ layout: "tabs" }} />
+                  {/* STRIPE FINAL FIX: читаем текущий выбранный метод */}
+                  <PaymentElement
+                    options={{ layout: "tabs" }}
+                    onChange={(e: any) => {
+                      // e.value?.type содержит тип выбранного ПМ (card, klarna, revolut_pay, …)
+                      setPmType(e?.value?.type ?? null)
+                    }}
+                  />
                 </div>
               )}
             </>
