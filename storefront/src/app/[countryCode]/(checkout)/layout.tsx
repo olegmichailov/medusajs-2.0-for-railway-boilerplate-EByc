@@ -1,5 +1,6 @@
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import ChevronDown from "@modules/common/icons/chevron-down"
+import CartCountHydrator from "@modules/checkout/components/cart-count-hydrator" // ← добавили
 
 export default function CheckoutLayout({
   children,
@@ -26,6 +27,10 @@ export default function CheckoutLayout({
           <div className="flex-1 basis-0" />
         </nav>
       </div>
+
+      {/* >>> гидратор ничего не рисует, просто следит за редиректами и обновляет данные */}
+      <CartCountHydrator />
+
       <div className="relative" data-testid="checkout-container">
         {children}
       </div>
