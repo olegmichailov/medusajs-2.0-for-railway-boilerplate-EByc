@@ -1,37 +1,53 @@
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
-import ErrorMessage from "@modules/checkout/components/error-message"
-import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
-import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
-import { PaymentElement } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
+import ErrorMessage from "@modules/checkout/components/error-message"
 import PaymentContainer from "@modules/checkout/components/payment-container"
-import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
+
+import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
+import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
+
+import { PaymentElement, useStripe } from "@stripe/react-stripe-js"
+
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
-import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
+import {
+  initiatePaymentSession,
+  placeOrder,
+} from "@lib/data/cart"
 
-// «Безопасный» useStripe — не падает вне <Elements>
-import { useStripeSafe } from "@lib/stripe/safe-hooks"
+import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 
-const Payment = ({
+type PaymentProps = {
+  cart: any
+  availablePaymentMethods: Array<{
+    id: string // если у тебя provider_id — замени здесь и ниже
+    // provider_id?: string
+  }>
+}
+
+const Payment: React.FC<PaymentProps> = ({
   cart,
   availablePaymentMethods,
-}: {
-  cart: any
-  availablePaymentMethods: any[]
 }) => {
   const activeSession = cart.payment_collection?.payment_sessions?.find(
-    (paymentSession: any) => paymentSession.status === "pending"
+    (s: any) => s.status === "pending"
   )
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cardBrand, setCardBrand] = useState<string | null>(null)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
+
+  // выбранный метод — по умолчанию активная сессия или первый доступный
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(
     activeSession?.provider_id ?? ""
   )
 
@@ -41,9 +57,11 @@ const Payment = ({
 
   const isOpen = searchParams.get("step") === "payment"
 
-  const isStripe = isStripeFunc(activeSession?.provider_id)
+  // ВАЖНО: isStripe вычисляем по ВЫБРАННОМУ методу, а не по активной сессии
+  const isStripe = isStripeFunc(selectedPaymentMethod)
+
   const stripeReady = useContext(StripeContext)
-  const stripe = useStripeSafe()
+  const stripe = useStripe()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -51,38 +69,85 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
 
-  // обработка возврата после редиректа
+  // если ничего не выбрано — выбрать первый доступный
   useEffect(() => {
+    if (
+      !selectedPaymentMethod &&
+      Array.isArray(availablePaymentMethods) &&
+      availablePaymentMethods.length
+    ) {
+      setSelectedPaymentMethod(availablePaymentMethods[0].id)
+    }
+  }, [availablePaymentMethods, selectedPaymentMethod])
+
+  // обработка возврата из Stripe APM: успех → placeOrder, иначе — вернём на payment с ошибкой
+  useEffect(() => {
+    const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
       searchParams.get("setup_intent_client_secret")
 
-    if (!stripe || !clientSecret) return
+    if (!stripe || (!redirectStatus && !clientSecret)) return
 
     let cancelled = false
-    stripe
-      .retrievePaymentIntent(clientSecret)
-      .then(async ({ paymentIntent, error }) => {
-        if (cancelled) return
-        if (error || !paymentIntent) return
 
-        if (
-          paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "processing" ||
-          paymentIntent.status === "requires_capture"
-        ) {
+    const backToPayment = (msg?: string) => {
+      if (msg) setError(msg)
+      router.replace(
+        pathname + "?" + createQueryString("step", "payment"),
+        { scroll: false }
+      )
+    }
+
+    const ok = ["succeeded", "processing", "requires_capture"]
+
+    const run = async () => {
+      // Если Stripe добавил redirect_status прямо в URL
+      if (redirectStatus) {
+        if (ok.includes(redirectStatus)) {
           try {
             await placeOrder()
           } catch (e: any) {
-            setError(e?.message || "Failed to complete order after redirect.")
+            setError(e?.message || "Failed to complete order.")
           }
+        } else {
+          backToPayment(
+            "Payment was canceled or failed. Try again or choose another method."
+          )
         }
-      })
-      .catch(() => {})
+        return
+      }
+
+      // Если только client_secret
+      const { paymentIntent, error } =
+        await stripe.retrievePaymentIntent(clientSecret)
+
+      if (cancelled) return
+
+      if (error) {
+        backToPayment(error.message)
+        return
+      }
+
+      const status = paymentIntent?.status
+      if (status && ok.includes(status)) {
+        try {
+          await placeOrder()
+        } catch (e: any) {
+          setError(e?.message || "Failed to complete order.")
+        }
+      } else {
+        backToPayment(
+          "Payment was canceled or failed. Try again or choose another method."
+        )
+      }
+    }
+
+    run()
     return () => {
       cancelled = true
     }
-  }, [stripe, searchParams])
+  }, [stripe, searchParams, pathname]) // router и createQueryString стабильны ниже
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -101,24 +166,30 @@ const Payment = ({
 
   const handleSubmit = async () => {
     setIsLoading(true)
+    setError(null)
     try {
-      const shouldInputCard =
-        isStripeFunc(selectedPaymentMethod) && !activeSession
+      const wantsStripe = isStripeFunc(selectedPaymentMethod)
 
+      // Если сессии нет — создаём под выбранный метод
       if (!activeSession) {
         await initiatePaymentSession(cart, {
           provider_id: selectedPaymentMethod,
         })
       }
 
-      if (!shouldInputCard) {
+      // Для не-Stripe идём сразу на review
+      if (!wantsStripe) {
         return router.push(
           pathname + "?" + createQueryString("step", "review"),
-          {
-            scroll: false,
-          }
+          { scroll: false }
         )
       }
+
+      // Для Stripe остаёмся на шаге оплаты — PaymentElement появится (есть сессия)
+      return router.replace(
+        pathname + "?" + createQueryString("step", "payment"),
+        { scroll: false }
+      )
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -129,6 +200,12 @@ const Payment = ({
   useEffect(() => {
     setError(null)
   }, [isOpen])
+
+  // бренды карт в summary больше не отслеживаем — PaymentElement сам валидирует
+  const paymentDetailsText = useMemo(() => {
+    if (isStripe) return "Card or local method (via Stripe)"
+    return "Another step will appear"
+  }, [isStripe])
 
   return (
     <div className="bg-white">
@@ -146,6 +223,7 @@ const Payment = ({
           Payment
           {!isOpen && paymentReady && <CheckCircleSolid />}
         </Heading>
+
         {!isOpen && paymentReady && (
           <Text>
             <button
@@ -160,30 +238,32 @@ const Payment = ({
       </div>
 
       <div>
+        {/* Открытый шаг оплаты */}
         <div className={isOpen ? "block" : "hidden"}>
-          {!paidByGiftcard && !!availablePaymentMethods?.length && (
+          {!paidByGiftcard && (availablePaymentMethods?.length ?? 0) > 0 && (
             <>
               <RadioGroup
                 value={selectedPaymentMethod}
                 onChange={(value: string) => setSelectedPaymentMethod(value)}
               >
                 {availablePaymentMethods
-                  .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
-                  .map((paymentMethod) => (
+                  .sort((a, b) => (a.id > b.id ? 1 : -1))}
+                  {/* если используешь provider_id — поменяй сортировку */}
+                  .map((pm) => (
                     <PaymentContainer
+                      key={pm.id}
                       paymentInfoMap={paymentInfoMap}
-                      paymentProviderId={paymentMethod.id}
-                      key={paymentMethod.id}
+                      paymentProviderId={pm.id}
                       selectedPaymentOptionId={selectedPaymentMethod}
                     />
                   ))}
               </RadioGroup>
 
-              {/* Рендерим PaymentElement только когда есть контекст Stripe */}
-              {isStripe && stripeReady && (
+              {/* Stripe PaymentElement виден только если выбран Stripe и есть Elements (из Wrapper) и активная сессия */}
+              {isStripe && stripeReady && activeSession && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
+                    Enter your payment details:
                   </Text>
                   <PaymentElement />
                 </div>
@@ -219,13 +299,14 @@ const Payment = ({
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? " Enter card details"
+              ? "Enter payment details"
               : "Continue to review"}
           </Button>
         </div>
 
+        {/* Свернутый шаг (summary) */}
         <div className={isOpen ? "hidden" : "block"}>
-          {cart && paymentReady && activeSession ? (
+          {cart && paymentReady && (activeSession || paidByGiftcard) ? (
             <div className="flex items-start gap-x-1 w-full">
               <div className="flex flex-col w-1/3">
                 <Text className="txt-medium-plus text-ui-fg-base mb-1">
@@ -239,6 +320,7 @@ const Payment = ({
                     selectedPaymentMethod}
                 </Text>
               </div>
+
               <div className="flex flex-col w-1/3">
                 <Text className="txt-medium-plus text-ui-fg-base mb-1">
                   Payment details
@@ -248,24 +330,13 @@ const Payment = ({
                   data-testid="payment-details-summary"
                 >
                   <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
-                    {/* иконка */}
-                    <CreditCard />
+                    {paymentInfoMap[selectedPaymentMethod]?.icon || (
+                      <CreditCard />
+                    )}
                   </Container>
-                  <Text>Another step will appear</Text>
+                  <Text>{paymentDetailsText}</Text>
                 </div>
               </div>
-            </div>
-          ) : paidByGiftcard ? (
-            <div className="flex flex-col w-1/3">
-              <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                Payment method
-              </Text>
-              <Text
-                className="txt-medium text-ui-fg-subtle"
-                data-testid="payment-method-summary"
-              >
-                Gift card
-              </Text>
             </div>
           ) : null}
         </div>
