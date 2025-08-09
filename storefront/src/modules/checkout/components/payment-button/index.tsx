@@ -1,21 +1,19 @@
 "use client"
 
-import React, { useContext, useState } from "react"
 import { Button } from "@medusajs/ui"
-
+import { OnApproveActions, OnApproveData } from "@paypal/paypal-js"
+import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
+import React, { useContext, useState } from "react"
 import ErrorMessage from "../error-message"
 import Spinner from "@modules/common/icons/spinner"
-
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
-
 import { isManual, isPaypal, isStripe } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
+import { usePathname } from "next/navigation"
 
-import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
-import { OnApproveActions, OnApproveData } from "@paypal/paypal-js"
-
-import { useElements, useStripe } from "@stripe/react-stripe-js"
+// ВАЖНО: берем «безопасные» хуки вместо прямых
+import { useStripeSafe, useElementsSafe } from "@lib/stripe/safe-hooks"
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -26,6 +24,13 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
   cart,
   "data-testid": dataTestId,
 }) => {
+  const path = usePathname()
+  const onCheckoutPage = !!path?.includes("/checkout")
+  if (!onCheckoutPage) {
+    // НИЧЕГО Stripe-связанного не рендерим на /cart
+    return null
+  }
+
   const notReady =
     !cart ||
     !cart.shipping_address ||
@@ -45,12 +50,10 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
           data-testid={dataTestId}
         />
       )
-
     case isManual(paymentSession?.provider_id):
       return (
         <ManualTestPaymentButton notReady={notReady} data-testid={dataTestId} />
       )
-
     case isPaypal(paymentSession?.provider_id):
       return (
         <PayPalPaymentButton
@@ -59,7 +62,6 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
           data-testid={dataTestId}
         />
       )
-
     default:
       return (
         <Button disabled size="large">
@@ -67,6 +69,25 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
         </Button>
       )
   }
+}
+
+const GiftCardPaymentButton = () => {
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleOrder = async () => {
+    setSubmitting(true)
+    await placeOrder()
+  }
+
+  return (
+    <Button
+      onClick={handleOrder}
+      isLoading={submitting}
+      data-testid="submit-order-button"
+    >
+      Place order
+    </Button>
+  )
 }
 
 const StripePaymentButton = ({
@@ -87,8 +108,9 @@ const StripePaymentButton = ({
       .finally(() => setSubmitting(false))
   }
 
-  const stripe = useStripe()
-  const elements = useElements()
+  // «Безопасные» хуки — вернут null вместо падения
+  const stripe = useStripeSafe()
+  const elements = useElementsSafe()
 
   const disabled = !stripe || !elements || notReady
 
@@ -106,10 +128,9 @@ const StripePaymentButton = ({
       confirmParams: {
         return_url:
           typeof window !== "undefined"
-            ? `${window.location.origin}${window.location.pathname.replace(
-                /\?.*$/,
-                ""
-              )}?step=review`
+            ? window.location.origin +
+              window.location.pathname.replace(/\?.*$/, "") +
+              "?step=review"
             : undefined,
       },
     })
@@ -118,7 +139,7 @@ const StripePaymentButton = ({
 
     if (error) {
       const pi = (error as any).payment_intent
-      if (pi && (pi.status === "requires_capture" || pi.status === "succeeded" || pi.status === "processing")) {
+      if (pi && (pi.status === "requires_capture" || pi.status === "succeeded")) {
         await onPaymentCompleted()
         return
       }
@@ -137,7 +158,6 @@ const StripePaymentButton = ({
       return
     }
 
-    // для redirect-методов — произойдёт переход; после возврата Payment/index.tsx всё обработает
     setSubmitting(false)
   }
 
@@ -222,8 +242,6 @@ const PayPalPaymentButton = ({
       </>
     )
   }
-
-  return null
 }
 
 const ManualTestPaymentButton = ({ notReady }: { notReady: boolean }) => {
