@@ -12,7 +12,7 @@ import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
 import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
-import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
+import { initiatePaymentSession } from "@lib/data/cart"
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
 
 const Payment = ({
@@ -48,7 +48,7 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  // --- ФИКС: корректно обрабатываем отмену/ошибку редирект-методов ---
+  // --- корректно обрабатываем отмену/ошибку редирект-методов ---
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -65,13 +65,12 @@ const Payment = ({
       ].forEach((k) => params.delete(k))
       params.set("step", "payment")
       router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-      // ВАЖНО: сразу перерисовываем серверные компоненты (шапка/сайдбар видят актуальную корзину)
       router.refresh()
       return
     }
   }, [searchParams, pathname, router])
 
-  // --- Авто-создание stripe-сессии, чтобы PaymentElement появился сразу ---
+  // --- авто-создание stripe-сессии, чтобы PaymentElement появился сразу ---
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -91,7 +90,7 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
-  // --- Успешный возврат со stripe (PI уже подтвержден) ---
+  // --- успешный возврат со Stripe (PI уже подтвержден) ---
   useEffect(() => {
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
@@ -111,18 +110,26 @@ const Payment = ({
           paymentIntent.status === "processing" ||
           paymentIntent.status === "requires_capture"
         ) {
-          try {
-            await placeOrder()
-          } catch (e: any) {
-            setError(e?.message || "Failed to complete order after redirect.")
-          }
+          // НЕ завершаем заказ автоматически.
+          // Чистим query и переходим на review — пользователь нажимает Place order сам.
+          const params = new URLSearchParams(searchParams.toString())
+          ;[
+            "payment_intent",
+            "payment_intent_client_secret",
+            "setup_intent",
+            "setup_intent_client_secret",
+            "redirect_status",
+          ].forEach((k) => params.delete(k))
+          params.set("step", "review")
+          router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+          router.refresh()
         }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [stripe, searchParams])
+  }, [stripe, searchParams, pathname, router])
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
