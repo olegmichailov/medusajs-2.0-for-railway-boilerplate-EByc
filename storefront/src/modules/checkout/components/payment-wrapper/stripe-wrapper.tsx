@@ -1,9 +1,17 @@
 "use client"
 
-import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
+import React from "react"
 import { Elements } from "@stripe/react-stripe-js"
-import { HttpTypes } from "@medusajs/types"
+import type { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
+import type { HttpTypes } from "@medusajs/types"
 
+/**
+ * Пропсы-обёртки для Stripe Elements.
+ * - paymentSession: активная сессия оплаты (Stripe PaymentIntent/SetupIntent), внутри которой есть client_secret
+ * - stripeKey: публичный ключ (NEXT_PUBLIC_STRIPE_KEY)
+ * - stripePromise: результат loadStripe(stripeKey)
+ * - children: содержимое, в котором будут использоваться хуки и компоненты Stripe (например, <PaymentElement/>)
+ */
 type StripeWrapperProps = {
   paymentSession: HttpTypes.StorePaymentSession
   stripeKey?: string
@@ -12,25 +20,37 @@ type StripeWrapperProps = {
 }
 
 /**
- * Монтирует Stripe Elements c client_secret PaymentIntent'а.
- * Payment Element сам покажет доступные методы (Card, SEPA, Klarna, кошельки и т.д.)
+ * StripeWrapper
+ *
+ * Монтирует провайдер <Elements> c корректными опциями, основанными на client_secret
+ * из PaymentIntent/SetupIntent. Payment Element (и прочие элементы) будут работать только внутри <Elements>.
+ *
+ * Важно:
+ * - Ключ `key={clientSecret}` на <Elements> принудительно пересобирает провайдер,
+ *   когда Stripe создаёт НОВУЮ сессию (новый client_secret). Это устраняет "залипание" старого состояния.
+ * - Проверки на наличие stripeKey/stripePromise/clientSecret сделаны явными, чтобы не было
+ *   тихих падений с непонятными ошибками в консоли.
  */
-const StripeWrapper: React.FC<StripeWrapperProps> = ({
-  paymentSession,
-  stripeKey,
-  stripePromise,
-  children,
-}) => {
-  const clientSecret = paymentSession?.data?.client_secret as
-    | string
-    | undefined
+const StripeWrapper: React.FC<StripeWrapperProps> = (props) => {
+  const { paymentSession, stripeKey, stripePromise, children } = props
 
+  // 1) Достаём client_secret из данных сессии
+  const clientSecret = paymentSession?.data?.client_secret as string | undefined
+
+  // 2) Готовим опции для Elements. Здесь можно тонко настраивать внешний вид и локаль.
   const options: StripeElementsOptions = {
     clientSecret,
-    locale: "en", // при желании "de"
-    appearance: { theme: "stripe" },
+    // Локаль интерфейса Stripe. Можно поставить "de", если хочешь немецкий.
+    locale: "en",
+    // Оформление — базовая тема Stripe. Можно кастомизировать под бренд позже.
+    appearance: {
+      theme: "stripe",
+      // Пример дополнительной тонкой настройки (оставлено закомментированным для читаемости):
+      // variables: { colorPrimary: "#111827" },
+    },
   }
 
+  // 3) Явные проверки окружения — если что-то не так, бросаем понятную ошибку.
   if (!stripeKey) {
     throw new Error(
       "Stripe key is missing. Set NEXT_PUBLIC_STRIPE_KEY environment variable."
@@ -49,7 +69,8 @@ const StripeWrapper: React.FC<StripeWrapperProps> = ({
     )
   }
 
-  // ВАЖНО: key заставляет Elements переинициализироваться при новом client_secret
+  // 4) Возвращаем провайдер Elements. Ключ равен clientSecret,
+  //    чтобы при его смене провайдер гарантированно пересоздался.
   return (
     <Elements key={clientSecret} options={options} stripe={stripePromise}>
       {children}
