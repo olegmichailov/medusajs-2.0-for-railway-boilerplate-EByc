@@ -6,44 +6,38 @@ import { HttpTypes } from "@medusajs/types"
 import { omit } from "lodash"
 import { revalidateTag } from "next/cache"
 import { redirect } from "next/navigation"
-import { getAuthHeaders, getCartId, removeCartId, setCartId, touchCartCookie } from "./cookies"
+import { getAuthHeaders, getCartId, removeCartId, setCartId } from "./cookies"
 import { getProductsById } from "./products"
 import { getRegion } from "./regions"
 
+/** ---------- READ-ONLY: безопасно для SSR ---------- */
 export async function retrieveCart() {
   const cartId = getCartId()
-
-  if (!cartId) {
-    return null
-  }
-
-  // ВАЖНО: перепишем cookie с нужными атрибутами (SameSite=None, Secure, path=/)
-  touchCartCookie()
+  if (!cartId) return null
 
   return await sdk.store.cart
     .retrieve(cartId, {}, { next: { tags: ["cart"] }, ...getAuthHeaders() })
     .then(({ cart }) => cart)
-    .catch(() => {
-      return null
-    })
+    .catch(() => null)
 }
 
-export async function getOrSetCart(countryCode: string) {
-  let cart = await retrieveCart()
+/**
+ * ---------- WRITE (Server Action only): создаёт корзину и ставит куку ----------
+ * ВАЖНО: вызывать ТОЛЬКО из других server actions/route handlers (например, из addToCart).
+ */
+export async function ensureCart(countryCode: string) {
   const region = await getRegion(countryCode)
-
   if (!region) {
     throw new Error(`Region not found for country code: ${countryCode}`)
   }
 
+  let cart = await retrieveCart()
   if (!cart) {
-    const cartResp = await sdk.store.cart.create({ region_id: region.id })
-    cart = cartResp.cart
-    setCartId(cart.id)
+    const { cart: created } = await sdk.store.cart.create({ region_id: region.id })
+    cart = created
+    setCartId(cart.id)                 // <-- кука СТАВИТСЯ ТОЛЬКО ЗДЕСЬ (action)
     revalidateTag("cart")
-  }
-
-  if (cart && cart?.region_id !== region.id) {
+  } else if (cart.region_id !== region.id) {
     await sdk.store.cart.update(
       cart.id,
       { region_id: region.id },
@@ -51,11 +45,14 @@ export async function getOrSetCart(countryCode: string) {
       getAuthHeaders()
     )
     revalidateTag("cart")
+    // перечитать
+    cart = (await retrieveCart()) as HttpTypes.StoreCart
   }
 
   return cart
 }
 
+/** ---------- Updates ---------- */
 export async function updateCart(data: HttpTypes.StoreUpdateCart) {
   const cartId = getCartId()
   if (!cartId) {
@@ -71,6 +68,7 @@ export async function updateCart(data: HttpTypes.StoreUpdateCart) {
     .catch(medusaError)
 }
 
+/** ---------- Line items ---------- */
 export async function addToCart({
   variantId,
   quantity,
@@ -84,10 +82,8 @@ export async function addToCart({
     throw new Error("Missing variant ID when adding to cart")
   }
 
-  const cart = await getOrSetCart(countryCode)
-  if (!cart) {
-    throw new Error("Error retrieving or creating cart")
-  }
+  // создаём корзину И ставим куку ТОЛЬКО тут (Server Action)
+  const cart = await ensureCart(countryCode)
 
   await sdk.store.cart
     .createLineItem(
@@ -109,42 +105,29 @@ export async function updateLineItem({
   lineId: string
   quantity: number
 }) {
-  if (!lineId) {
-    throw new Error("Missing lineItem ID when updating line item")
-  }
-
+  if (!lineId) throw new Error("Missing lineItem ID when updating line item")
   const cartId = getCartId()
-  if (!cartId) {
-    throw new Error("Missing cart ID when updating line item")
-  }
+  if (!cartId) throw new Error("Missing cart ID when updating line item")
 
   await sdk.store.cart
     .updateLineItem(cartId, lineId, { quantity }, {}, getAuthHeaders())
-    .then(() => {
-      revalidateTag("cart")
-    })
+    .then(() => revalidateTag("cart"))
     .catch(medusaError)
 }
 
 export async function deleteLineItem(lineId: string) {
-  if (!lineId) {
-    throw new Error("Missing lineItem ID when deleting line item")
-  }
-
+  if (!lineId) throw new Error("Missing lineItem ID when deleting line item")
   const cartId = getCartId()
-  if (!cartId) {
-    throw new Error("Missing cart ID when deleting line item")
-  }
+  if (!cartId) throw new Error("Missing cart ID when deleting line item")
 
   await sdk.store.cart
     .deleteLineItem(cartId, lineId, getAuthHeaders())
-    .then(() => {
-      revalidateTag("cart")
-    })
+    .then(() => revalidateTag("cart"))
     .catch(medusaError)
   revalidateTag("cart")
 }
 
+/** ---------- Enrich ---------- */
 export async function enrichLineItems(
   lineItems:
     | HttpTypes.StoreCartLineItem[]
@@ -155,22 +138,17 @@ export async function enrichLineItems(
   if (!lineItems) return []
 
   const queryParams = {
-    ids: lineItems.map((lineItem) => lineItem.product_id!),
+    ids: lineItems.map((li) => li.product_id!),
     regionId,
   }
 
   const products = await getProductsById(queryParams)
-  if (!lineItems?.length || !products) {
-    return []
-  }
+  if (!lineItems?.length || !products) return []
 
   const enrichedItems = lineItems.map((item) => {
     const product = products.find((p: any) => p.id === item.product_id)
     const variant = product?.variants?.find((v: any) => v.id === item.variant_id)
-
-    if (!product || !variant) {
-      return item
-    }
+    if (!product || !variant) return item
 
     return {
       ...item,
@@ -184,6 +162,7 @@ export async function enrichLineItems(
   return enrichedItems
 }
 
+/** ---------- Shipping ---------- */
 export async function setShippingMethod({
   cartId,
   shippingMethodId,
@@ -198,15 +177,17 @@ export async function setShippingMethod({
       {},
       getAuthHeaders()
     )
-    .then(() => {
-      revalidateTag("cart")
-    })
+    .then(() => revalidateTag("cart"))
     .catch(medusaError)
 }
 
+/** ---------- Payments ---------- */
 export async function initiatePaymentSession(
   cart: HttpTypes.StoreCart,
-  data: { provider_id: string; context?: Record<string, unknown> }
+  data: {
+    provider_id: string
+    context?: Record<string, unknown>
+  }
 ) {
   return sdk.store.payment
     .initiatePaymentSession(cart, data, {}, getAuthHeaders())
@@ -217,31 +198,23 @@ export async function initiatePaymentSession(
     .catch(medusaError)
 }
 
+/** ---------- Discounts / Gift cards (как было, заглушки) ---------- */
 export async function applyPromotions(codes: string[]) {
   const cartId = getCartId()
-  if (!cartId) {
-    throw new Error("No existing cart found")
-  }
+  if (!cartId) throw new Error("No existing cart found")
 
   await updateCart({ promo_codes: codes })
-    .then(() => {
-      revalidateTag("cart")
-    })
+    .then(() => revalidateTag("cart"))
     .catch(medusaError)
 }
 
-export async function applyGiftCard(_code: string) {
-  // не используется
-}
+export async function applyGiftCard(_code: string) {}
 
-export async function removeDiscount(_code: string) {
-  // не используется
-}
+export async function removeDiscount(_code: string) {}
 
-export async function removeGiftCard(_codeToRemove: string, _giftCards: any[]) {
-  // не используется
-}
+export async function removeGiftCard(_codeToRemove: string, _giftCards: any[]) {}
 
+/** ---------- Forms / Actions ---------- */
 export async function submitPromotionForm(
   _currentState: unknown,
   formData: FormData
@@ -254,10 +227,10 @@ export async function submitPromotionForm(
   }
 }
 
+/** ---------- Addresses ---------- */
 export async function setAddresses(_currentState: unknown, formData: FormData) {
   try {
     if (!formData) throw new Error("No form data found when setting addresses")
-
     const cartId = getCartId()
     if (!cartId) throw new Error("No existing cart found when setting addresses")
 
@@ -279,7 +252,6 @@ export async function setAddresses(_currentState: unknown, formData: FormData) {
 
     const sameAsBilling = formData.get("same_as_billing")
     if (sameAsBilling === "on") data.billing_address = data.shipping_address
-
     if (sameAsBilling !== "on") {
       data.billing_address = {
         first_name: formData.get("billing_address.first_name"),
@@ -300,28 +272,24 @@ export async function setAddresses(_currentState: unknown, formData: FormData) {
     return e.message
   }
 
-  redirect(
-    `/${formData.get("shipping_address.country_code")}/checkout?step=delivery`
-  )
+  redirect(`/${formData.get("shipping_address.country_code")}/checkout?step=delivery`)
 }
 
+/** ---------- Complete ---------- */
 export async function placeOrder() {
   const cartId = getCartId()
-  if (!cartId) {
-    throw new Error("No existing cart found when placing an order")
-  }
+  if (!cartId) throw new Error("No existing cart found when placing an order")
 
   const cartRes = await sdk.store.cart
     .complete(cartId, {}, getAuthHeaders())
-    .then((cartRes) => {
+    .then((res) => {
       revalidateTag("cart")
-      return cartRes
+      return res
     })
     .catch(medusaError)
 
   if (cartRes?.type === "order") {
-    const countryCode =
-      cartRes.order.shipping_address?.country_code?.toLowerCase()
+    const countryCode = cartRes.order.shipping_address?.country_code?.toLowerCase()
     removeCartId()
     redirect(`/${countryCode}/order/confirmed/${cartRes?.order.id}`)
   }
@@ -329,13 +297,11 @@ export async function placeOrder() {
   return cartRes.cart
 }
 
+/** ---------- Region ---------- */
 export async function updateRegion(countryCode: string, currentPath: string) {
   const cartId = getCartId()
   const region = await getRegion(countryCode)
-
-  if (!region) {
-    throw new Error(`Region not found for country code: ${countryCode}`)
-  }
+  if (!region) throw new Error(`Region not found for country code: ${countryCode}`)
 
   if (cartId) {
     await updateCart({ region_id: region.id })
