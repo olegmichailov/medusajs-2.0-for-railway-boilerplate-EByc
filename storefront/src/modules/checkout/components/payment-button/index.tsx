@@ -120,6 +120,9 @@ const StripePaymentButton = ({
       return
     }
 
+    // ЕДИНЫЙ return_url → всегда на шаг оплаты, чтобы:
+    // - success вернулся с payment_intent_client_secret → placeOrder (см. Payment/index.tsx)
+    // - cancel/failed → сервер вернёт на ?step=payment без 404 (см. checkout/page.tsx)
     const result = await stripe.confirmPayment({
       elements,
       redirect: "if_required",
@@ -128,7 +131,7 @@ const StripePaymentButton = ({
           typeof window !== "undefined"
             ? window.location.origin +
               window.location.pathname.replace(/\?.*$/, "") +
-              "?step=review"
+              "?step=payment"
             : undefined,
       },
     })
