@@ -31,7 +31,6 @@ export default function EditorCanvas() {
 
   const stageRef = useRef<Konva.Stage>(null)
   const tRef     = useRef<Konva.Transformer>(null)
-
   const cropRect = useRef<Konva.Rect>(null)
   const cropTf   = useRef<Konva.Transformer>(null)
 
@@ -39,13 +38,12 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [isCropping, setIsCropping] = useState(false)
 
-  // textarea overlay для inline-текста
   const overlayRef = useRef<HTMLTextAreaElement|null>(null)
 
-  // авто-скейл
+  // авто-скейл (только на клиенте; этот компонент и так клиентский)
   const { viewW, viewH, scale } = useMemo(() => {
-    const vw = typeof window !== "undefined" ? window.innerWidth : 1200
-    const vh = typeof window !== "undefined" ? window.innerHeight : 800
+    const vw = window.innerWidth
+    const vh = window.innerHeight
     const maxW = vw - PADDING * 2
     const maxH = vh - PADDING * 2 - 80
     const s = Math.min(maxW / BASE_W, maxH / BASE_H)
@@ -61,50 +59,37 @@ export default function EditorCanvas() {
   const findNode = (id: string | null) => getLayerById(id)?.node || null
   const getType = (id: string | null): LayerType | null => getLayerById(id)?.type || null
 
-  // meta
   const applyMeta = (node: AnyNode, meta: BaseMeta) => {
     node.opacity(meta.opacity)
     ;(node as any).globalCompositeOperation = meta.blend
     if ((node as any).filters) {
       if (meta.raster > 0 && (Konva as any).Filters?.Pixelate) {
-        (node as any).filters([(Konva as any).Filters.Pixelate])
+        ;(node as any).filters([(Konva as any).Filters.Pixelate])
         ;(node as any).pixelSize(meta.raster)
       } else {
-        (node as any).filters([])
+        ;(node as any).filters([])
       }
     }
     node.getLayer()?.batchDraw()
   }
+  const baseMeta = (name: string): BaseMeta => ({ blend:"source-over", opacity:1, raster:0, name, visible:true, locked:false })
 
-  const baseMeta = (name: string): BaseMeta => ({
-    blend: "source-over",
-    opacity: 1,
-    raster: 0,
-    name,
-    visible: true,
-    locked: false,
-  })
-
-  // transformer attach + drag
+  // attach/hide трансформер (и включение drag только в move)
   const attachTransformer = () => {
     const node = findNode(selectedId)
     const shouldHide = isDrawing || isCropping || tool === "brush" || tool === "erase"
-
     if (shouldHide || !node || (getLayerById(selectedId!)?.meta.locked)) {
       tRef.current?.nodes([])
       tRef.current?.getLayer()?.batchDraw()
       return
     }
-
     tRef.current?.nodes([node])
     tRef.current?.getLayer()?.batchDraw()
-
-    const canDrag = tool === "move" && !getLayerById(selectedId!)?.meta.locked
-    ;(node as any).draggable(canDrag)
+    ;(node as any).draggable(tool === "move" && !getLayerById(selectedId!)?.meta.locked)
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
-  // shortcuts
+  // шорткаты
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const node = findNode(selectedId)
@@ -113,58 +98,43 @@ export default function EditorCanvas() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         const src = getLayerById(selectedId!)!
         const clone = node.clone()
-        clone.x(node.x() + 20); clone.y(node.y() + 20)
+        clone.x(node.x()+20); clone.y(node.y()+20)
         ;(clone as any).id(uid())
-        const newLay: AnyLayer = {
-          id: (clone as any)._id,
-          node: clone,
-          side: src.side,
-          meta: { ...src.meta, name: src.meta.name + " copy" },
-          type: src.type,
-        }
-        setLayers(p => [...p, newLay])
+        const newLay: AnyLayer = { id:(clone as any)._id, node:clone, side:src.side, meta:{...src.meta, name:src.meta.name+" copy"}, type:src.type }
+        setLayers(p=>[...p, newLay])
         select(newLay.id)
       } else if (e.key === "Delete" || e.key === "Backspace") {
-        setLayers(p => p.filter(l => l.id !== selectedId))
-        select(null)
-      } else if (e.key === "]") {
-        moveZ(selectedId!, "up")
-      } else if (e.key === "[") {
-        moveZ(selectedId!, "down")
-      }
+        setLayers(p=>p.filter(l=>l.id!==selectedId)); select(null)
+      } else if (e.key === "]") moveZ(selectedId!, "up")
+      else if (e.key === "[")  moveZ(selectedId!, "down")
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, layers, side])
 
-  // upload
+  // загрузка изображения
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
       const img = new window.Image()
       img.crossOrigin = "anonymous"
       img.onload = () => {
-        const node = new Konva.Image({
-          image: img,
-          x: BASE_W / 2 - img.width / 2,
-          y: BASE_H / 2 - img.height / 2,
-        })
+        const node = new Konva.Image({ image: img, x: BASE_W/2 - img.width/2, y: BASE_H/2 - img.height/2 })
         node.width(img.width); node.height(img.height)
         ;(node as any).id(uid())
         const meta = baseMeta(file.name)
         applyMeta(node, meta)
         const id = (node as any)._id
-        setLayers(p => [...p, { id, side, node, meta, type: "image" }])
-        select(id)
-        set({ tool: "move" })
+        setLayers(p=>[...p, { id, side, node, meta, type:"image"}])
+        select(id); set({ tool:"move" })
       }
       img.src = r.result as string
     }
     r.readAsDataURL(file)
   }
 
-  // inline-text
+  // inline-текст
   const createInlineEditor = (node: Konva.Text) => {
     const stage = stageRef.current
     if (!stage) return
@@ -173,19 +143,19 @@ export default function EditorCanvas() {
     const area = document.createElement("textarea")
     area.value = node.text()
     Object.assign(area.style, {
-      position: "absolute",
+      position:"absolute",
       top: `${abs.y * scale + rect.top}px`,
-      left: `${abs.x * scale + rect.left}px`,
-      width: `${Math.max(node.width() * scale, 200)}px`,
-      fontSize: `${node.fontSize() * scale}px`,
+      left:`${abs.x * scale + rect.left}px`,
+      width:`${Math.max(node.width()*scale, 200)}px`,
+      fontSize:`${node.fontSize()*scale}px`,
       fontFamily: node.fontFamily(),
       color: String(node.fill()),
-      lineHeight: "1.15",
-      border: "1px solid #000",
-      background: "rgba(255,255,255,0.9)",
-      padding: "2px 4px",
-      margin: "0",
-      zIndex: "1000",
+      lineHeight:"1.15",
+      border:"1px solid #000",
+      background:"rgba(255,255,255,0.9)",
+      padding:"2px 4px",
+      margin:"0",
+      zIndex:"1000",
     } as CSSStyleDeclaration)
     document.body.appendChild(area)
     overlayRef.current = area
@@ -202,60 +172,54 @@ export default function EditorCanvas() {
     })
     area.addEventListener("blur", commit)
   }
-
   const onAddText = () => {
     const node = new Konva.Text({
-      text: "Type…",
-      x: BASE_W / 2 - 180,
-      y: BASE_H / 2 - 30,
-      fontSize: 64,
-      fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-      fill: brushColor,
-      width: 400,
+      text:"Type…", x:BASE_W/2-180, y:BASE_H/2-30,
+      fontSize:64, fontFamily:"Inter, system-ui, -apple-system, sans-serif",
+      fill:brushColor, width:400
     })
     ;(node as any).id(uid())
     const meta = baseMeta("Text")
     applyMeta(node, meta)
     const id = (node as any)._id
-    setLayers(p => [...p, { id, side, node, meta, type: "text" }])
-    select(id); set({ tool: "move" })
-    node.on("dblclick dbltap", () => createInlineEditor(node))
+    setLayers(p=>[...p, { id, side, node, meta, type:"text"}])
+    select(id); set({ tool:"move" })
+    node.on("dblclick dbltap", ()=> createInlineEditor(node))
   }
 
-  // shapes
+  // фигуры
   const addShape = (kind: ShapeKind) => {
     let node: any
-    if (kind === "circle")   node = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 180, fill: brushColor })
-    if (kind === "square")   node = new Konva.Rect({ x: BASE_W/2-180, y: BASE_H/2-180, width: 360, height:360, fill: brushColor })
-    if (kind === "triangle") node = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 220, fill: brushColor })
-    if (kind === "cross") {
-      node = new Konva.Group({ x: BASE_W/2-180, y: BASE_H/2-180 })
-      node.add(new Konva.Rect({ width:360, height:70, y:145, fill: brushColor }))
-      node.add(new Konva.Rect({ width:70, height:360, x:145, fill: brushColor }))
+    if (kind==="circle")   node = new Konva.Circle({ x:BASE_W/2, y:BASE_H/2, radius:180, fill:brushColor })
+    if (kind==="square")   node = new Konva.Rect({ x:BASE_W/2-180, y:BASE_H/2-180, width:360, height:360, fill:brushColor })
+    if (kind==="triangle") node = new Konva.RegularPolygon({ x:BASE_W/2, y:BASE_H/2, sides:3, radius:220, fill:brushColor })
+    if (kind==="cross") {
+      node = new Konva.Group({ x:BASE_W/2-180, y:BASE_H/2-180 })
+      node.add(new Konva.Rect({ width:360, height:70, y:145, fill:brushColor }))
+      node.add(new Konva.Rect({ width:70, height:360, x:145, fill:brushColor }))
     }
-    if (kind === "line")     node = new Konva.Line({ points:[BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16 })
+    if (kind==="line")     node = new Konva.Line({ points:[BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke:brushColor, strokeWidth:16 })
     ;(node as any).id(uid())
     const meta = baseMeta(kind)
     applyMeta(node, meta)
     const id = (node as any)._id
-    setLayers(p => [...p, { id, side, node, meta, type: "shape" }])
-    select(id); set({ tool: "move" })
+    setLayers(p=>[...p, { id, side, node, meta, type:"shape"}])
+    select(id); set({ tool:"move" })
   }
 
-  // brush/erase — stroke не показываем в панели слоёв
+  // кисть/ластик
   const startStroke = (x:number,y:number) => {
     const line = new Konva.Line({
-      points: [x,y],
+      points:[x,y],
       stroke: tool==="erase" ? "#ffffff" : brushColor,
       strokeWidth: brushSize,
-      lineCap: "round",
-      lineJoin: "round",
+      lineCap:"round", lineJoin:"round",
       globalCompositeOperation: tool==="erase" ? "destination-out" : "source-over",
     })
     ;(line as any).id(uid())
     const meta = baseMeta("Stroke")
     const id = (line as any)._id
-    setLayers(p=>[...p, { id, side, node: line, meta, type:"stroke"}])
+    setLayers(p=>[...p, { id, side, node:line, meta, type:"stroke"}])
     select(id)
     setIsDrawing(true)
   }
@@ -272,7 +236,7 @@ export default function EditorCanvas() {
     if (!node) return
     setIsCropping(true)
     const b = node.getClientRect({ relativeTo: stageRef.current })
-    cropRect.current?.setAttrs({ x: b.x, y: b.y, width: b.width, height: b.height, visible: true })
+    cropRect.current?.setAttrs({ x:b.x, y:b.y, width:b.width, height:b.height, visible:true })
     cropRect.current?.getLayer()?.batchDraw()
     cropTf.current?.nodes([cropRect.current!])
   }
@@ -281,17 +245,15 @@ export default function EditorCanvas() {
     const rect = cropRect.current
     if (!node || !rect) { setIsCropping(false); return }
     const s = scale
-    const rx = rect.x()/s - node.x()
-    const ry = rect.y()/s - node.y()
-    const rw = rect.width()/s
-    const rh = rect.height()/s
+    const rx = rect.x()/s - node.x(), ry = rect.y()/s - node.y()
+    const rw = rect.width()/s,       rh = rect.height()/s
 
     if (node instanceof Konva.Image) {
-      node.crop({ x: rx, y: ry, width: rw, height: rh })
+      node.crop({ x:rx, y:ry, width:rw, height:rh })
       node.width(rw); node.height(rh)
       node.getLayer()?.batchDraw()
     } else {
-      const g = new Konva.Group({ x: node.x(), y: node.y(), clip: { x: rx, y: ry, width: rw, height: rh } })
+      const g = new Konva.Group({ x:node.x(), y:node.y(), clip:{ x:rx, y:ry, width:rw, height:rh } })
       node.x(0); node.y(0)
       const parent = node.getParent()
       parent?.add(g); node.moveTo(g); g.cache(); g.draw()
@@ -307,11 +269,10 @@ export default function EditorCanvas() {
     cropRect.current?.getLayer()?.batchDraw()
   }
 
-  // export (учёт масштаба)
+  // экспорт (правильный pixelRatio относительно текущего зума)
   const exportSide = (s: Side) => {
     const st = stageRef.current; if (!st) return
-    const oldScale = st.scaleX()
-    const pr = 1 / oldScale
+    const pr = 1 / st.scaleX()
 
     const hidden: AnyLayer[] = []
     layers.forEach(l => { if (l.side !== s) { l.node.visible(false); hidden.push(l) } })
@@ -327,7 +288,7 @@ export default function EditorCanvas() {
   }
 
   // pointer
-  const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+  const getPos = () => stageRef.current?.getPointerPosition() || { x:0, y:0 }
   const onDown = () => {
     if (isCropping || overlayRef.current) return
     const p = getPos()
@@ -336,16 +297,16 @@ export default function EditorCanvas() {
     else if (tool==="shape") addShape(shapeKind)
   }
   const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
-  const onUp = () => setIsDrawing(false)
+  const onUp   = () => setIsDrawing(false)
 
   // блок скролла на мобиле при рисовании
   useEffect(()=>{
     const prevent = (e: TouchEvent) => { if (tool==="brush"||tool==="erase") e.preventDefault() }
-    document.addEventListener("touchmove", prevent, { passive: false })
+    document.addEventListener("touchmove", prevent, { passive:false })
     return ()=>document.removeEventListener("touchmove", prevent as any)
   }, [tool])
 
-  // список для панельки (stroke скрыты)
+  // список для панели (stroke скрыты)
   const layerItems = useMemo(()=> layers
     .filter(l=>l.side===side && l.type!=="stroke")
     .map(l=>({ id:l.id, name:l.meta.name, type:l.type, visible:l.meta.visible, locked:l.meta.locked })), [layers, side])
@@ -355,62 +316,45 @@ export default function EditorCanvas() {
   }
 
   const moveZ = (id:string, dir:"up"|"down") => {
-    const idx = layers.findIndex(l=>l.id===id)
-    if (idx < 0) return
+    const idx = layers.findIndex(l=>l.id===id); if (idx<0) return
     const node = layers[idx].node
     if (dir==="up") node.moveUp(); else node.moveDown()
     node.getLayer()?.batchDraw()
-
-    setLayers(p => {
-      const a = [...p]
-      const i = a.findIndex(l => l.id === id); if (i < 0) return p
-      const j = dir === "up" ? i + 1 : i - 1
-      if (j < 0 || j >= a.length) return p
-      ;[a[i], a[j]] = [a[j], a[i]]
+    setLayers(p=>{
+      const a=[...p]; const i=a.findIndex(l=>l.id===id); const j=dir==="up"?i+1:i-1
+      if (j<0 || j>=a.length) return p
+      ;[a[i],a[j]]=[a[j],a[i]]
       return a
     })
   }
 
-  // быстрые настройки объекта
+  // быстрые правки объекта
   const setObjectColor = (hex: string) => {
     const lay = getLayerById(selectedId); if (!lay) return
-    if (lay.type === "text") { (lay.node as Konva.Text).fill(hex) }
+    if (lay.type === "text") (lay.node as Konva.Text).fill(hex)
     else if (lay.type === "shape") {
       if (lay.node instanceof Konva.Line) (lay.node as Konva.Line).stroke(hex)
       else if ("fill" in (lay.node as any)) (lay.node as any).fill(hex)
-    } else if (lay.type === "stroke") {
-      (lay.node as Konva.Line).stroke(hex)
-    }
+    } else if (lay.type === "stroke") (lay.node as Konva.Line).stroke(hex)
     lay.node.getLayer()?.batchDraw()
   }
-  const setStrokeWidth = (w: number) => {
+  const setStrokeWidth = (w:number) => {
     const lay = getLayerById(selectedId); if (!lay) return
-    if (lay.type === "stroke") {
-      (lay.node as Konva.Line).strokeWidth(w)
-      lay.node.getLayer()?.batchDraw()
-    }
+    if (lay.type === "stroke") { (lay.node as Konva.Line).strokeWidth(w); lay.node.getLayer()?.batchDraw() }
   }
 
   return (
     <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
       <Toolbar
-        side={side}
-        setSide={(s)=>set({ side: s })}
-        tool={tool}
-        setTool={(t)=>set({ tool: t })}
-        brushColor={brushColor}
-        setBrushColor={(v)=>set({ brushColor: v })}
-        brushSize={brushSize}
-        setBrushSize={(n)=>set({ brushSize: n })}
-        shapeKind={shapeKind}
-        setShapeKind={(k)=>set({ shapeKind: k })}
+        side={side} setSide={(s)=>set({ side:s })}
+        tool={tool} setTool={(t)=>set({ tool:t })}
+        brushColor={brushColor} setBrushColor={(v)=>set({ brushColor:v })}
+        brushSize={brushSize} setBrushSize={(n)=>set({ brushSize:n })}
+        shapeKind={shapeKind} setShapeKind={(k)=>set({ shapeKind:k })}
         onUploadImage={onUploadImage}
         onAddText={onAddText}
         onAddShape={addShape}
-        startCrop={startCrop}
-        applyCrop={applyCrop}
-        cancelCrop={cancelCrop}
-        isCropping={isCropping}
+        startCrop={startCrop} applyCrop={applyCrop} cancelCrop={cancelCrop} isCropping={isCropping}
         onDownloadFront={()=>exportSide("front")}
         onDownloadBack={()=>exportSide("back")}
         toggleLayers={toggleLayers}
@@ -431,14 +375,13 @@ export default function EditorCanvas() {
           }}
           onToggleLock={(id)=> {
             const l = getLayerById(id)!; updateMeta(id, { locked: !l.meta.locked })
-            ;(l.node as any).locked = !l.meta.locked
-            attachTransformer()
+            ;(l.node as any).locked = !l.meta.locked; attachTransformer()
           }}
           onDelete={(id)=> { setLayers(p=>p.filter(l=>l.id!==id)); if (selectedId===id) select(null) }}
           onDuplicate={(id)=> {
             const src = getLayerById(id)!; const clone = src.node.clone()
             clone.x(src.node.x()+20); clone.y(src.node.y()+20); (clone as any).id(uid())
-            const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
+            const newLay: AnyLayer = { id:(clone as any)._id, node:clone, side:src.side, meta:{...src.meta, name:src.meta.name+" copy"}, type:src.type }
             setLayers(p=>[...p, newLay]); select(newLay.id)
           }}
           onMoveUp={(id)=> moveZ(id, "up")}
@@ -468,15 +411,7 @@ export default function EditorCanvas() {
             {visibleLayers.map((l)=>(
               <Group key={l.id} onClick={()=> select(l.id)} onTap={()=> select(l.id)} />
             ))}
-            <Transformer
-              ref={tRef}
-              rotateEnabled={true}
-              anchorSize={12}
-              borderStroke="black"
-              anchorStroke="black"
-              anchorFill="white"
-            />
-            {/* Crop overlay */}
+            <Transformer ref={tRef} rotateEnabled anchorSize={12} borderStroke="black" anchorStroke="black" anchorFill="white" />
             <Rect ref={cropRect} visible={false} stroke="black" dash={[6,4]} strokeWidth={2} draggable />
             <Transformer ref={cropTf} rotateEnabled={false} anchorSize={10} borderStroke="black" anchorStroke="black" />
           </Layer>
