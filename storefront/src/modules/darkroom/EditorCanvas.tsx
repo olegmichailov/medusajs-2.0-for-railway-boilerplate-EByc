@@ -6,12 +6,15 @@ import useImage from "use-image"
 import { isMobile } from "react-device-detect"
 import Toolbar from "./Toolbar"
 
-// ——— Константы рендера — полное «печать»-разрешение и адаптивный показ
+// Базовый размер «печать»-холста
 const BASE_W = 2000
 const BASE_H = 2600
-const PRINT_PIXEL_RATIO = 3 // итоговый PNG в высоком разрешении
+const EXPORT_PIXEL_RATIO = 3
 
 type Side = "front" | "back"
+type Blend = "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten"
+
+const BLENDS: Blend[] = ["source-over", "multiply", "screen", "overlay", "darken", "lighten"]
 
 type DraggableImg = {
   id: string
@@ -23,55 +26,57 @@ type DraggableImg = {
   rotation: number
   opacity: number
   crop?: { x: number; y: number; width: number; height: number }
+  blend: Blend
+  z: number
 }
 
-type Stroke = { color: string; size: number; points: number[] }
+type Stroke = {
+  color: string
+  size: number
+  points: number[]
+  mode: "draw" | "erase" // erase = destination-out
+}
 
-const EditorCanvas = () => {
-  // ——— Mockups
+export default function EditorCanvas() {
+  // мокапы
   const [mockFront] = useImage("/mockups/MOCAP_FRONT.png", "anonymous")
   const [mockBack] = useImage("/mockups/MOCAP_BACK.png", "anonymous")
 
-  // ——— Текущая сторона
   const [side, setSide] = useState<Side>("front")
 
-  // ——— Слои данных для каждой стороны
+  // слои по сторонам
   const [frontImgs, setFrontImgs] = useState<DraggableImg[]>([])
   const [backImgs, setBackImgs] = useState<DraggableImg[]>([])
   const [frontStrokes, setFrontStrokes] = useState<Stroke[]>([])
   const [backStrokes, setBackStrokes] = useState<Stroke[]>([])
 
-  // ——— Текущие настройки/режимы
-  const [mode, setMode] = useState<"move" | "brush" | "crop">("brush")
-  const [brushColor, setBrushColor] = useState("#d63384")
-  const [brushSize, setBrushSize] = useState(6)
+  // ui / режимы
+  const [mode, setMode] = useState<"move" | "brush" | "erase" | "crop">("brush")
+  const [brushColor, setBrushColor] = useState("#111111")
+  const [brushSize, setBrushSize] = useState(8)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(!isMobile)
 
-  // ——— Crop state
+  // crop
   const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [isCropping, setIsCropping] = useState(false)
 
-  // ——— UI: панель-инструментов (sheet) видимость
-  const [toolsOpen, setToolsOpen] = useState(!isMobile)
-
-  // ——— Refs
   const stageRef = useRef<any>(null)
   const trRef = useRef<any>(null)
 
-  // ——— Текущие наборы по стороне
+  // текущие по стороне
   const imgs = side === "front" ? frontImgs : backImgs
   const setImgs = side === "front" ? setFrontImgs : setBackImgs
   const strokes = side === "front" ? frontStrokes : backStrokes
   const setStrokes = side === "front" ? setFrontStrokes : setBackStrokes
   const mock = side === "front" ? mockFront : mockBack
 
-  // ——— Рассчёт видимого размера канвы по вьюпорту (по центру, без искажений)
+  // адаптивные размеры: строго по центру, без искажений
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1280
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    // оставим место под верхнюю навигацию и нижнюю панель браузера на мобиле
-    const padTop = isMobile ? 72 : 96
+    const padTop = isMobile ? 68 : 92
     const padSide = isMobile ? 16 : 24
     const maxW = vw - padSide * 2
     const maxH = vh - padTop - 24
@@ -79,27 +84,23 @@ const EditorCanvas = () => {
     return { viewW: Math.round(BASE_W * s), viewH: Math.round(BASE_H * s), scale: s }
   }, [])
 
-  // ——— Заблокировать жесты страницы, когда рисуем на мобиле
+  // блокируем пинч/скролл над канвой на мобиле (можно рисовать)
   useEffect(() => {
     if (!isMobile) return
-    const prevent = (e: TouchEvent) => {
-      if (!stageRef.current) return
-      // если палец над конвой — отменяем скролл/пинч
-      e.preventDefault()
-    }
+    const prevent = (e: TouchEvent) => e.preventDefault()
     document.addEventListener("touchmove", prevent, { passive: false })
-    document.addEventListener("gesturestart", prevent, { passive: false } as any)
-    document.addEventListener("gesturechange", prevent, { passive: false } as any)
-    document.addEventListener("gestureend", prevent, { passive: false } as any)
+    document.addEventListener("gesturestart", prevent as any, { passive: false } as any)
+    document.addEventListener("gesturechange", prevent as any, { passive: false } as any)
+    document.addEventListener("gestureend", prevent as any, { passive: false } as any)
     return () => {
-      document.removeEventListener("touchmove", prevent as any)
+      document.removeEventListener("touchmove", prevent)
       document.removeEventListener("gesturestart", prevent as any)
       document.removeEventListener("gesturechange", prevent as any)
       document.removeEventListener("gestureend", prevent as any)
     }
   }, [])
 
-  // ——— Трансформер к выделенному
+  // трансформер
   useEffect(() => {
     if (!trRef.current) return
     const layer = stageRef.current?.getLayers?.()[0]
@@ -116,61 +117,64 @@ const EditorCanvas = () => {
     }
   }, [selectedId, imgs, side])
 
-  // ——— Помощники
+  // преобразование координат
   const clientToCanvas = useCallback(
-    (p: { x: number; y: number }) => ({
-      x: p.x / scale,
-      y: p.y / scale,
-    }),
+    (p: { x: number; y: number }) => ({ x: p.x / scale, y: p.y / scale }),
     [scale]
   )
 
+  // добавление изображения
   const addImageFromFile = useCallback(
     (file: File) => {
       const reader = new FileReader()
       reader.onload = () => {
-        const img = new Image()
-        img.crossOrigin = "anonymous"
-        img.onload = () => {
-          // начальные размеры с подгонкой под макет
+        const im = new Image()
+        im.crossOrigin = "anonymous"
+        im.onload = () => {
           const maxW = BASE_W * 0.6
-          const k = Math.min(maxW / img.width, (BASE_H * 0.6) / img.height, 1)
+          const maxH = BASE_H * 0.6
+          const k = Math.min(maxW / im.width, maxH / im.height, 1)
+          const id = `${Date.now()}`
+          const z = (imgs[imgs.length - 1]?.z ?? 0) + 1
           const newImg: DraggableImg = {
-            id: `${Date.now()}`,
-            image: img,
-            x: (BASE_W - img.width * k) / 2,
-            y: (BASE_H - img.height * k) / 2,
-            width: img.width * k,
-            height: img.height * k,
+            id,
+            image: im,
+            x: (BASE_W - im.width * k) / 2,
+            y: (BASE_H - im.height * k) / 2,
+            width: im.width * k,
+            height: im.height * k,
             rotation: 0,
             opacity: 1,
+            blend: "source-over",
+            z,
           }
-          setImgs((prev) => [...prev, newImg])
-          setSelectedId(newImg.id)
+          setImgs((p) => [...p, newImg].sort((a, b) => a.z - b.z))
+          setSelectedId(id)
           setMode("move")
         }
-        img.src = reader.result as string
+        im.src = reader.result as string
       }
       reader.readAsDataURL(file)
     },
-    [setImgs]
+    [imgs, setImgs]
   )
 
+  // поинтеры
   const onPointerDown = (e: any) => {
-    // клик по «пустоте» — снять выделение
     if (e.target === e.target.getStage()) {
       setSelectedId(null)
       if (mode === "crop") setCropRect(null)
-      return
     }
 
-    if (mode === "brush") {
+    if (mode === "brush" || mode === "erase") {
       const pos = stageRef.current?.getPointerPosition()
       if (!pos) return
       const { x, y } = clientToCanvas(pos)
       setIsDrawing(true)
-      setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: [x, y] }])
-      return
+      setStrokes((prev) => [
+        ...prev,
+        { color: brushColor, size: brushSize, points: [x, y], mode: mode === "erase" ? "erase" : "draw" },
+      ])
     }
 
     if (mode === "crop") {
@@ -179,12 +183,11 @@ const EditorCanvas = () => {
       const { x, y } = clientToCanvas(pos)
       setIsCropping(true)
       setCropRect({ x, y, w: 0, h: 0 })
-      return
     }
   }
 
   const onPointerMove = () => {
-    if (mode === "brush" && isDrawing) {
+    if ((mode === "brush" || mode === "erase") && isDrawing) {
       const pos = stageRef.current?.getPointerPosition()
       if (!pos) return
       const { x, y } = clientToCanvas(pos)
@@ -208,39 +211,53 @@ const EditorCanvas = () => {
     if (mode === "crop") setIsCropping(false)
   }
 
-  // ——— Применить/отменить crop
+  // Crop apply — корректная геометрия + пересечение с выбранным изображением
   const applyCrop = () => {
     if (!selectedId || !cropRect) return
-    setImgs((prev) =>
-      prev.map((it) =>
-        it.id === selectedId
-          ? {
-              ...it,
-              crop: {
-                x: Math.max(0, Math.min(it.width, cropRect.x - it.x)),
-                y: Math.max(0, Math.min(it.height, cropRect.y - it.y)),
-                width: Math.max(1, Math.min(it.width, Math.abs(cropRect.w))),
-                height: Math.max(1, Math.min(it.height, Math.abs(cropRect.h))),
-              },
-            }
-          : it
-      )
-    )
+    const sel = imgs.find((i) => i.id === selectedId)
+    if (!sel) return
+
+    // нормализуем рамку
+    const rx = Math.min(cropRect.x, cropRect.x + cropRect.w)
+    const ry = Math.min(cropRect.y, cropRect.y + cropRect.h)
+    const rw = Math.abs(cropRect.w)
+    const rh = Math.abs(cropRect.h)
+
+    // пересечение рамки с изображением в координатах канвы
+    const ix1 = sel.x
+    const iy1 = sel.y
+    const ix2 = sel.x + sel.width
+    const iy2 = sel.y + sel.height
+    const cx1 = Math.max(ix1, rx)
+    const cy1 = Math.max(iy1, ry)
+    const cx2 = Math.min(ix2, rx + rw)
+    const cy2 = Math.min(iy2, ry + rh)
+    if (cx2 <= cx1 || cy2 <= cy1) {
+      // нет пересечения
+      setCropRect(null)
+      return
+    }
+    // переводим в локальные координаты изображения
+    const crop = { x: cx1 - sel.x, y: cy1 - sel.y, width: cx2 - cx1, height: cy2 - cy1 }
+
+    setImgs((prev) => prev.map((it) => (it.id === selectedId ? { ...it, crop } : it)))
     setCropRect(null)
   }
   const cancelCrop = () => setCropRect(null)
 
-  // ——— Горячие клавиши
+  // Blend shortcuts + z-order
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey
-      // удалить
+
+      // delete
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         e.preventDefault()
-        setImgs((prev) => prev.filter((i) => i.id !== selectedId))
+        setImgs((p) => p.filter((i) => i.id !== selectedId))
         setSelectedId(null)
+        return
       }
-      // копировать/вставить
+      // copy / paste / duplicate
       if (meta && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x") && selectedId) {
         e.preventDefault()
         const src = imgs.find((i) => i.id === selectedId)
@@ -250,49 +267,77 @@ const EditorCanvas = () => {
       if (meta && e.key.toLowerCase() === "v" && (window as any).__clip) {
         e.preventDefault()
         const src: DraggableImg = (window as any).__clip
-        const copy: DraggableImg = {
-          ...src,
-          id: `${Date.now()}`,
-          x: src.x + 20,
-          y: src.y + 20,
-        }
-        setImgs((p) => [...p, copy])
-        setSelectedId(copy.id)
+        const id = `${Date.now()}`
+        const z = (imgs[imgs.length - 1]?.z ?? 0) + 1
+        const copy: DraggableImg = { ...src, id, x: src.x + 20, y: src.y + 20, z }
+        setImgs((p) => [...p, copy].sort((a, b) => a.z - b.z))
+        setSelectedId(id)
       }
-      // дублировать
       if (meta && e.key.toLowerCase() === "d" && selectedId) {
         e.preventDefault()
         const src = imgs.find((i) => i.id === selectedId)
         if (!src) return
-        const copy: DraggableImg = { ...src, id: `${Date.now()}`, x: src.x + 20, y: src.y + 20 }
-        setImgs((p) => [...p, copy])
-        setSelectedId(copy.id)
+        const id = `${Date.now()}`
+        const z = (imgs[imgs.length - 1]?.z ?? 0) + 1
+        const copy: DraggableImg = { ...src, id, x: src.x + 20, y: src.y + 20, z }
+        setImgs((p) => [...p, copy].sort((a, b) => a.z - b.z))
+        setSelectedId(id)
+      }
+
+      // z-order
+      if (selectedId && (e.key === "[" || e.key === "]")) {
+        e.preventDefault()
+        setImgs((prev) => {
+          const arr = [...prev]
+          const idx = arr.findIndex((i) => i.id === selectedId)
+          if (idx === -1) return prev
+          if (e.key === "]" && idx < arr.length - 1) {
+            const [it] = arr.splice(idx, 1)
+            arr.splice(idx + 1, 0, it)
+          }
+          if (e.key === "[" && idx > 0) {
+            const [it] = arr.splice(idx, 1)
+            arr.splice(idx - 1, 0, it)
+          }
+          // перенумеруем z
+          arr.forEach((it, i) => (it.z = i))
+          return arr
+        })
+      }
+
+      // blend cycle
+      if (selectedId && e.shiftKey && (e.key === "+" || e.key === "_" || e.key === "=" || e.key === "-")) {
+        e.preventDefault()
+        setImgs((prev) =>
+          prev.map((it) => {
+            if (it.id !== selectedId) return it
+            const idx = BLENDS.indexOf(it.blend)
+            const next = e.key === "-" || e.key === "_" ? (idx - 1 + BLENDS.length) % BLENDS.length : (idx + 1) % BLENDS.length
+            return { ...it, blend: BLENDS[next] }
+          })
+        )
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [imgs, selectedId, setImgs])
 
-  // ——— Экспорт
-  const exportPNG = (targetSide: Side) => {
-    const needSide = targetSide
-    const s = side
-    setSide(needSide)
-    // небольшой тик, чтобы слой перерисовался
+  // экспорт по стороне
+  const exportPNG = (target: Side) => {
+    const prev = side
+    setSide(target)
     requestAnimationFrame(() => {
-      const uri = stageRef.current.toDataURL({ pixelRatio: PRINT_PIXEL_RATIO })
+      const uri = stageRef.current.toDataURL({ pixelRatio: EXPORT_PIXEL_RATIO })
       const a = document.createElement("a")
       a.href = uri
-      a.download = `darkroom-${needSide}.png`
+      a.download = `darkroom-${target}.png`
       a.click()
-      setSide(s)
+      setSide(prev)
     })
   }
 
-  // ——— Рендер
   return (
     <div className="w-full min-h-[calc(100vh-64px)] flex flex-col items-center">
-      {/* Контейнер под мокап — ровно по центру вьюпорта */}
       <div
         className="relative"
         style={{
@@ -314,60 +359,61 @@ const EditorCanvas = () => {
           onTouchEnd={onPointerUp}
         >
           <Layer>
-            {/* Подложка-мокап текущей стороны */}
             {mock && <KImage image={mock} width={BASE_W} height={BASE_H} />}
-            {/* Картинки */}
-            {imgs.map((it) => (
-              <KImage
-                key={it.id}
-                id={`node-${it.id}`}
-                image={it.image}
-                x={it.x}
-                y={it.y}
-                width={it.width}
-                height={it.height}
-                rotation={it.rotation}
-                opacity={it.opacity}
-                crop={it.crop}
-                draggable={mode === "move"}
-                onClick={() => setSelectedId(it.id)}
-                onTap={() => setSelectedId(it.id)}
-                onDragEnd={(e) => {
-                  const { x, y } = e.target.position()
-                  setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, x, y } : img)))
-                }}
-                onTransformEnd={(e: any) => {
-                  const node = e.target
-                  const scaleX = node.scaleX()
-                  const scaleY = node.scaleY()
-                  node.scaleX(1)
-                  node.scaleY(1)
-                  const next = {
-                    x: node.x(),
-                    y: node.y(),
-                    rotation: node.rotation(),
-                    width: Math.max(5, node.width() * scaleX),
-                    height: Math.max(5, node.height() * scaleY),
-                  }
-                  setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, ...next } : img)))
-                }}
-              />
-            ))}
+            {imgs
+              .slice()
+              .sort((a, b) => a.z - b.z)
+              .map((it) => (
+                <KImage
+                  key={it.id}
+                  id={`node-${it.id}`}
+                  image={it.image}
+                  x={it.x}
+                  y={it.y}
+                  width={it.width}
+                  height={it.height}
+                  rotation={it.rotation}
+                  opacity={it.opacity}
+                  crop={it.crop}
+                  globalCompositeOperation={it.blend}
+                  draggable={mode === "move"}
+                  onClick={() => setSelectedId(it.id)}
+                  onTap={() => setSelectedId(it.id)}
+                  onDragEnd={(e) => {
+                    const { x, y } = e.target.position()
+                    setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, x, y } : img)))
+                  }}
+                  onTransformEnd={(e: any) => {
+                    const node = e.target
+                    const scaleX = node.scaleX()
+                    const scaleY = node.scaleY()
+                    node.scaleX(1)
+                    node.scaleY(1)
+                    const next = {
+                      x: node.x(),
+                      y: node.y(),
+                      rotation: node.rotation(),
+                      width: Math.max(5, node.width() * scaleX),
+                      height: Math.max(5, node.height() * scaleY),
+                    }
+                    setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, ...next } : img)))
+                  }}
+                />
+              ))}
 
-            {/* Рисунки */}
             {strokes.map((s, i) => (
               <Line
                 key={i}
                 points={s.points}
-                stroke={s.color}
+                stroke={s.mode === "erase" ? "#000" : s.color}
                 strokeWidth={s.size}
                 lineCap="round"
                 lineJoin="round"
                 tension={0.4}
+                globalCompositeOperation={s.mode === "erase" ? "destination-out" : "source-over"}
               />
             ))}
 
-            {/* Crop рамка */}
             {mode === "crop" && cropRect && (
               <Group>
                 <Rect
@@ -381,28 +427,23 @@ const EditorCanvas = () => {
               </Group>
             )}
 
-            {/* Трансформер */}
-            {selectedId && mode !== "brush" && <Transformer ref={trRef} rotateEnabled={true} />}
+            {selectedId && mode !== "brush" && mode !== "erase" && <Transformer ref={trRef} rotateEnabled={true} />}
           </Layer>
         </Stage>
       </div>
 
-      {/* Панель инструментов: мобайл — снизу sheet по кнопке Create, десктоп — выезжающая сбоку */}
       <Toolbar
         open={toolsOpen}
         onOpenChange={setToolsOpen}
         side={side}
         onSideChange={setSide}
         mode={mode}
-        onModeChange={(m) => {
-          setMode(m)
-          if (m !== "crop") setCropRect(null)
-        }}
+        onModeChange={setMode}
         brushColor={brushColor}
         onBrushColor={setBrushColor}
         brushSize={brushSize}
         onBrushSize={setBrushSize}
-        onAddImage={(file) => addImageFromFile(file)}
+        onAddImage={addImageFromFile}
         onClearStrokes={() => setStrokes([])}
         onDeleteSelected={() => {
           if (!selectedId) return
@@ -413,9 +454,11 @@ const EditorCanvas = () => {
           if (!selectedId) return
           const src = imgs.find((i) => i.id === selectedId)
           if (!src) return
-          const copy: DraggableImg = { ...src, id: `${Date.now()}`, x: src.x + 20, y: src.y + 20 }
-          setImgs((p) => [...p, copy])
-          setSelectedId(copy.id)
+          const id = `${Date.now()}`
+          const z = (imgs[imgs.length - 1]?.z ?? 0) + 1
+          const copy: DraggableImg = { ...src, id, x: src.x + 20, y: src.y + 20, z }
+          setImgs((p) => [...p, copy].sort((a, b) => a.z - b.z))
+          setSelectedId(id)
         }}
         onApplyCrop={applyCrop}
         onCancelCrop={cancelCrop}
@@ -426,5 +469,3 @@ const EditorCanvas = () => {
     </div>
   )
 }
-
-export default EditorCanvas
