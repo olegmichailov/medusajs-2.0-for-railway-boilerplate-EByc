@@ -99,6 +99,8 @@ const StripePaymentButton = ({
 
     const result = await stripe.confirmPayment({
       elements,
+      // оставляем if_required — редирект произойдёт для Klarna/Revolut,
+      // а для карт, если 3DS не нужен, останемся на месте
       redirect: "if_required",
       confirmParams: {
         return_url:
@@ -112,9 +114,10 @@ const StripePaymentButton = ({
 
     const { error, paymentIntent } = result
 
+    // НЕ закрываем заказ при requires_capture — ждём финальный success/processing
     if (error) {
       const pi = (error as any).payment_intent
-      if (pi && (pi.status === "requires_capture" || pi.status === "succeeded")) {
+      if (pi && (pi.status === "succeeded" || pi.status === "processing")) {
         await onPaymentCompleted()
         return
       }
@@ -125,8 +128,7 @@ const StripePaymentButton = ({
 
     if (
       paymentIntent &&
-      (paymentIntent.status === "requires_capture" ||
-        paymentIntent.status === "succeeded" ||
+      (paymentIntent.status === "succeeded" ||
         paymentIntent.status === "processing")
     ) {
       await onPaymentCompleted()
