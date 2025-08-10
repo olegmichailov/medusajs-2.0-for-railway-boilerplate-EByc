@@ -8,9 +8,7 @@ export type Blend = "source-over" | "multiply" | "screen" | "overlay" | "darken"
 export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
 
 type UIState = {
-  showPanel: boolean
   showLayers: boolean
-  togglePanel: () => void
   toggleLayers: () => void
 }
 
@@ -27,20 +25,17 @@ type DrawState = {
 }
 
 export const useDarkroom = create<UIState & DrawState>((set) => ({
-  // UI
-  showPanel: false,
-  showLayers: false,
-  togglePanel: () => set((s) => ({ showPanel: !s.showPanel })),
+  showLayers: true,
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
 
-  // draw
   side: "front",
   tool: "brush",
-  brushColor: "#ff2a7a", // «emo» розовый по умолчанию
+  brushColor: "#ff2a7a",
   brushSize: 6,
   shapeKind: "circle",
   selectedId: null,
   isCropping: false,
+
   set: (s) => set(s),
   select: (id) => set({ selectedId: id }),
 }))
