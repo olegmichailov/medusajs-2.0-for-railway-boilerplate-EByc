@@ -1,25 +1,57 @@
+"use client"
+
 import { create } from "zustand"
 
-type Tool = "select" | "draw" | "text"
+export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "image" | "crop"
 
-interface DarkroomState {
-  tool: Tool
-  setTool: (tool: Tool) => void
-  color: string
-  setColor: (color: string) => void
-  brushSize: number
-  setBrushSize: (size: number) => void
-  textInput: string
-  setTextInput: (text: string) => void
+export type Blend =
+  | "source-over" // Normal
+  | "multiply"
+  | "screen"
+  | "overlay"
+  | "darken"
+  | "lighten"
+
+export type Side = "front" | "back"
+
+type LayerKind = "image" | "shape" | "text" | "stroke"
+
+export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
+
+export interface LayerMeta {
+  id: string
+  kind: LayerKind
+  side: Side
+  blend: Blend
+  opacity: number
+  raster: number // 0 = off; >0 = pixel size
 }
 
-export const useDarkroomStore = create<DarkroomState>((set) => ({
-  tool: "select",
-  setTool: (tool) => set({ tool }),
-  color: "#ffffff",
-  setColor: (color) => set({ color }),
-  brushSize: 4,
-  setBrushSize: (size) => set({ brushSize: size }),
-  textInput: "",
-  setTextInput: (text) => set({ textInput: text }),
+type DarkroomState = {
+  tool: Tool
+  side: Side
+  showPanel: boolean
+  brushSize: number
+  brushColor: string
+  selectedId: string | null
+  shapeKind: ShapeKind
+  // runtime flags
+  isCropping: boolean
+  set: (p: Partial<DarkroomState>) => void
+  togglePanel: () => void
+  select: (id: string | null) => void
+}
+
+export const useDarkroom = create<DarkroomState>((set) => ({
+  tool: "brush",
+  side: "front",
+  showPanel: false,
+  brushSize: 8,
+  brushColor: "#ff2fa3",
+  selectedId: null,
+  shapeKind: "circle",
+  isCropping: false,
+  set: (p) => set(p),
+  togglePanel: () => set((s) => ({ showPanel: !s.showPanel })),
+  select: (id) => set({ selectedId: id }),
 }))
