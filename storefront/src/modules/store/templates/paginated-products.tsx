@@ -109,10 +109,9 @@ export default function PaginatedProducts({
 
   return (
     <>
-      {/* панель с переключателем колонок — те же поля, что и у списка ниже */}
-      <div className="px-6 small:px-0 pt-4 pb-2 flex items-center justify-between">
-        <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
-        <div className="flex gap-1 ml-auto">
+      {/* панель: тот же контейнер, что и список; переключатель прибит к правому краю */}
+      <div className="pt-4 pb-2 flex items-center">
+        <div className="ml-auto flex gap-1">
           {columnOptions.map((col) => (
             <button
               key={col}
@@ -129,8 +128,8 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* список — такие же боковые поля, как на странице товара */}
-      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-6 small:px-0`} data-testid="products-list">
+      {/* список: без дополнительных px — поля берём из родителя (StoreTemplate) */}
+      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10`} data-testid="products-list">
         {products.map((p) => (
           <li key={p.id} className="w-full">
             <ProductPreview product={p} region={region} />
