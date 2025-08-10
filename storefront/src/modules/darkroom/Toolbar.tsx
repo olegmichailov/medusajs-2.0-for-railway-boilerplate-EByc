@@ -3,8 +3,22 @@
 import { isMobile } from "react-device-detect"
 import { clx } from "@medusajs/ui"
 import {
-  Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Move,
-  Crop, Download, PanelsRightOpen, PanelsRightClose, Circle, Square, Triangle, Slash, Plus, Minus
+  Brush,
+  Eraser,
+  Type as TypeIcon,
+  Shapes,
+  Image as ImageIcon,
+  Move,
+  Crop,
+  Download,
+  // ВАЖНО: правильные имена иконок без «s»
+  PanelRightOpen,
+  PanelRightClose,
+  Circle as IconCircle,
+  Square as IconSquare,
+  Triangle as IconTriangle,
+  Slash,
+  Plus,
 } from "lucide-react"
 import React, { useRef, useState, type CSSProperties } from "react"
 import type { Blend, ShapeKind, Side, Tool } from "./store"
@@ -81,8 +95,8 @@ export default function Toolbar({
       <div className="flex items-center justify-between mb-2" onMouseDown={dragStart}>
         <div className="cursor-grab active:cursor-grabbing text-[11px] uppercase tracking-wide">Tools</div>
         {!isMobile && (
-          <button className={btn} onClick={toggleLayers}>
-            {layersOpen ? <PanelsRightClose className={ico}/> : <PanelsRightOpen className={ico}/>}
+          <button className={btn} onClick={toggleLayers} aria-label="Toggle layers">
+            {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
           </button>
         )}
         <button className={btn} onClick={()=>setOpen((s)=>!s)}>{open? "Close":"Open"}</button>
@@ -92,13 +106,13 @@ export default function Toolbar({
         <div className="space-y-3">
           {/* primary row */}
           <div className="grid grid-cols-7 gap-2">
-            <button className={clx(btn, tool==="move" && "bg-black text-white")} onClick={()=>setTool("move")}><Move className={ico}/></button>
-            <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")}><Brush className={ico}/></button>
-            <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")}><Eraser className={ico}/></button>
-            <button className={clx(btn, tool==="text" && "bg-black text-white")} onClick={onAddText}><TypeIcon className={ico}/></button>
-            <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")}><Shapes className={ico}/></button>
-            <button className={clx(btn, tool==="image" && "bg-black text-white")} onClick={()=>fileRef.current?.click()}><ImageIcon className={ico}/></button>
-            <button className={clx(btn, tool==="crop" && "bg-black text-white")} onClick={()=> (isCropping ? cancelCrop() : startCrop())}><Crop className={ico}/></button>
+            <button className={clx(btn, tool==="move" && "bg-black text-white")} onClick={()=>setTool("move")} aria-label="Move"><Move className={ico}/></button>
+            <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} aria-label="Brush"><Brush className={ico}/></button>
+            <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} aria-label="Erase"><Eraser className={ico}/></button>
+            <button className={clx(btn, tool==="text" && "bg-black text-white")} onClick={onAddText} aria-label="Text"><TypeIcon className={ico}/></button>
+            <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} aria-label="Shapes"><Shapes className={ico}/></button>
+            <button className={clx(btn, tool==="image" && "bg-black text-white")} onClick={()=>fileRef.current?.click()} aria-label="Image"><ImageIcon className={ico}/></button>
+            <button className={clx(btn, tool==="crop" && "bg-black text-white")} onClick={()=> (isCropping ? cancelCrop() : startCrop())} aria-label="Crop"><Crop className={ico}/></button>
           </div>
 
           {/* brush controls */}
@@ -120,11 +134,11 @@ export default function Toolbar({
           {/* shape picker */}
           {tool==="shape" && (
             <div className="grid grid-cols-5 gap-2">
-              <button className={clx(btn, shapeKind==="circle" && "bg-black text-white")} onClick={()=>{setShapeKind("circle"); onAddShape("circle")}}><Circle className={ico}/></button>
-              <button className={clx(btn, shapeKind==="square" && "bg-black text-white")} onClick={()=>{setShapeKind("square"); onAddShape("square")}}><Square className={ico}/></button>
-              <button className={clx(btn, shapeKind==="triangle" && "bg-black text-white")} onClick={()=>{setShapeKind("triangle"); onAddShape("triangle")}}><Triangle className={ico}/></button>
-              <button className={clx(btn, shapeKind==="cross" && "bg-black text-white")} onClick={()=>{setShapeKind("cross"); onAddShape("cross")}}><Plus className={ico} /></button>
-              <button className={clx(btn, shapeKind==="line" && "bg-black text-white")} onClick={()=>{setShapeKind("line"); onAddShape("line")}}><Slash className={ico}/></button>
+              <button className={clx(btn, shapeKind==="circle" && "bg-black text-white")} onClick={()=>{setShapeKind("circle"); onAddShape("circle")}} aria-label="Add circle"><IconCircle className={ico}/></button>
+              <button className={clx(btn, shapeKind==="square" && "bg-black text-white")} onClick={()=>{setShapeKind("square"); onAddShape("square")}} aria-label="Add square"><IconSquare className={ico}/></button>
+              <button className={clx(btn, shapeKind==="triangle" && "bg-black text-white")} onClick={()=>{setShapeKind("triangle"); onAddShape("triangle")}} aria-label="Add triangle"><IconTriangle className={ico}/></button>
+              <button className={clx(btn, shapeKind==="cross" && "bg-black text-white")} onClick={()=>{setShapeKind("cross"); onAddShape("cross")}} aria-label="Add cross"><Plus className={ico} /></button>
+              <button className={clx(btn, shapeKind==="line" && "bg-black text-white")} onClick={()=>{setShapeKind("line"); onAddShape("line")}} aria-label="Add line"><Slash className={ico}/></button>
             </div>
           )}
 
@@ -132,8 +146,8 @@ export default function Toolbar({
           <div className="grid grid-cols-4 gap-2">
             <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
             <button className={clx(btn, side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>Back</button>
-            <button className={btn} onClick={onDownloadFront}><Download className={ico}/></button>
-            <button className={btn} onClick={onDownloadBack}><Download className={ico}/></button>
+            <button className={btn} onClick={onDownloadFront} aria-label="Download Front"><Download className={ico}/></button>
+            <button className={btn} onClick={onDownloadBack} aria-label="Download Back"><Download className={ico}/></button>
           </div>
 
           {/* crop actions */}
@@ -159,12 +173,7 @@ export default function Toolbar({
         </div>
       )}
       {/* панель */}
-      {isMobile ? Panel : (
-        <>
-          {/* десктоп — панель всегда видима; по умолчанию открыта */}
-          <div className="hidden md:block">{Panel}</div>
-        </>
-      )}
+      {isMobile ? Panel : <div className="hidden md:block">{Panel}</div>}
     </>
   )
 }
