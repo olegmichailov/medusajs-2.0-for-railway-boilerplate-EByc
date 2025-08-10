@@ -1,6 +1,7 @@
+// storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
-import { useCallback, useContext, useEffect, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -48,17 +49,24 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  // Показывать радиогруппу только если провайдеров больше одного (например, Stripe + PayPal)
+  // Показывать радиогруппу только если провайдеров больше одного
   const showProviderPicker = (availablePaymentMethods?.length ?? 0) > 1
 
-  // bfcache/back — форсим обновление серверных компонентов (шапка, корзина)
+  // ---- 0) Форсим refresh при возврате из bfcache/фонового режима ----
   useEffect(() => {
     const onPageShow = () => router.refresh()
+    const onVisible = () => {
+      if (document.visibilityState === "visible") router.refresh()
+    }
     window.addEventListener("pageshow", onPageShow)
-    return () => window.removeEventListener("pageshow", onPageShow)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("pageshow", onPageShow)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
   }, [router])
 
-  // CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ
+  // ---- 1) CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ ----
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -80,7 +88,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // «Сторожок»: пришли с client_secret, но без redirect_status — считаем отменой через 8 сек
+  // ---- 2) «Сторожок»: пришли с client_secret, но без redirect_status ----
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
@@ -98,7 +106,31 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // Авто-инициация stripe-сессии — чтобы PaymentElement появился сразу
+  // ---- 3) Сброс выбора при СМЕНЕ корзины/набора методов ----
+  useEffect(() => {
+    const active = cart?.payment_collection?.payment_sessions?.find(
+      (s: any) => s.status === "pending"
+    )
+    setSelectedPaymentMethod(active?.provider_id ?? "")
+    setError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart?.id, (availablePaymentMethods || []).map((m) => m.id).join(",")])
+
+  // ---- 4) Если есть активная сессия — подхватываем её как выбранный метод ----
+  useEffect(() => {
+    if (!selectedPaymentMethod && activeSession?.provider_id) {
+      setSelectedPaymentMethod(activeSession.provider_id)
+    }
+  }, [activeSession?.provider_id, selectedPaymentMethod])
+
+  // ---- 5) Если нет выбора, но методы уже приехали — выбрать первый ----
+  useEffect(() => {
+    if (!selectedPaymentMethod && (availablePaymentMethods?.length ?? 0) > 0) {
+      setSelectedPaymentMethod(availablePaymentMethods[0].id)
+    }
+  }, [selectedPaymentMethod, availablePaymentMethods])
+
+  // ---- 6) Авто-инициация stripe-сессии (для появления PaymentElement) ----
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -119,9 +151,9 @@ const Payment = ({
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
   /**
-   * ВАЖНО: завершаем заказ ТОЛЬКО при `succeeded` или `processing`.
-   * `requires_capture` ИСКЛЮЧЕН — не считаем это финальным успехом с фронта.
-   * Это даёт корректное поведение для редирект-методов (Klarna/RevolutPay).
+   * ---- 7) Автозавершение после редиректа/без него ----
+   * Завершаем ТОЛЬКО при succeeded/processing. requires_capture исключён —
+   * финализацию сделает вебхук/бэк.
    */
   useEffect(() => {
     const clientSecret =
@@ -202,6 +234,9 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
+  // методы могут на мгновение быть пустыми (SSR/рефреш) — считаем это «лоадингом»
+  const methodsLoaded = (availablePaymentMethods?.length ?? 0) > 0
+
   return (
     <div className="bg-white">
       <div className="flex flex-row items-center justify-between mb-6">
@@ -233,33 +268,52 @@ const Payment = ({
 
       <div>
         <div className={isOpen ? "block" : "hidden"}>
-          {!paidByGiftcard && !!availablePaymentMethods?.length && (
+          {!paidByGiftcard && (
             <>
-              {showProviderPicker && (
-                <RadioGroup
-                  value={selectedPaymentMethod}
-                  onChange={(value: string) => setSelectedPaymentMethod(value)}
-                >
-                  {availablePaymentMethods
-                    .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
-                    .map((paymentMethod) => (
-                      <PaymentContainer
-                        paymentInfoMap={paymentInfoMap}
-                        paymentProviderId={paymentMethod.id}
-                        key={paymentMethod.id}
-                        selectedPaymentOptionId={selectedPaymentMethod}
-                      />
-                    ))}
-                </RadioGroup>
-              )}
+              {methodsLoaded ? (
+                <>
+                  {showProviderPicker && (
+                    <RadioGroup
+                      value={selectedPaymentMethod}
+                      onChange={(value: string) => setSelectedPaymentMethod(value)}
+                    >
+                      {availablePaymentMethods
+                        .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
+                        .map((paymentMethod) => (
+                          <PaymentContainer
+                            paymentInfoMap={paymentInfoMap}
+                            paymentProviderId={paymentMethod.id}
+                            key={paymentMethod.id}
+                            selectedPaymentOptionId={selectedPaymentMethod}
+                          />
+                        ))}
+                    </RadioGroup>
+                  )}
 
-              {choseStripe && stripeReady && (
-                <div className="mt-5 transition-all duration-150 ease-in-out">
-                  <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your payment details:
+                  {choseStripe && stripeReady && (
+                    <div className="mt-5 transition-all duration-150 ease-in-out">
+                      <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                        Enter your payment details:
+                      </Text>
+                      {/* Внутри — вкладки Card/Klarna/Revolut Pay */}
+                      <PaymentElement options={{ layout: "tabs" }} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                // Fallback: методы ещё не подтянулись — мягкая «кнопка обновить»
+                <div className="mt-4">
+                  <Text className="txt-medium text-ui-fg-subtle">
+                    Payment methods are loading…
                   </Text>
-                  {/* вкладки Card / Klarna / Revolut Pay и т.п. */}
-                  <PaymentElement options={{ layout: "tabs" }} />
+                  <Button
+                    className="mt-3"
+                    size="small"
+                    variant="secondary"
+                    onClick={() => router.refresh()}
+                  >
+                    Refresh
+                  </Button>
                 </div>
               )}
             </>
@@ -289,7 +343,7 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={!selectedPaymentMethod && !paidByGiftcard}
+            disabled={(!selectedPaymentMethod && !paidByGiftcard) || !methodsLoaded}
             data-testid="submit-payment-button"
           >
             {!activeSession && choseStripe
