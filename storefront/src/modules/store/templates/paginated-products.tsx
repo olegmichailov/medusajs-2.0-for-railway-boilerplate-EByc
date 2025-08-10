@@ -149,17 +149,19 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* Мобайл edge-to-edge: горизонтальные гаттеры = 0; на sm+ вернём стандартные */}
-      <ul
-        className={`grid ${gridColsClass} gap-x-0 sm:gap-x-4 gap-y-10 px-0 sm:px-0`}
-        data-testid="products-list"
-      >
-        {products.map((p) => (
-          <li key={p.id} className="w-full">
-            <ProductPreview product={p} region={region} />
-          </li>
-        ))}
-      </ul>
+      {/* full-bleed на мобиле: выравниваем сетку по краям экрана */}
+      <div className="-mx-4 small:mx-0">
+        <ul
+          className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-0`}
+          data-testid="products-list"
+        >
+          {products.map((p) => (
+            <li key={p.id} className="w-full">
+              <ProductPreview product={p} region={region} />
+            </li>
+          ))}
+        </ul>
+      </div>
 
       {hasMore && <div ref={loader} className="h-10 mt-10" />}
     </>
