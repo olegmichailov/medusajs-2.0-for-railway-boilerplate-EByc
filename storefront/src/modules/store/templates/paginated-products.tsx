@@ -37,10 +37,10 @@ export default function PaginatedProducts({
   const [hasMore, setHasMore] = useState(true)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const loader = useRef(null)
+  const loader = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    const mobile = window.innerWidth < 640
+    const mobile = typeof window !== "undefined" ? window.innerWidth < 640 : false
     setIsMobile(mobile)
     setColumns(mobile ? 1 : 2)
   }, [])
@@ -103,19 +103,18 @@ export default function PaginatedProducts({
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
 
   useEffect(() => {
-    if (!region || !hasMore || !initialLoaded) return
+    if (!region || !initialLoaded) return
+    if (!loader.current) return
 
-    const observer = new IntersectionObserver(
+    const obs = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) fetchMore()
+        if (entries[0].isIntersecting && hasMore) fetchMore()
       },
-      { threshold: 1.0 }
+      { threshold: 0.25 }
     )
 
-    if (loader.current) observer.observe(loader.current)
-    return () => {
-      if (loader.current) observer.unobserve(loader.current)
-    }
+    obs.observe(loader.current)
+    return () => obs.disconnect()
   }, [fetchMore, region, hasMore, initialLoaded])
 
   const gridColsClass =
@@ -141,6 +140,8 @@ export default function PaginatedProducts({
                   ? "bg-black text-white border-black"
                   : "bg-white text-black border-gray-300 hover:border-black"
               }`}
+              aria-pressed={columns === col}
+              aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
             >
               {col}
             </button>
@@ -148,13 +149,14 @@ export default function PaginatedProducts({
         </div>
       </div>
 
+      {/* Мобайл edge-to-edge: горизонтальные гаттеры = 0; на sm+ вернём стандартные */}
       <ul
-        className={`grid ${gridColsClass} gap-x-4 gap-y-10 px-0 sm:px-0`}
+        className={`grid ${gridColsClass} gap-x-0 sm:gap-x-4 gap-y-10 px-0 sm:px-0`}
         data-testid="products-list"
       >
-        {products.map((p, i) => (
-          <li key={p.id}>
-            <ProductPreview product={p} region={region} index={i} preload={i < 4} />
+        {products.map((p) => (
+          <li key={p.id} className="w-full">
+            <ProductPreview product={p} region={region} />
           </li>
         ))}
       </ul>
