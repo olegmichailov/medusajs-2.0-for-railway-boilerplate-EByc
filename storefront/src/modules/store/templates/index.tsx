@@ -6,7 +6,6 @@ import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-g
 import RefinementList from "@modules/store/components/refinement-list"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
-// важное: PaginatedProducts по-прежнему грузим динамически (клиентский)
 const PaginatedProducts = dynamic(() => import("./paginated-products"), {
   ssr: false,
 })
@@ -29,8 +28,6 @@ const StoreTemplate = ({
       data-testid="category-container"
     >
       <RefinementList sortBy={sort} />
-
-      {/* ВАЖНО: убрали px-6/sm:px-0 — пусть правая колонка наследует только поля content-container */}
       <div className="w-full">
         <h1
           data-testid="store-page-title"
