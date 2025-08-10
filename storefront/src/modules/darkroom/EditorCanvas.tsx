@@ -1,461 +1,430 @@
-"use client";
+"use client"
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Stage, Layer, Image as KonvaImage, Line, Transformer } from "react-konva";
-import useImage from "use-image";
-import { useRouter } from "next/navigation";
-import { isMobile as deviceIsMobile } from "react-device-detect";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Stage, Layer, Image as KImage, Line, Transformer, Rect, Group } from "react-konva"
+import useImage from "use-image"
+import { isMobile } from "react-device-detect"
+import Toolbar from "./Toolbar"
 
-/** ПЕЧАТНЫЙ (логический) размер холста */
-const CANVAS_WIDTH = 3000;
-const CANVAS_HEIGHT = 4500;
+// ——— Константы рендера — полное «печать»-разрешение и адаптивный показ
+const BASE_W = 2000
+const BASE_H = 2600
+const PRINT_PIXEL_RATIO = 3 // итоговый PNG в высоком разрешении
 
-/** Макс. видимая высота области рисования */
-const VIEWPORT_MAX_HEIGHT = deviceIsMobile ? 640 : 760;
+type Side = "front" | "back"
 
-type DrwLine = { color: string; size: number; points: number[] };
-type ImgItem = {
-  id: string;
-  image: HTMLImageElement;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  opacity: number;
-};
+type DraggableImg = {
+  id: string
+  image: HTMLImageElement
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  crop?: { x: number; y: number; width: number; height: number }
+}
 
-const EditorCanvas: React.FC = () => {
-  const router = useRouter();
+type Stroke = { color: string; size: number; points: number[] }
 
-  /** mockup-подложка (front/back) */
-  const [mockupType, setMockupType] = useState<"front" | "back">("front");
-  const [mockupImage] = useImage(
-    mockupType === "front" ? "/mockups/MOCAP_FRONT.png" : "/mockups/MOCAP_BACK.png"
-  );
+const EditorCanvas = () => {
+  // ——— Mockups
+  const [mockFront] = useImage("/mockups/MOCAP_FRONT.png", "anonymous")
+  const [mockBack] = useImage("/mockups/MOCAP_BACK.png", "anonymous")
 
-  /** пользовательские картинки и мазки */
-  const [images, setImages] = useState<ImgItem[]>([]);
-  const [drawings, setDrawings] = useState<DrwLine[]>([]);
+  // ——— Текущая сторона
+  const [side, setSide] = useState<Side>("front")
 
-  /** инструменты */
-  const [mode, setMode] = useState<"move" | "brush">("brush");
-  const [brushColor, setBrushColor] = useState("#d63384");
-  const [brushSize, setBrushSize] = useState(8);
+  // ——— Слои данных для каждой стороны
+  const [frontImgs, setFrontImgs] = useState<DraggableImg[]>([])
+  const [backImgs, setBackImgs] = useState<DraggableImg[]>([])
+  const [frontStrokes, setFrontStrokes] = useState<Stroke[]>([])
+  const [backStrokes, setBackStrokes] = useState<Stroke[]>([])
 
-  /** выбор и opacity */
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [opacity, setOpacity] = useState<number>(1);
+  // ——— Текущие настройки/режимы
+  const [mode, setMode] = useState<"move" | "brush" | "crop">("brush")
+  const [brushColor, setBrushColor] = useState("#d63384")
+  const [brushSize, setBrushSize] = useState(6)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [isDrawing, setIsDrawing] = useState(false)
 
-  /** меню: теперь выдвижное и на десктопе, и на мобиле */
-  const [menuOpen, setMenuOpen] = useState<boolean>(!deviceIsMobile);
+  // ——— Crop state
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [isCropping, setIsCropping] = useState(false)
 
-  /** refs */
-  const stageRef = useRef<any>(null);
-  const transformerRef = useRef<any>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const drawing = useRef<boolean>(false);
+  // ——— UI: панель-инструментов (sheet) видимость
+  const [toolsOpen, setToolsOpen] = useState(!isMobile)
 
-  /** вычисляем масштаб s для вписывания печатного холста в доступную область */
-  const [stageSize, setStageSize] = useState<{ w: number; h: number; s: number }>({
-    w: CANVAS_WIDTH,
-    h: CANVAS_HEIGHT,
-    s: 1,
-  });
+  // ——— Refs
+  const stageRef = useRef<any>(null)
+  const trRef = useRef<any>(null)
 
-  const recalcScale = useCallback(() => {
-    const el = wrapRef.current;
-    if (!el) return;
+  // ——— Текущие наборы по стороне
+  const imgs = side === "front" ? frontImgs : backImgs
+  const setImgs = side === "front" ? setFrontImgs : setBackImgs
+  const strokes = side === "front" ? frontStrokes : backStrokes
+  const setStrokes = side === "front" ? setFrontStrokes : setBackStrokes
+  const mock = side === "front" ? mockFront : mockBack
 
-    const maxW = el.clientWidth;
-    const maxH = Math.min(VIEWPORT_MAX_HEIGHT, window.innerHeight * 0.82);
+  // ——— Рассчёт видимого размера канвы по вьюпорту (по центру, без искажений)
+  const { viewW, viewH, scale } = useMemo(() => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1280
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800
+    // оставим место под верхнюю навигацию и нижнюю панель браузера на мобиле
+    const padTop = isMobile ? 72 : 96
+    const padSide = isMobile ? 16 : 24
+    const maxW = vw - padSide * 2
+    const maxH = vh - padTop - 24
+    const s = Math.min(maxW / BASE_W, maxH / BASE_H)
+    return { viewW: Math.round(BASE_W * s), viewH: Math.round(BASE_H * s), scale: s }
+  }, [])
 
-    const sx = maxW / CANVAS_WIDTH;
-    const sy = maxH / CANVAS_HEIGHT;
-    const s = Math.min(sx, sy);
-
-    setStageSize({
-      w: Math.round(CANVAS_WIDTH * s),
-      h: Math.round(CANVAS_HEIGHT * s),
-      s,
-    });
-  }, []);
-
+  // ——— Заблокировать жесты страницы, когда рисуем на мобиле
   useEffect(() => {
-    recalcScale();
-    window.addEventListener("resize", recalcScale);
-    return () => window.removeEventListener("resize", recalcScale);
-  }, [recalcScale]);
-
-  /** БЛОКИРУЕМ ЖЕСТЫ/СКРОЛЛ на мобильных во время взаимодействия с канвасом */
-  useEffect(() => {
-    const root = wrapRef.current;
-    if (!root) return;
-
-    // Полностью отключаем стандартные жесты в зоне канваса
-    root.style.touchAction = "none"; // блокирует панорамирование/пинч/даблтап-зуум
-    root.style.overscrollBehavior = "none";
-
-    // iOS Safari: доп. защита от жестов масштабирования
-    const prevent = (e: Event) => e.preventDefault();
-    root.addEventListener("gesturestart", prevent as any, { passive: false });
-    root.addEventListener("gesturechange", prevent as any, { passive: false });
-    root.addEventListener("gestureend", prevent as any, { passive: false });
-
-    // и колесо с ctrl (масштаб страницы)
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) e.preventDefault();
-    };
-    root.addEventListener("wheel", onWheel, { passive: false });
-
-    return () => {
-      root.style.touchAction = "";
-      root.style.overscrollBehavior = "";
-      root.removeEventListener("gesturestart", prevent as any);
-      root.removeEventListener("gesturechange", prevent as any);
-      root.removeEventListener("gestureend", prevent as any);
-      root.removeEventListener("wheel", onWheel as any);
-    };
-  }, []);
-
-  /** Transformer привязка к выбранному изображению */
-  useEffect(() => {
-    if (transformerRef.current && selectedIndex !== null) {
-      const node = stageRef.current?.findOne?.(`#img-${selectedIndex}`);
-      if (node) {
-        transformerRef.current.nodes([node]);
-        transformerRef.current.getLayer().batchDraw();
-      }
-    } else if (transformerRef.current) {
-      transformerRef.current.nodes([]);
-      transformerRef.current.getLayer().batchDraw();
+    if (!isMobile) return
+    const prevent = (e: TouchEvent) => {
+      if (!stageRef.current) return
+      // если палец над конвой — отменяем скролл/пинч
+      e.preventDefault()
     }
-  }, [selectedIndex, images.length]);
+    document.addEventListener("touchmove", prevent, { passive: false })
+    document.addEventListener("gesturestart", prevent, { passive: false } as any)
+    document.addEventListener("gesturechange", prevent, { passive: false } as any)
+    document.addEventListener("gestureend", prevent, { passive: false } as any)
+    return () => {
+      document.removeEventListener("touchmove", prevent as any)
+      document.removeEventListener("gesturestart", prevent as any)
+      document.removeEventListener("gesturechange", prevent as any)
+      document.removeEventListener("gestureend", prevent as any)
+    }
+  }, [])
 
-  /** Загрузка пользовательского изображения */
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ——— Трансформер к выделенному
+  useEffect(() => {
+    if (!trRef.current) return
+    const layer = stageRef.current?.getLayers?.()[0]
+    if (!layer) return
+    if (!selectedId) {
+      trRef.current.nodes([])
+      layer.draw()
+      return
+    }
+    const node = layer.findOne(`#node-${selectedId}`)
+    if (node) {
+      trRef.current.nodes([node])
+      layer.draw()
+    }
+  }, [selectedId, imgs, side])
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new window.Image();
-      img.src = reader.result as string;
-      img.onload = () => {
-        // Делаем стартовый размер 50% ширины макета (с сохранением пропорций)
-        const initW = CANVAS_WIDTH * 0.5;
-        const ratio = img.height / img.width;
-        const initH = initW * ratio;
+  // ——— Помощники
+  const clientToCanvas = useCallback(
+    (p: { x: number; y: number }) => ({
+      x: p.x / scale,
+      y: p.y / scale,
+    }),
+    [scale]
+  )
 
-        const item: ImgItem = {
-          id: String(Date.now()),
-          image: img,
-          x: (CANVAS_WIDTH - initW) / 2,
-          y: (CANVAS_HEIGHT - initH) / 2,
-          width: initW,
-          height: initH,
-          rotation: 0,
-          opacity: 1,
-        };
-        setImages((prev) => [...prev, item]);
-        setSelectedIndex(images.length);
-        setMode("move");
-      };
-    };
-    reader.readAsDataURL(file);
-    e.currentTarget.value = "";
-  };
+  const addImageFromFile = useCallback(
+    (file: File) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const img = new Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          // начальные размеры с подгонкой под макет
+          const maxW = BASE_W * 0.6
+          const k = Math.min(maxW / img.width, (BASE_H * 0.6) / img.height, 1)
+          const newImg: DraggableImg = {
+            id: `${Date.now()}`,
+            image: img,
+            x: (BASE_W - img.width * k) / 2,
+            y: (BASE_H - img.height * k) / 2,
+            width: img.width * k,
+            height: img.height * k,
+            rotation: 0,
+            opacity: 1,
+          }
+          setImgs((prev) => [...prev, newImg])
+          setSelectedId(newImg.id)
+          setMode("move")
+        }
+        img.src = reader.result as string
+      }
+      reader.readAsDataURL(file)
+    },
+    [setImgs]
+  )
 
-  /** Перевод экранных координат → мировые (учитываем масштаб s) */
-  const toWorld = useCallback(() => {
-    const stage = stageRef.current as any;
-    const pos = stage?.getPointerPosition?.();
-    if (!pos) return null;
-    const s = stageSize.s;
-    return { x: pos.x / s, y: pos.y / s };
-  }, [stageSize.s]);
-
-  /** Рисование */
   const onPointerDown = (e: any) => {
-    // клик по пустоте снимает выделение
-    if (e.target === e.target.getStage()) setSelectedIndex(null);
-    if (mode !== "brush") return;
-    const wp = toWorld();
-    if (!wp) return;
-    drawing.current = true;
-    setDrawings((prev) => [...prev, { color: brushColor, size: brushSize, points: [wp.x, wp.y] }]);
-  };
+    // клик по «пустоте» — снять выделение
+    if (e.target === e.target.getStage()) {
+      setSelectedId(null)
+      if (mode === "crop") setCropRect(null)
+      return
+    }
+
+    if (mode === "brush") {
+      const pos = stageRef.current?.getPointerPosition()
+      if (!pos) return
+      const { x, y } = clientToCanvas(pos)
+      setIsDrawing(true)
+      setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: [x, y] }])
+      return
+    }
+
+    if (mode === "crop") {
+      const pos = stageRef.current?.getPointerPosition()
+      if (!pos) return
+      const { x, y } = clientToCanvas(pos)
+      setIsCropping(true)
+      setCropRect({ x, y, w: 0, h: 0 })
+      return
+    }
+  }
 
   const onPointerMove = () => {
-    if (!drawing.current || mode !== "brush") return;
-    const wp = toWorld();
-    if (!wp) return;
-    setDrawings((prev) => {
-      const last = prev[prev.length - 1];
-      const next = { ...last, points: [...last.points, wp.x, wp.y] };
-      return [...prev.slice(0, -1), next];
-    });
-  };
+    if (mode === "brush" && isDrawing) {
+      const pos = stageRef.current?.getPointerPosition()
+      if (!pos) return
+      const { x, y } = clientToCanvas(pos)
+      setStrokes((prev) => {
+        const last = prev[prev.length - 1]
+        last.points = last.points.concat([x, y])
+        return [...prev.slice(0, -1), last]
+      })
+    }
+
+    if (mode === "crop" && isCropping && cropRect) {
+      const pos = stageRef.current?.getPointerPosition()
+      if (!pos) return
+      const { x, y } = clientToCanvas(pos)
+      setCropRect({ ...cropRect, w: x - cropRect.x, h: y - cropRect.y })
+    }
+  }
 
   const onPointerUp = () => {
-    drawing.current = false;
-  };
+    setIsDrawing(false)
+    if (mode === "crop") setIsCropping(false)
+  }
 
-  /** Опасити у выбранной картинки */
+  // ——— Применить/отменить crop
+  const applyCrop = () => {
+    if (!selectedId || !cropRect) return
+    setImgs((prev) =>
+      prev.map((it) =>
+        it.id === selectedId
+          ? {
+              ...it,
+              crop: {
+                x: Math.max(0, Math.min(it.width, cropRect.x - it.x)),
+                y: Math.max(0, Math.min(it.height, cropRect.y - it.y)),
+                width: Math.max(1, Math.min(it.width, Math.abs(cropRect.w))),
+                height: Math.max(1, Math.min(it.height, Math.abs(cropRect.h))),
+              },
+            }
+          : it
+      )
+    )
+    setCropRect(null)
+  }
+  const cancelCrop = () => setCropRect(null)
+
+  // ——— Горячие клавиши
   useEffect(() => {
-    if (selectedIndex === null) return;
-    setImages((prev) => {
-      const arr = [...prev];
-      arr[selectedIndex] = { ...arr[selectedIndex], opacity };
-      return arr;
-    });
-  }, [opacity, selectedIndex]);
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey
+      // удалить
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        e.preventDefault()
+        setImgs((prev) => prev.filter((i) => i.id !== selectedId))
+        setSelectedId(null)
+      }
+      // копировать/вставить
+      if (meta && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x") && selectedId) {
+        e.preventDefault()
+        const src = imgs.find((i) => i.id === selectedId)
+        if (!src) return
+        ;(window as any).__clip = src
+      }
+      if (meta && e.key.toLowerCase() === "v" && (window as any).__clip) {
+        e.preventDefault()
+        const src: DraggableImg = (window as any).__clip
+        const copy: DraggableImg = {
+          ...src,
+          id: `${Date.now()}`,
+          x: src.x + 20,
+          y: src.y + 20,
+        }
+        setImgs((p) => [...p, copy])
+        setSelectedId(copy.id)
+      }
+      // дублировать
+      if (meta && e.key.toLowerCase() === "d" && selectedId) {
+        e.preventDefault()
+        const src = imgs.find((i) => i.id === selectedId)
+        if (!src) return
+        const copy: DraggableImg = { ...src, id: `${Date.now()}`, x: src.x + 20, y: src.y + 20 }
+        setImgs((p) => [...p, copy])
+        setSelectedId(copy.id)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [imgs, selectedId, setImgs])
 
-  const clearDrawing = () => setDrawings([]);
+  // ——— Экспорт
+  const exportPNG = (targetSide: Side) => {
+    const needSide = targetSide
+    const s = side
+    setSide(needSide)
+    // небольшой тик, чтобы слой перерисовался
+    requestAnimationFrame(() => {
+      const uri = stageRef.current.toDataURL({ pixelRatio: PRINT_PIXEL_RATIO })
+      const a = document.createElement("a")
+      a.href = uri
+      a.download = `darkroom-${needSide}.png`
+      a.click()
+      setSide(s)
+    })
+  }
 
-  /** Экспорт ровно в печатный размер */
-  const handleDownload = async () => {
-    const stage = stageRef.current as any;
-    if (!stage) return;
-    const pixelRatio = 1 / stageSize.s; // даёт CANVAS_WIDTH×CANVAS_HEIGHT
-    const canvas: HTMLCanvasElement = await stage.toCanvas({ pixelRatio });
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "composition.png";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }, "image/png");
-  };
-
-  /** Рисуем МОКАП без искажений: fit=contain + центрируем */
-  const mockupRect = useMemo(() => {
-    if (!mockupImage) return null;
-    const iw = mockupImage.width || CANVAS_WIDTH;
-    const ih = mockupImage.height || CANVAS_HEIGHT;
-    const scale = Math.min(CANVAS_WIDTH / iw, CANVAS_HEIGHT / ih); // contain
-    const w = iw * scale;
-    const h = ih * scale;
-    const x = (CANVAS_WIDTH - w) / 2;
-    const y = (CANVAS_HEIGHT - h) / 2;
-    return { x, y, w, h };
-  }, [mockupImage]);
-
+  // ——— Рендер
   return (
-    <div className="w-screen h-screen bg-white overflow-hidden flex flex-col">
-      {/* Панель (выдвижная) — одинаковая логика для мобилы и десктопа */}
-      <div className="p-3 flex items-center justify-between border-b">
-        <div className="flex items-center gap-2">
-          <button onClick={() => router.back()} className="text-sm border px-3 py-1">
-            Back
-          </button>
-          <span className="text-sm opacity-70">Darkroom</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            className="text-sm border px-3 py-1"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-expanded={menuOpen}
-          >
-            {menuOpen ? "Hide panel" : "Show panel"}
-          </button>
-          <button className="bg-black text-white text-sm px-3 py-1" onClick={handleDownload}>
-            Download PNG
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[320px_1fr]">
-        {/* Выдвижная панель инструментов */}
-        <aside
-          className={`border-r p-4 transition-transform duration-200 ease-out
-            ${menuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-          `}
-          aria-hidden={!menuOpen && window.innerWidth < 1024}
+    <div className="w-full min-h-[calc(100vh-64px)] flex flex-col items-center">
+      {/* Контейнер под мокап — ровно по центру вьюпорта */}
+      <div
+        className="relative"
+        style={{
+          width: viewW,
+          height: viewH,
+          marginTop: isMobile ? 12 : 24,
+        }}
+      >
+        <Stage
+          ref={stageRef}
+          width={viewW}
+          height={viewH}
+          scale={{ x: scale, y: scale }}
+          onMouseDown={onPointerDown}
+          onMouseMove={onPointerMove}
+          onMouseUp={onPointerUp}
+          onTouchStart={onPointerDown}
+          onTouchMove={onPointerMove}
+          onTouchEnd={onPointerUp}
         >
-          <div className="flex flex-wrap gap-2 mb-4 text-sm">
-            <button
-              className={`border px-3 py-1 ${mode === "move" ? "bg-black text-white" : ""}`}
-              onClick={() => setMode("move")}
-            >
-              Move
-            </button>
-            <button
-              className={`border px-3 py-1 ${mode === "brush" ? "bg-black text-white" : ""}`}
-              onClick={() => setMode("brush")}
-            >
-              Brush
-            </button>
-            <button
-              className={`border px-3 py-1 ${mockupType === "front" ? "bg-black text-white" : ""}`}
-              onClick={() => setMockupType("front")}
-            >
-              Front
-            </button>
-            <button
-              className={`border px-3 py-1 ${mockupType === "back" ? "bg-black text-white" : ""}`}
-              onClick={() => setMockupType("back")}
-            >
-              Back
-            </button>
-            <button className="border px-3 py-1" onClick={clearDrawing}>
-              Clear strokes
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs mb-1">Add image</label>
-              <input type="file" accept="image/*" onChange={handleFileChange} />
-            </div>
-
-            <div>
-              <label className="block text-xs mb-1">Selected image opacity: {Math.round(opacity * 100)}%</label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={opacity}
-                onChange={(e) => setOpacity(Number(e.target.value))}
-                className="w-full h-[2px] bg-black appearance-none cursor-pointer
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2
-                  [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+          <Layer>
+            {/* Подложка-мокап текущей стороны */}
+            {mock && <KImage image={mock} width={BASE_W} height={BASE_H} />}
+            {/* Картинки */}
+            {imgs.map((it) => (
+              <KImage
+                key={it.id}
+                id={`node-${it.id}`}
+                image={it.image}
+                x={it.x}
+                y={it.y}
+                width={it.width}
+                height={it.height}
+                rotation={it.rotation}
+                opacity={it.opacity}
+                crop={it.crop}
+                draggable={mode === "move"}
+                onClick={() => setSelectedId(it.id)}
+                onTap={() => setSelectedId(it.id)}
+                onDragEnd={(e) => {
+                  const { x, y } = e.target.position()
+                  setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, x, y } : img)))
+                }}
+                onTransformEnd={(e: any) => {
+                  const node = e.target
+                  const scaleX = node.scaleX()
+                  const scaleY = node.scaleY()
+                  node.scaleX(1)
+                  node.scaleY(1)
+                  const next = {
+                    x: node.x(),
+                    y: node.y(),
+                    rotation: node.rotation(),
+                    width: Math.max(5, node.width() * scaleX),
+                    height: Math.max(5, node.height() * scaleY),
+                  }
+                  setImgs((p) => p.map((img) => (img.id === it.id ? { ...img, ...next } : img)))
+                }}
               />
-            </div>
+            ))}
 
-            <div>
-              <label className="block text-xs mb-1">Brush size: {brushSize}px</label>
-              <input
-                type="range"
-                min="1"
-                max="40"
-                value={brushSize}
-                onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-full h-[2px] bg-black appearance-none cursor-pointer
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2
-                  [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+            {/* Рисунки */}
+            {strokes.map((s, i) => (
+              <Line
+                key={i}
+                points={s.points}
+                stroke={s.color}
+                strokeWidth={s.size}
+                lineCap="round"
+                lineJoin="round"
+                tension={0.4}
               />
-            </div>
+            ))}
 
-            <div>
-              <label className="block text-xs mb-1">Brush color</label>
-              <input
-                type="color"
-                value={brushColor}
-                onChange={(e) => setBrushColor(e.target.value)}
-                className="w-8 h-8 border p-0 cursor-pointer"
-              />
-            </div>
-          </div>
-        </aside>
+            {/* Crop рамка */}
+            {mode === "crop" && cropRect && (
+              <Group>
+                <Rect
+                  x={Math.min(cropRect.x, cropRect.x + cropRect.w)}
+                  y={Math.min(cropRect.y, cropRect.y + cropRect.h)}
+                  width={Math.abs(cropRect.w)}
+                  height={Math.abs(cropRect.h)}
+                  stroke="#111"
+                  dash={[6, 4]}
+                />
+              </Group>
+            )}
 
-        {/* Область рисования — КАНВАС ПО ЦЕНТРУ */}
-        <section className="relative flex items-center justify-center">
-          <div
-            ref={wrapRef}
-            className="w-full h-full flex items-center justify-center select-none"
-            style={{
-              maxHeight: VIEWPORT_MAX_HEIGHT,
-              touchAction: "none",        // жесты off
-              overscrollBehavior: "none", // не тянуть страницу
-            }}
-            // страховка: полностью запрещаем скролл/зум в зоне канваса
-            onTouchMove={(e) => e.preventDefault()}
-            onWheel={(e) => {
-              if ((e as any).ctrlKey) e.preventDefault();
-            }}
-          >
-            <Stage
-              ref={stageRef}
-              width={stageSize.w}
-              height={stageSize.h}
-              scale={{ x: stageSize.s, y: stageSize.s }}
-              onMouseDown={onPointerDown}
-              onMousemove={onPointerMove}
-              onMouseup={onPointerUp}
-              onTouchStart={onPointerDown}
-              onTouchMove={onPointerMove}
-              onTouchEnd={onPointerUp}
-              style={{ transform: "translateY(-12px)" }}
-            >
-              <Layer>
-                {mockupImage && mockupRect && (
-                  <KonvaImage
-                    image={mockupImage}
-                    x={mockupRect.x}
-                    y={mockupRect.y}
-                    width={mockupRect.w}
-                    height={mockupRect.h}
-                    listening={false}
-                  />
-                )}
-
-                {images.map((img, idx) => (
-                  <KonvaImage
-                    key={img.id}
-                    id={`img-${idx}`}
-                    image={img.image}
-                    x={img.x}
-                    y={img.y}
-                    width={img.width}
-                    height={img.height}
-                    rotation={img.rotation}
-                    opacity={img.opacity}
-                    draggable={mode === "move"}
-                    onClick={() => setSelectedIndex(idx)}
-                    onTap={() => setSelectedIndex(idx)}
-                    onDragEnd={(e) => {
-                      const { x, y } = e.target.position();
-                      setImages((prev) => {
-                        const arr = [...prev];
-                        arr[idx] = { ...arr[idx], x, y };
-                        return arr;
-                      });
-                    }}
-                    onTransformEnd={(e) => {
-                      const node = e.target;
-                      const scaleX = node.scaleX();
-                      const scaleY = node.scaleY();
-                      node.scaleX(1);
-                      node.scaleY(1);
-                      const newW = Math.max(10, node.width() * scaleX);
-                      const newH = Math.max(10, node.height() * scaleY);
-                      setImages((prev) => {
-                        const arr = [...prev];
-                        arr[idx] = { ...arr[idx], width: newW, height: newH, rotation: node.rotation() };
-                        return arr;
-                      });
-                    }}
-                  />
-                ))}
-
-                {drawings.map((ln, i) => (
-                  <Line
-                    key={i}
-                    points={ln.points}
-                    stroke={ln.color}
-                    strokeWidth={ln.size}
-                    lineCap="round"
-                    lineJoin="round"
-                    tension={0}
-                    globalCompositeOperation="source-over"
-                  />
-                ))}
-
-                {selectedIndex !== null && <Transformer ref={transformerRef} rotateEnabled={true} />}
-              </Layer>
-            </Stage>
-          </div>
-        </section>
+            {/* Трансформер */}
+            {selectedId && mode !== "brush" && <Transformer ref={trRef} rotateEnabled={true} />}
+          </Layer>
+        </Stage>
       </div>
-    </div>
-  );
-};
 
-export default EditorCanvas;
+      {/* Панель инструментов: мобайл — снизу sheet по кнопке Create, десктоп — выезжающая сбоку */}
+      <Toolbar
+        open={toolsOpen}
+        onOpenChange={setToolsOpen}
+        side={side}
+        onSideChange={setSide}
+        mode={mode}
+        onModeChange={(m) => {
+          setMode(m)
+          if (m !== "crop") setCropRect(null)
+        }}
+        brushColor={brushColor}
+        onBrushColor={setBrushColor}
+        brushSize={brushSize}
+        onBrushSize={setBrushSize}
+        onAddImage={(file) => addImageFromFile(file)}
+        onClearStrokes={() => setStrokes([])}
+        onDeleteSelected={() => {
+          if (!selectedId) return
+          setImgs((p) => p.filter((i) => i.id !== selectedId))
+          setSelectedId(null)
+        }}
+        onDuplicateSelected={() => {
+          if (!selectedId) return
+          const src = imgs.find((i) => i.id === selectedId)
+          if (!src) return
+          const copy: DraggableImg = { ...src, id: `${Date.now()}`, x: src.x + 20, y: src.y + 20 }
+          setImgs((p) => [...p, copy])
+          setSelectedId(copy.id)
+        }}
+        onApplyCrop={applyCrop}
+        onCancelCrop={cancelCrop}
+        hasCrop={!!cropRect && !!selectedId}
+        onDownloadFront={() => exportPNG("front")}
+        onDownloadBack={() => exportPNG("back")}
+      />
+    </div>
+  )
+}
+
+export default EditorCanvas
