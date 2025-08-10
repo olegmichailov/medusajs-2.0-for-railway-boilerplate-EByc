@@ -1,14 +1,14 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Stage, Layer, Image as KImage, Rect, Transformer } from "react-konva"
+import { Stage, Layer, Image as KImage, Line, Rect, Transformer } from "react-konva"
 import Konva from "konva"
 import useImage from "use-image"
+import { isMobile } from "react-device-detect"
 import Toolbar from "./Toolbar"
 import LayersPanel from "./LayersPanel"
-import { useDarkroom, type Blend, type ShapeKind, type Side } from "./store"
+import { useDarkroom, Blend, ShapeKind, Side } from "./store"
 
-// Размер полотна (hi-res)
 const BASE_W = 2400
 const BASE_H = 3200
 const PADDING = 20
@@ -18,21 +18,12 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
 const uid = () => Math.random().toString(36).slice(2)
 
-type BaseMeta = {
-  blend: Blend
-  opacity: number
-  raster: number
-  name: string
-  visible: boolean
-  locked: boolean
-}
+type BaseMeta = { blend: Blend; opacity: number; raster: number; name: string; visible: boolean; locked: boolean }
 type AnyNode = Konva.Image | Konva.Line | Konva.Text | Konva.Shape | Konva.Group
-type LayerType = "image"|"shape"|"text"|"stroke"
-type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
+type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: "image"|"shape"|"text"|"stroke" }
 
 export default function EditorCanvas() {
-  const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select,
-          showLayers, toggleLayers } = useDarkroom()
+  const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select, showLayers, toggleLayers } = useDarkroom()
 
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
@@ -48,18 +39,17 @@ export default function EditorCanvas() {
   const [isCropping, setIsCropping] = useState(false)
   const pendingStrokeId = useRef<string | null>(null)
 
-  // Автоскейл
+  // autoscale
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const sidePanel = showLayers ? 320 : 0
+    const sidePanel = !isMobile && showLayers ? 320 : 0
     const maxW = vw - PADDING * 2 - sidePanel
     const maxH = vh - PADDING * 2 - 80
     const s = Math.min(maxW / BASE_W, maxH / BASE_H)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
   }, [showLayers])
 
-  // Видимость слоёв при смене стороны
   useEffect(() => {
     layers.forEach(l => l.node.visible(l.side === side && l.meta.visible))
     drawLayerRef.current?.batchDraw()
@@ -82,20 +72,19 @@ export default function EditorCanvas() {
   }
   const baseMeta = (name: string): BaseMeta => ({ blend:"source-over", opacity:1, raster:0, name, visible:true, locked:false })
 
-  // Трансформер и drag
   const canDrag = (t: string) => !["brush","erase","crop"].includes(t)
+
   const attachTransformer = () => {
     const lay = findLayer(selectedId)
     const node = lay?.node
-    const hide = !node || lay?.meta.locked || lay?.type==="stroke" || isDrawing || isCropping
-    if (hide) {
+    if (node && tRef.current && !lay?.meta.locked && lay?.type !== "stroke" && !isDrawing && !isCropping) {
+      node.draggable(canDrag(tool))
+      tRef.current.nodes([node])
+      tRef.current.getLayer()?.batchDraw()
+    } else {
       tRef.current?.nodes([])
       tRef.current?.getLayer()?.batchDraw()
-      return
     }
-    node!.draggable(canDrag(tool))
-    tRef.current?.nodes([node!])
-    tRef.current?.getLayer()?.batchDraw()
   }
   useEffect(()=>{ attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
@@ -106,7 +95,7 @@ export default function EditorCanvas() {
     node.getLayer()?.batchDraw()
   }, [tool, selectedId])
 
-  // Шорткаты
+  // shortcuts (dup/del/stack)
   useEffect(()=>{
     const onKey = (e: KeyboardEvent) => {
       const node = findNode(selectedId)
@@ -136,7 +125,7 @@ export default function EditorCanvas() {
     return ()=>window.removeEventListener("keydown", onKey)
   }, [selectedId, layers, side])
 
-  // Upload image
+  // image upload
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -149,9 +138,9 @@ export default function EditorCanvas() {
           y: BASE_H/2 - img.height/2,
           width: img.width,
           height: img.height,
+          listening: true,
         })
         ;(node as any).id(uid())
-        node.listening(true)
         const meta = baseMeta(file.name)
         applyMeta(node, meta)
         drawLayerRef.current?.add(node)
@@ -166,7 +155,7 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // Inline edit text
+  // inline text
   const editTextInline = (textNode: Konva.Text) => {
     const stage = stageRef.current
     if (!stage) return
@@ -178,15 +167,15 @@ export default function EditorCanvas() {
     ta.value = textNode.text()
     ta.style.position = "fixed"
     ta.style.left = rect.left + pos.x * scale + "px"
-    ta.style.top = rect.top + (pos.y - textNode.fontSize()) * scale + "px"
+    ta.style.top  = rect.top  + (pos.y - textNode.fontSize()) * scale + "px"
     ta.style.width = Math.max(200, textNode.width() * scale) + "px"
     ta.style.fontSize = textNode.fontSize() * scale + "px"
     ta.style.fontFamily = textNode.fontFamily()
     ta.style.color = (textNode.fill() as string) || "#000"
-    ta.style.padding = "0px"
-    ta.style.margin = "0px"
+    ta.style.padding = "0"
+    ta.style.margin = "0"
     ta.style.border = "1px solid #000"
-    ta.style.background = "white"
+    ta.style.background = "#fff"
     ta.style.zIndex = "9999"
 
     document.body.appendChild(ta)
@@ -202,17 +191,16 @@ export default function EditorCanvas() {
     ta.addEventListener("blur", commit)
   }
 
-  // Add text
   const onAddText = () => {
     const node = new Konva.Text({
       text: "Your text",
       x: BASE_W/2-180, y: BASE_H/2-30,
       fontSize: 64,
       fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-      fill: brushColor
+      fill: brushColor,
+      listening: true,
     })
     ;(node as any).id(uid())
-    node.listening(true)
     const meta = baseMeta("Text")
     applyMeta(node, meta)
     drawLayerRef.current?.add(node)
@@ -224,25 +212,23 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // Shapes
-  const addShape = (kind: ShapeKind) => {
-    let node: AnyNode
-    if (kind==="circle")
-      node = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 180, fill: brushColor })
-    else if (kind==="square")
-      node = new Konva.Rect({ x: BASE_W/2-180, y: BASE_H/2-180, width: 360, height:360, fill: brushColor })
-    else if (kind==="triangle")
-      node = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 220, fill: brushColor })
-    else if (kind==="cross") {
-      const g = new Konva.Group({ x: BASE_W/2-180, y: BASE_H/2-180 })
-      const r1 = new Konva.Rect({ width:360, height:70, y:145, fill: brushColor })
-      const r2 = new Konva.Rect({ width:70, height:360, x:145, fill: brushColor })
-      g.add(r1); g.add(r2); node = g
-    } else {
-      node = new Konva.Line({ points:[BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap:"round" })
+  // shapes
+  const createShapeNode = (kind: ShapeKind): AnyNode => {
+    if (kind==="circle")   return new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 180, fill: brushColor, listening:true })
+    if (kind==="square")   return new Konva.Rect({ x: BASE_W/2-180, y: BASE_H/2-180, width: 360, height:360, fill: brushColor, listening:true })
+    if (kind==="triangle") return new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 220, fill: brushColor, listening:true })
+    if (kind==="cross") {
+      const g = new Konva.Group({ x: BASE_W/2-180, y: BASE_H/2-180, listening:true })
+      g.add(new Konva.Rect({ width:360, height:70, y:145, fill: brushColor }))
+      g.add(new Konva.Rect({ width:70, height:360, x:145, fill: brushColor }))
+      return g
     }
+    return new Konva.Line({ points:[BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, listening:true })
+  }
+
+  const addShape = (kind: ShapeKind) => {
+    const node = createShapeNode(kind)
     ;(node as any).id(uid())
-    ;(node as any).listening(true)
     const meta = baseMeta(kind)
     applyMeta(node, meta)
     drawLayerRef.current?.add(node as any)
@@ -253,7 +239,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // При смене глобального цвета красим выделенный текст/shape
+  // recolor selected when changing global color (text/shape)
   useEffect(() => {
     const lay = findLayer(selectedId)
     if (!lay) return
@@ -261,13 +247,16 @@ export default function EditorCanvas() {
       ;(lay.node as Konva.Text).fill(brushColor)
       drawLayerRef.current?.batchDraw()
     } else if (lay.type === "shape") {
-      if ((lay.node as any).fill) { (lay.node as any).fill(brushColor) }
-      else if (lay.node instanceof Konva.Line) { (lay.node as Konva.Line).stroke(brushColor) }
+      if (lay.node instanceof Konva.Line) {
+        lay.node.stroke(brushColor)
+      } else if ((lay.node as any).fill) {
+        (lay.node as any).fill(brushColor)
+      }
       drawLayerRef.current?.batchDraw()
     }
   }, [brushColor, selectedId])
 
-  // Brush / Erase (без хэндлов в процессе)
+  // brush / erase
   const startStroke = (x:number,y:number) => {
     const line = new Konva.Line({
       points: [x,y],
@@ -276,15 +265,16 @@ export default function EditorCanvas() {
       lineCap: "round",
       lineJoin: "round",
       globalCompositeOperation: tool==="erase" ? "destination-out" : "source-over",
+      listening: true,
     })
     ;(line as any).id(uid())
-    line.listening(true)
     drawLayerRef.current?.add(line)
     const meta = baseMeta("Stroke")
     const id = (line as any)._id
     setLayers(p=>[...p, { id, side, node: line, meta, type:"stroke"}])
     pendingStrokeId.current = id
     setIsDrawing(true)
+    // не select во время рисования
     tRef.current?.nodes([])
   }
   const appendStroke = (x:number,y:number) => {
@@ -295,10 +285,9 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // Crop
+  // crop
   const startCrop = () => {
-    const node = findNode(selectedId)
-    if (!node) return
+    const node = findNode(selectedId); if (!node) return
     setIsCropping(true)
     const b = node.getClientRect({ relativeTo: stageRef.current })
     cropRectRef.current?.setAttrs({ x: b.x, y: b.y, width: b.width, height: b.height, visible: true })
@@ -315,7 +304,6 @@ export default function EditorCanvas() {
     const ry = rect.y()/s - node.y()
     const rw = rect.width()/s
     const rh = rect.height()/s
-
     if (node instanceof Konva.Image) {
       node.crop({ x: rx, y: ry, width: rw, height: rh })
       node.width(rw); node.height(rh)
@@ -338,32 +326,54 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // Export (фикс масштаба)
+  // export (фикс кропа)
   const exportSide = (s: Side) => {
     const st = stageRef.current; if (!st) return
-    const pr = 1 / st.scaleX()
+    const pr = 1 / st.scaleX() // вернуть 1:1
     const hidden: AnyLayer[] = []
-    layers.forEach(l => { if (l.side !== s) { l.node.visible(false); hidden.push(l) } })
+    layers.forEach(l=>{ if (l.side !== s) { l.node.visible(false); hidden.push(l) } })
     st.draw()
-    const data = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
-    hidden.forEach(l => l.node.visible(l.meta.visible))
+    const data = st.toDataURL({ pixelRatio: pr, x: 0, y: 0, width: BASE_W, height: BASE_H, mimeType: "image/png" })
+    hidden.forEach(l=> l.node.visible(l.meta.visible))
     st.draw()
     const a = document.createElement("a")
     a.href = data; a.download = `darkroom-${s}.png`; a.click()
   }
 
-  // Pointer
-  const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
-  const onDown = () => {
+  // pointer routing — НЕТ спавна фигуры при клике по объекту
+  const onDown = (e: any) => {
     if (isCropping) return
-    const p = getPos()
-    if (tool==="brush" || tool==="erase") startStroke(p.x/scale, p.y/scale)
-    else if (tool==="text") onAddText()
-    else if (tool==="shape") addShape(shapeKind)
+    const p = stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+
+    // пустое место?
+    const clickedStage = e.target === e.target.getStage()
+
+    if (tool==="brush" || tool==="erase") {
+      startStroke(p.x/scale, p.y/scale)
+      return
+    }
+    if (tool==="text") {
+      if (clickedStage) onAddText()
+      return
+    }
+    if (tool==="shape") {
+      if (clickedStage) addShape(shapeKind) // только по пустому холсту
+      return
+    }
+
+    // Move/Select
+    if (clickedStage) {
+      select(null)
+      tRef.current?.nodes([])
+    } else {
+      const node: any = e.target
+      const id = node?._id
+      if (id) select(id)
+    }
   }
   const onMove = () => {
     if (!isDrawing) return
-    const p = getPos()
+    const p = stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
     appendStroke(p.x/scale, p.y/scale)
   }
   const onUp = () => {
@@ -374,15 +384,15 @@ export default function EditorCanvas() {
     setIsDrawing(false)
   }
 
-  // Мобильный запрет скролла во время рисования
+  // mobile scroll lock during drawing
   useEffect(()=>{
     const prevent = (e: TouchEvent) => { if (tool==="brush"||tool==="erase") e.preventDefault() }
     document.addEventListener("touchmove", prevent, { passive: false })
     return ()=>document.removeEventListener("touchmove", prevent as any)
   }, [tool])
 
-  // Список слоёв (верхние — сверху)
-  const layerItems = useMemo(()=> {
+  // layers list (top at top)
+  const layerItems = React.useMemo(()=> {
     return layers
       .filter(l=>l.side===side)
       .sort((a,b)=> a.node.zIndex() - b.node.zIndex())
@@ -401,18 +411,10 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
   const onLayerSelect   = (id:string)=> select(id)
-  const onToggleVisible = (id:string)=> {
-    const l = layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible })
-  }
-  const onToggleLock    = (id:string)=> {
-    const l = layers.find(x=>x.id===id)!; (l.node as any).locked = !l.meta.locked
-    updateMeta(id, { locked: !l.meta.locked }); attachTransformer()
-  }
+  const onToggleVisible = (id:string)=> { const l = layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }
+  const onToggleLock    = (id:string)=> { const l = layers.find(x=>x.id===id)!; (l.node as any).locked = !l.meta.locked; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }
   const onDelete        = (id:string)=> {
-    setLayers(p=>{
-      const l = p.find(x=>x.id===id); l?.node.destroy()
-      return p.filter(x=>x.id!==id)
-    })
+    setLayers(p=>{ const l = p.find(x=>x.id===id); l?.node.destroy(); return p.filter(x=>x.id!==id) })
     if (selectedId===id) select(null)
     drawLayerRef.current?.batchDraw()
   }
@@ -424,8 +426,8 @@ export default function EditorCanvas() {
     setLayers(p=>[...p, newLay]); select(newLay.id)
     drawLayerRef.current?.batchDraw()
   }
-  const onMoveUp        = (id:string)=> { const n = layers.find(l=>l.id===id)?.node; n?.moveUp(); drawLayerRef.current?.batchDraw() }
-  const onMoveDown      = (id:string)=> { const n = layers.find(l=>l.id===id)?.node; n?.moveDown(); drawLayerRef.current?.batchDraw() }
+  const onMoveUp   = (id:string)=> { const n = layers.find(l=>l.id===id)?.node; n?.moveUp();   drawLayerRef.current?.batchDraw() }
+  const onMoveDown = (id:string)=> { const n = layers.find(l=>l.id===id)?.node; n?.moveDown(); drawLayerRef.current?.batchDraw() }
 
   return (
     <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
@@ -437,6 +439,7 @@ export default function EditorCanvas() {
         shapeKind={shapeKind} setShapeKind={(k)=>set({ shapeKind: k })}
         onUploadImage={onUploadImage}
         onAddText={onAddText}
+        // ВАЖНО: кнопки шейпов — только выбирают тип; добавление — кликом по пустому холсту
         onAddShape={addShape}
         startCrop={startCrop} applyCrop={applyCrop} cancelCrop={cancelCrop} isCropping={isCropping}
         onDownloadFront={()=>exportSide("front")}
@@ -472,25 +475,22 @@ export default function EditorCanvas() {
           onTouchMove={onMove}
           onTouchEnd={onUp}
         >
-          {/* Mockup без прозрачности */}
           <Layer listening={false}>
             {side==="front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H}/>}
             {side==="back"  && backMock  && <KImage image={backMock}  width={BASE_W} height={BASE_H}/>}
           </Layer>
 
-          {/* Рабочий слой */}
           <Layer ref={drawLayerRef}>
             <Transformer
               ref={tRef}
               rotateEnabled
-              anchorSize={12}
+              anchorSize={10}
               borderStroke="black"
               anchorStroke="black"
               anchorFill="white"
             />
-            {/* Crop */}
             <Rect ref={cropRectRef} visible={false} stroke="black" dash={[6,4]} strokeWidth={2} draggable />
-            <Transformer ref={cropTfRef} rotateEnabled={false} anchorSize={10} borderStroke="black" anchorStroke="black" />
+            <Transformer ref={cropTfRef} rotateEnabled={false} anchorSize={8} borderStroke="black" anchorStroke="black" />
           </Layer>
         </Stage>
       </div>
