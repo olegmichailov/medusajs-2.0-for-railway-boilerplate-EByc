@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { getProductsListWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import ProductPreview from "@modules/products/components/product-preview"
@@ -36,14 +36,16 @@ export default function PaginatedProducts({
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [initialLoaded, setInitialLoaded] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const loader = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const mobile = typeof window !== "undefined" ? window.innerWidth < 640 : false
+    setIsMobile(mobile)
     setColumns(mobile ? 1 : 2)
   }, [])
 
-  const columnOptions = [1, 2, 3, 4]
+  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -53,10 +55,10 @@ export default function PaginatedProducts({
       setOffset(0)
 
       const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset: 0 }
-      if (collectionId) queryParams.collection_id = [collectionId]
-      if (categoryId) queryParams.category_id = [categoryId]
-      if (productsIds) queryParams.id = productsIds
-      if (sortBy === "created_at") queryParams.order = "created_at"
+      if (collectionId) queryParams["collection_id"] = [collectionId]
+      if (categoryId) queryParams["category_id"] = [categoryId]
+      if (productsIds) queryParams["id"] = productsIds
+      if (sortBy === "created_at") queryParams["order"] = "created_at"
 
       const {
         response: { products: newProducts },
@@ -72,10 +74,10 @@ export default function PaginatedProducts({
 
   const fetchMore = useCallback(async () => {
     const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset }
-    if (collectionId) queryParams.collection_id = [collectionId]
-    if (categoryId) queryParams.category_id = [categoryId]
-    if (productsIds) queryParams.id = productsIds
-    if (sortBy === "created_at") queryParams.order = "created_at"
+    if (collectionId) queryParams["collection_id"] = [collectionId]
+    if (categoryId) queryParams["category_id"] = [categoryId]
+    if (productsIds) queryParams["id"] = productsIds
+    if (sortBy === "created_at") queryParams["order"] = "created_at"
 
     const {
       response: { products: newProducts },
@@ -102,15 +104,21 @@ export default function PaginatedProducts({
     return () => obs.disconnect()
   }, [fetchMore, region, hasMore, initialLoaded])
 
+  // ---- ВАЖНО: одинаковые боковые поля у переключателя и у самой сетки
+  // 1 колонка — edge-to-edge; 2+ колонки — аккуратные поля и зазор между карточками
+  const sidePadMobile = useMemo(() => (columns === 1 ? "px-0" : "px-4"), [columns])
+  const gapXMobile = useMemo(() => (columns === 1 ? "gap-x-0" : "gap-x-4"), [columns])
+
   const gridColsClass =
     columns === 1 ? "grid-cols-1" : columns === 2 ? "grid-cols-2" : columns === 3 ? "grid-cols-3" : "grid-cols-4"
 
   return (
     <>
-      {/* панель переключения колонок — в той же ширине, что и список/изображение */}
-      <div className="pt-4 pb-2 flex items-center px-0 small:px-0">
-        <div className="ml-auto flex gap-1">
-          {columnOptions.slice(0, 2).map((col) => (
+      {/* панель с переключателем колонок — та же ширина, что и сетка */}
+      <div className={`${sidePadMobile} small:px-0 pt-4 pb-2 flex items-center justify-between`}>
+        <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
+        <div className="flex gap-1 ml-auto">
+          {columnOptions.map((col) => (
             <button
               key={col}
               onClick={() => setColumns(col)}
@@ -126,10 +134,13 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* список — без дополнительных паддингов; ширина совпадает с PDP */}
-      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-0 small:px-0`} data-testid="products-list">
+      {/* список товаров */}
+      <ul
+        className={`grid ${gridColsClass} ${gapXMobile} gap-y-10 ${sidePadMobile} small:px-0`}
+        data-testid="products-list"
+      >
         {products.map((p) => (
-          <li key={p.id} className="w-full">
+          <li key={p.id} className="w-full box-border">
             <ProductPreview product={p} region={region} />
           </li>
         ))}
