@@ -36,15 +36,17 @@ export default function PaginatedProducts({
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [initialLoaded, setInitialLoaded] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const loader = useRef<HTMLDivElement | null>(null)
 
-  // мобильный/десктоп — по умолчанию 1 колонка на мобиле
   useEffect(() => {
     const mobile = typeof window !== "undefined" ? window.innerWidth < 640 : false
+    setIsMobile(mobile)
     setColumns(mobile ? 1 : 2)
   }, [])
 
-  // загрузка первой страницы
+  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
+
   useEffect(() => {
     const fetchInitial = async () => {
       const regionData = await getRegion(countryCode)
@@ -70,7 +72,6 @@ export default function PaginatedProducts({
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
-  // догрузка
   const fetchMore = useCallback(async () => {
     const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset }
     if (collectionId) queryParams["collection_id"] = [collectionId]
@@ -91,7 +92,6 @@ export default function PaginatedProducts({
     setOffset((prev) => prev + PRODUCT_LIMIT)
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
 
-  // наблюдатель
   useEffect(() => {
     if (!region || !initialLoaded || !loader.current) return
     const obs = new IntersectionObserver(
@@ -104,21 +104,14 @@ export default function PaginatedProducts({
     return () => obs.disconnect()
   }, [fetchMore, region, hasMore, initialLoaded])
 
-  // ВАЖНО: боковые поля и межколоночные гаттеры
-  // 1 колонка → ощущение “full bleed” (px-6 как на продукте)
-  // 2 колонки → уже поля (px-3), но нормальный зазор между карточками (gap-x-3)
-  const containerPadding = columns === 1 ? "px-2" : "px-2"
   const gridColsClass =
     columns === 1 ? "grid-cols-1" : columns === 2 ? "grid-cols-2" : columns === 3 ? "grid-cols-3" : "grid-cols-4"
-  const gapX = columns === 1 ? "gap-x-0" : "gap-x-3"
 
-  // UI
   return (
     <>
-      {/* панель переключения колонок — прилипает к правому краю сетки */}
-      <div className={`${containerPadding} pt-4 pb-2 flex items-center`}>
+      <div className="pt-4 pb-2 flex items-center">
         <div className="ml-auto flex gap-1">
-          {[1, 2, 3, 4].slice(0, 2).map((col) => ( // на мобиле показываем 1/2
+          {columnOptions.map((col) => (
             <button
               key={col}
               onClick={() => setColumns(col)}
@@ -134,8 +127,10 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* список товаров */}
-      <ul className={`grid ${gridColsClass} ${gapX} gap-y-10 ${containerPadding}`} data-testid="products-list">
+      <ul
+        className={`grid ${gridColsClass} gap-x-4 gap-y-10`}
+        data-testid="products-list"
+      >
         {products.map((p) => (
           <li key={p.id} className="w-full">
             <ProductPreview product={p} region={region} />
