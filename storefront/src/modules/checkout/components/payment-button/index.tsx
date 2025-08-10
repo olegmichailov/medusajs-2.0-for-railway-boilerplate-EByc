@@ -89,6 +89,34 @@ const StripePaymentButton = ({
 
   const disabled = !stripe || !elements || notReady
 
+  // Вспомогательный чекер статуса PI по client_secret
+  const checkPiAndCompleteIfDone = async (): Promise<boolean> => {
+    try {
+      const clientSecret =
+        (cart as any)?.payment_collection?.payment_sessions?.[0]?.data
+          ?.client_secret as string | undefined
+
+      if (!stripe || !clientSecret) return false
+
+      const { paymentIntent, error } = await stripe.retrievePaymentIntent(
+        clientSecret
+      )
+      if (error || !paymentIntent) return false
+
+      if (
+        paymentIntent.status === "succeeded" ||
+        paymentIntent.status === "processing" ||
+        paymentIntent.status === "requires_capture"
+      ) {
+        await onPaymentCompleted()
+        return true
+      }
+    } catch {
+      // игнор
+    }
+    return false
+  }
+
   const handlePayment = async () => {
     setSubmitting(true)
 
@@ -97,10 +125,14 @@ const StripePaymentButton = ({
       return
     }
 
+    // 1) Если PI уже завершён (например, Link/Wallet подтвердил мгновенно),
+    // просто закрываем заказ, не шлём повторный confirm (во избежание 400).
+    const alreadyDone = await checkPiAndCompleteIfDone()
+    if (alreadyDone) return
+
+    // 2) Обычный путь подтверждения
     const result = await stripe.confirmPayment({
       elements,
-      // оставляем if_required — редирект произойдёт для Klarna/Revolut,
-      // а для карт, если 3DS не нужен, останемся на месте
       redirect: "if_required",
       confirmParams: {
         return_url:
@@ -114,13 +146,13 @@ const StripePaymentButton = ({
 
     const { error, paymentIntent } = result
 
-    // НЕ закрываем заказ при requires_capture — ждём финальный success/processing
     if (error) {
-      const pi = (error as any).payment_intent
-      if (pi && (pi.status === "succeeded" || pi.status === "processing")) {
-        await onPaymentCompleted()
-        return
-      }
+      // Иногда Stripe даёт 400 и не кладёт PI в error,
+      // подстрахуемся ручным чтением и дособерём заказ, если уже всё ок.
+      const doneNow = await checkPiAndCompleteIfDone()
+      if (doneNow) return
+
+      // Если всё ещё не ок — покажем ошибку
       setErrorMessage(error.message || null)
       setSubmitting(false)
       return
@@ -128,7 +160,8 @@ const StripePaymentButton = ({
 
     if (
       paymentIntent &&
-      (paymentIntent.status === "succeeded" ||
+      (paymentIntent.status === "requires_capture" ||
+        paymentIntent.status === "succeeded" ||
         paymentIntent.status === "processing")
     ) {
       await onPaymentCompleted()
