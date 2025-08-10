@@ -23,6 +23,11 @@ type LayerType = "image"|"shape"|"text"|"stroke"
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
 export default function EditorCanvas() {
+  // безопасный «монтирован ли клиент»
+  const [mounted, setMounted] = useState(false)
+  useEffect(()=> setMounted(true), [])
+  if (!mounted) return null
+
   const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select,
           showLayers, toggleLayers } = useDarkroom()
 
@@ -40,7 +45,7 @@ export default function EditorCanvas() {
 
   const overlayRef = useRef<HTMLTextAreaElement|null>(null)
 
-  // авто-скейл (только на клиенте; этот компонент и так клиентский)
+  // авто-скейл
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = window.innerWidth
     const vh = window.innerHeight
@@ -74,7 +79,7 @@ export default function EditorCanvas() {
   }
   const baseMeta = (name: string): BaseMeta => ({ blend:"source-over", opacity:1, raster:0, name, visible:true, locked:false })
 
-  // attach/hide трансформер (и включение drag только в move)
+  // трансформер только когда нужно (во время рисования/ластика скрыт)
   const attachTransformer = () => {
     const node = findNode(selectedId)
     const shouldHide = isDrawing || isCropping || tool === "brush" || tool === "erase"
@@ -269,7 +274,7 @@ export default function EditorCanvas() {
     cropRect.current?.getLayer()?.batchDraw()
   }
 
-  // экспорт (правильный pixelRatio относительно текущего зума)
+  // экспорт — правильный pixelRatio
   const exportSide = (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = 1 / st.scaleX()
@@ -299,14 +304,14 @@ export default function EditorCanvas() {
   const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
   const onUp   = () => setIsDrawing(false)
 
-  // блок скролла на мобиле при рисовании
+  // блокируем скролл на мобиле при рисовании
   useEffect(()=>{
     const prevent = (e: TouchEvent) => { if (tool==="brush"||tool==="erase") e.preventDefault() }
     document.addEventListener("touchmove", prevent, { passive:false })
     return ()=>document.removeEventListener("touchmove", prevent as any)
   }, [tool])
 
-  // список для панели (stroke скрыты)
+  // список для панели (stroke не показываем)
   const layerItems = useMemo(()=> layers
     .filter(l=>l.side===side && l.type!=="stroke")
     .map(l=>({ id:l.id, name:l.meta.name, type:l.type, visible:l.meta.visible, locked:l.meta.locked })), [layers, side])
@@ -328,7 +333,6 @@ export default function EditorCanvas() {
     })
   }
 
-  // быстрые правки объекта
   const setObjectColor = (hex: string) => {
     const lay = getLayerById(selectedId); if (!lay) return
     if (lay.type === "text") (lay.node as Konva.Text).fill(hex)
