@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   description: "View your cart",
 }
 
+// Всегда свежий рендер (после редиректов и возвратов из bfcache)
+export const revalidate = 0
+export const dynamic = "force-dynamic"
+
 const fetchCart = async () => {
   const cart = await retrieveCart()
 
