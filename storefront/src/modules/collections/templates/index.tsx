@@ -21,25 +21,26 @@ export default function CollectionTemplate({
   const sort = sortBy || "created_at"
 
   return (
-    // Мобайл: убираем боковые паддинги у контейнера, чтобы сетка шла edge-to-edge.
-    // На sm+ возвращаем стандартные отступы.
+    {/* ⬇️ На мобиле убираем внутренние паддинги контейнера */}
     <div className="content-container px-0 small:px-6 flex flex-col small:flex-row small:items-start py-6">
       <RefinementList sortBy={sort} />
 
-      {/* Правая колонка со списком продуктов */}
       <div className="w-full">
         <div className="mb-8 text-2xl-semi">
           <h1>{collection.title}</h1>
         </div>
 
-        <Suspense fallback={<SkeletonProductGrid />}>
-          <PaginatedProducts
-            sortBy={sort}
-            page={pageNumber}
-            collectionId={collection.id}
-            countryCode={countryCode}
-          />
-        </Suspense>
+        {/* ⬇️ Full-bleed приём: компенсируем стандартный mobile-gutter (-mx-6, т.к. у content-container обычно px-6) */}
+        <div className="-mx-6 small:mx-0">
+          <Suspense fallback={<SkeletonProductGrid />}>
+            <PaginatedProducts
+              sortBy={sort}
+              page={pageNumber}
+              collectionId={collection.id}
+              countryCode={countryCode}
+            />
+          </Suspense>
+        </div>
       </div>
     </div>
   )
