@@ -36,16 +36,14 @@ export default function PaginatedProducts({
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [initialLoaded, setInitialLoaded] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
   const loader = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const mobile = typeof window !== "undefined" ? window.innerWidth < 640 : false
-    setIsMobile(mobile)
     setColumns(mobile ? 1 : 2)
   }, [])
 
-  const columnOptions = isMobile ? [1, 2] : [1, 2, 3, 4]
+  const columnOptions = [1, 2, 3, 4]
 
   useEffect(() => {
     const fetchInitial = async () => {
@@ -55,10 +53,10 @@ export default function PaginatedProducts({
       setOffset(0)
 
       const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset: 0 }
-      if (collectionId) queryParams["collection_id"] = [collectionId]
-      if (categoryId) queryParams["category_id"] = [categoryId]
-      if (productsIds) queryParams["id"] = productsIds
-      if (sortBy === "created_at") queryParams["order"] = "created_at"
+      if (collectionId) queryParams.collection_id = [collectionId]
+      if (categoryId) queryParams.category_id = [categoryId]
+      if (productsIds) queryParams.id = productsIds
+      if (sortBy === "created_at") queryParams.order = "created_at"
 
       const {
         response: { products: newProducts },
@@ -74,10 +72,10 @@ export default function PaginatedProducts({
 
   const fetchMore = useCallback(async () => {
     const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset }
-    if (collectionId) queryParams["collection_id"] = [collectionId]
-    if (categoryId) queryParams["category_id"] = [categoryId]
-    if (productsIds) queryParams["id"] = productsIds
-    if (sortBy === "created_at") queryParams["order"] = "created_at"
+    if (collectionId) queryParams.collection_id = [collectionId]
+    if (categoryId) queryParams.category_id = [categoryId]
+    if (productsIds) queryParams.id = productsIds
+    if (sortBy === "created_at") queryParams.order = "created_at"
 
     const {
       response: { products: newProducts },
@@ -109,39 +107,33 @@ export default function PaginatedProducts({
 
   return (
     <>
-      {/* обнуляем мобильные боковые паддинги родителя только для этой секции */}
-      <div className="-mx-6 small:mx-0">
-        {/* панель переключения — прибита к правому краю изображения */}
-        <div className="pt-4 pb-2 flex items-center px-6 small:px-0">
-          <div className="ml-auto flex gap-1">
-            {columnOptions.map((col) => (
-              <button
-                key={col}
-                onClick={() => setColumns(col)}
-                className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
-                  columns === col ? "bg-black text-white border-black" : "bg-white text-black border-gray-300 hover:border-black"
-                }`}
-                aria-pressed={columns === col}
-                aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
-              >
-                {col}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* список — теперь реально «в ширину» (тем же краем, что и на PDP) */}
-        <ul
-          className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-6 small:px-0`}
-          data-testid="products-list"
-        >
-          {products.map((p) => (
-            <li key={p.id} className="w-full">
-              <ProductPreview product={p} region={region} />
-            </li>
+      {/* панель переключения колонок — в той же ширине, что и список/изображение */}
+      <div className="pt-4 pb-2 flex items-center px-0 small:px-0">
+        <div className="ml-auto flex gap-1">
+          {columnOptions.slice(0, 2).map((col) => (
+            <button
+              key={col}
+              onClick={() => setColumns(col)}
+              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
+                columns === col ? "bg-black text-white border-black" : "bg-white text-black border-gray-300 hover:border-black"
+              }`}
+              aria-pressed={columns === col}
+              aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
+            >
+              {col}
+            </button>
           ))}
-        </ul>
+        </div>
       </div>
+
+      {/* список — без дополнительных паддингов; ширина совпадает с PDP */}
+      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-0 small:px-0`} data-testid="products-list">
+        {products.map((p) => (
+          <li key={p.id} className="w-full">
+            <ProductPreview product={p} region={region} />
+          </li>
+        ))}
+      </ul>
 
       {hasMore && <div ref={loader} className="h-10 mt-10" />}
     </>
