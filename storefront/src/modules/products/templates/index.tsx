@@ -37,14 +37,14 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
         className="content-container flex flex-col small:flex-row small:items-start py-6 relative"
         data-testid="product-container"
       >
-        {/* Левая колонка — инфо */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
+        {/* Левая колонка — инфо (на мобиле идёт второй) */}
+        <div className="order-2 small:order-1 flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-6">
           <ProductInfo product={product} />
           <ProductTabs product={product} />
         </div>
 
-        {/* Галерея изображений */}
-        <div className="block w-full relative">
+        {/* Галерея изображений (на мобиле идёт первой) */}
+        <div className="order-1 small:order-2 block w-full relative">
           <ImageGallery
             images={product?.images || []}
             preloadFirst
@@ -52,8 +52,8 @@ const ProductTemplate: React.FC<ProductTemplateProps> = ({
           />
         </div>
 
-        {/* Правая колонка — CTA и Add to Cart */}
-        <div className="flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
+        {/* Правая колонка — CTA и Add to Cart (остаётся третьей) */}
+        <div className="order-3 small:order-3 flex flex-col small:sticky small:top-48 small:py-0 small:max-w-[300px] w-full py-8 gap-y-12">
           <ProductOnboardingCta />
           <Suspense
             fallback={
