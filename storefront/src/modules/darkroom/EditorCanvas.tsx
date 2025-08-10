@@ -1,626 +1,625 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Stage, Layer, Image as KImage, Line, Group, Rect, Transformer, Text as KText } from "react-konva"
-import useImage from "use-image"
-import { isMobile } from "react-device-detect"
-import Toolbar from "./Toolbar"
-
-type Side = "front" | "back"
-type Blend = "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten"
-
-type BrushStroke = {
-  id: string
-  color: string
-  size: number
-  points: number[]
-  mode: "brush" | "erase"
-}
-
-type PrimitiveKind = "rect" | "circle" | "triangle" | "cross" | "line"
-
-type Primitive = {
-  id: string
-  kind: PrimitiveKind
-  x: number
-  y: number
-  w: number
-  h: number
-  rotation: number
-  opacity: number
-  fill: string
-  stroke?: string
-  strokeWidth?: number
-  blend: Blend
-  raster?: number // 0..1 — сила «растра»
-}
-
-type PlacedImage = {
-  id: string
-  image: HTMLImageElement
-  x: number
-  y: number
-  w: number
-  h: number
-  rotation: number
-  opacity: number
-  blend: Blend
-  crop?: { x: number; y: number; w: number; h: number }
-  raster?: number // 0..1
-}
-
-type TextBlock = {
-  id: string
-  text: string
-  x: number
-  y: number
-  fontSize: number
-  fontFamily: string
-  fill: string
-  rotation: number
-  opacity: number
-  blend: Blend
-}
-
-type DesignState = {
-  strokes: BrushStroke[]
-  images: PlacedImage[]
-  primitives: Primitive[]
-  texts: TextBlock[]
-}
-
-const newDesign = (): DesignState => ({
-  strokes: [],
-  images: [],
-  primitives: [],
-  texts: [],
-})
-
-const PINK = "#ff2d9a" // «emo» розовый по умолчанию
-
-// Базовый высокорезовый холст (печатный)
-const CANVAS_WIDTH = 2000
-const CANVAS_HEIGHT = 2600
-
-// Отображение: аккуратно вписываем в экран
-const DISPLAY_MAX_W = 980
-const DISPLAY_MAX_H = isMobile ? 720 : 820
-
-function fit(w: number, h: number, maxW: number, maxH: number) {
-  const k = Math.min(maxW / w, maxH / h)
-  return { w: Math.round(w * k), h: Math.round(h * k), k }
-}
-
-// Псевдо-растр (имитация): используем Konva фильтр Pixelate + немного контраста/градаций.
-// Это быстрая замена настоящему halftone-shader’у (можно внедрить позже).
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Stage, Layer, Group, Image as KImage, Line, Rect, Text, Transformer } from "react-konva"
 import Konva from "konva"
-const ensureFilters = () => {
-  // Конва уже имеет Pixelate/Contrast/Grayscale
+import useImage from "use-image"
+import { useDarkroom, Blend, Side, ShapeKind } from "./store"
+import { isMobile } from "react-device-detect"
+
+// ───── Canvas geometry (большое «печатаемое» полотно + автоскейл под экран)
+const BASE_W = 2000
+const BASE_H = 2600
+const PADDING = 24
+
+// мокапы
+const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
+const BACK_SRC = "/mockups/MOCAP_BACK.png"
+
+// utils
+const uid = () => Math.random().toString(36).slice(2)
+
+type ImgLayer = {
+  id: string
+  side: Side
+  node: Konva.Image
+  meta: {
+    blend: Blend
+    opacity: number
+    raster: number
+  }
+}
+type ShapeLayer = {
+  id: string
+  side: Side
+  node: Konva.Shape | Konva.Line
+  meta: {
+    blend: Blend
+    opacity: number
+    raster: number
+  }
+}
+type TextLayer = {
+  id: string
+  side: Side
+  node: Konva.Text
+  meta: {
+    blend: Blend
+    opacity: number
+    raster: number
+  }
+}
+type StrokeLayer = {
+  id: string
+  side: Side
+  node: Konva.Line
+  meta: {
+    blend: Blend
+    opacity: number
+    raster: number
+  }
 }
 
-const EditorCanvas: React.FC = () => {
-  ensureFilters()
+type AnyLayer = ImgLayer | ShapeLayer | TextLayer | StrokeLayer
 
-  const [side, setSide] = useState<Side>("front")
-  const [front, setFront] = useState<DesignState>(newDesign)
-  const [back, setBack] = useState<DesignState>(newDesign)
+export default function EditorCanvas() {
+  const {
+    tool, side, showPanel, togglePanel,
+    brushSize, brushColor, set, selectedId, select, shapeKind, isCropping
+  } = useDarkroom()
 
-  const design = side === "front" ? front : back
-  const setDesign = side === "front" ? setFront : setBack
+  const [frontMock] = useImage(FRONT_SRC, "anonymous")
+  const [backMock] = useImage(BACK_SRC, "anonymous")
 
-  const [mode, setMode] = useState<"move" | "brush" | "erase" | "crop" | "text" | "primitive">("brush")
-  const [brushColor, setBrushColor] = useState(PINK)
-  const [brushSize, setBrushSize] = useState(8)
+  const stageRef = useRef<Konva.Stage>(null)
+  const tRef = useRef<Konva.Transformer>(null)
+  const cropRectRef = useRef<Konva.Rect>(null)
 
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [activeType, setActiveType] = useState<"image" | "primitive" | "text" | null>(null)
-
-  const [mockFront] = useImage("/mockups/MOCAP_FRONT.png")
-  const [mockBack] = useImage("/mockups/MOCAP_BACK.png")
-
-  const stageRef = useRef<any>(null)
-  const trRef = useRef<any>(null)
-  const cropRectRef = useRef<any>(null)
-
-  // размеры под экран
-  const { displayW, displayH, scale } = useMemo(() => {
-    const { w, h, k } = fit(CANVAS_WIDTH, CANVAS_HEIGHT, DISPLAY_MAX_W, DISPLAY_MAX_H)
-    return { displayW: w, displayH: h, scale: k }
-  }, [])
-
-  // ------- Добавление изображений
-  const handleAddImage = useCallback((file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const img = new Image()
-      img.onload = () => {
-        const maxW = CANVAS_WIDTH * 0.6
-        const k = Math.min(maxW / img.width, 1)
-        const w = Math.round(img.width * k)
-        const h = Math.round(img.height * k)
-        const item: PlacedImage = {
-          id: "img_" + Date.now(),
-          image: img,
-          x: (CANVAS_WIDTH - w) / 2,
-          y: (CANVAS_HEIGHT - h) / 2,
-          w,
-          h,
-          rotation: 0,
-          opacity: 1,
-          blend: "normal",
-        }
-        setDesign((d) => ({ ...d, images: [...d.images, item] }))
-        setActiveId(item.id)
-        setActiveType("image")
-        setMode("move")
-      }
-      img.src = reader.result as string
-    }
-    reader.readAsDataURL(file)
-  }, [setDesign])
-
-  // ------- Примитивы
-  const addPrimitive = (kind: PrimitiveKind) => {
-    const w = 600
-    const h = kind === "line" ? 4 : 400
-    const p: Primitive = {
-      id: "pr_" + Date.now(),
-      kind,
-      x: (CANVAS_WIDTH - w) / 2,
-      y: (CANVAS_HEIGHT - h) / 2,
-      w,
-      h,
-      rotation: 0,
-      opacity: 1,
-      fill: "#000",
-      stroke: undefined,
-      strokeWidth: 0,
-      blend: "normal",
-      raster: 0,
-    }
-    setDesign((d) => ({ ...d, primitives: [...d.primitives, p] }))
-    setActiveId(p.id)
-    setActiveType("primitive")
-    setMode("move")
-  }
-
-  // ------- Текст
-  const addText = (initial = "Text") => {
-    const t: TextBlock = {
-      id: "tx_" + Date.now(),
-      text: initial,
-      x: CANVAS_WIDTH / 2 - 200,
-      y: CANVAS_HEIGHT / 2 - 40,
-      fontSize: 72,
-      fontFamily: "Arial, Helvetica, sans-serif",
-      fill: "#000",
-      rotation: 0,
-      opacity: 1,
-      blend: "normal",
-    }
-    setDesign((d) => ({ ...d, texts: [...d.texts, t] }))
-    setActiveId(t.id)
-    setActiveType("text")
-    setMode("move")
-  }
-
-  // ------- Рисование кистью/ластиком
+  const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
-  const startDraw = () => {
-    if (!(mode === "brush" || mode === "erase")) return
-    const pos = stageRef.current.getPointerPosition()
-    if (!pos) return
-    const sx = pos.x / scale
-    const sy = pos.y / scale
-    const stroke: BrushStroke = {
-      id: "st_" + Date.now(),
-      color: brushColor,
-      size: brushSize,
-      points: [sx, sy],
-      mode: mode === "erase" ? "erase" : "brush",
-    }
-    setDesign((d) => ({ ...d, strokes: [...d.strokes, stroke] }))
-    setIsDrawing(true)
-  }
-  const moveDraw = () => {
-    if (!isDrawing) return
-    const pos = stageRef.current.getPointerPosition()
-    if (!pos) return
-    const sx = pos.x / scale
-    const sy = pos.y / scale
-    setDesign((d) => {
-      const last = d.strokes[d.strokes.length - 1]
-      if (!last) return d
-      last.points = [...last.points, sx, sy]
-      return { ...d, strokes: [...d.strokes.slice(0, -1), last] }
-    })
-  }
-  const endDraw = () => setIsDrawing(false)
 
-  // ------- Выбор + трансформер
+  // ───── scale stage to screen
+  const { viewW, viewH, scale } = useMemo(() => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1200
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800
+    const maxW = vw - PADDING * 2 - (isMobile ? 0 : 340) // место под панель на десктопе
+    const maxH = vh - PADDING * 2
+    const s = Math.min(maxW / BASE_W, maxH / BASE_H)
+    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
+  }, [showPanel])
+
+  // ───── helpers
+  const activeLayers = useMemo(
+    () => layers.filter((l) => l.side === side),
+    [layers, side]
+  )
+
+  const findNode = (id: string | null) =>
+    id ? layers.find((l) => l.id === id)?.node || null : null
+
+  const attachTransformer = () => {
+    const node = findNode(selectedId)
+    if (node && tRef.current) {
+      tRef.current.nodes([node])
+      tRef.current.getLayer()?.batchDraw()
+    } else {
+      tRef.current?.nodes([])
+      tRef.current?.getLayer()?.batchDraw()
+    }
+  }
+
   useEffect(() => {
-    if (!trRef.current || !activeId) return
-    const stage = stageRef.current as any
-    const node = stage.findOne("#" + activeId)
-    if (node) {
-      trRef.current.nodes([node])
-      trRef.current.getLayer().batchDraw()
-    }
-  }, [activeId, design])
+    attachTransformer()
+  }, [selectedId, layers, side])
 
-  // ------- Клавиатурные шорткаты
+  // ───── keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!activeId) return
-
-      const removeActive = () => {
-        setDesign((d) => ({
-          ...d,
-          images: d.images.filter((x) => x.id !== activeId),
-          primitives: d.primitives.filter((x) => x.id !== activeId),
-          texts: d.texts.filter((x) => x.id !== activeId),
-        }))
-        setActiveId(null)
-        setActiveType(null)
-      }
-
-      const dupActive = () => {
-        setDesign((d) => {
-          const im = d.images.find((x) => x.id === activeId)
-          if (im) {
-            const du: PlacedImage = { ...im, id: "img_" + Date.now(), x: im.x + 30, y: im.y + 30 }
-            return { ...d, images: [...d.images, du] }
-          }
-          const pr = d.primitives.find((x) => x.id === activeId)
-          if (pr) {
-            const du: Primitive = { ...pr, id: "pr_" + Date.now(), x: pr.x + 30, y: pr.y + 30 }
-            return { ...d, primitives: [...d.primitives, du] }
-          }
-          const tx = d.texts.find((x) => x.id === activeId)
-          if (tx) {
-            const du: TextBlock = { ...tx, id: "tx_" + Date.now(), x: tx.x + 30, y: tx.y + 30 }
-            return { ...d, texts: [...d.texts, du] }
-          }
-          return d
-        })
-      }
-
-      // Delete
-      if (e.key === "Delete" || e.key === "Backspace") {
-        e.preventDefault()
-        removeActive()
-      }
-      // Cmd/Ctrl + D → duplicate
+      const node = findNode(selectedId)
+      if (!node) return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-        e.preventDefault()
-        dupActive()
-      }
-      // [ / ] — порядок слоёв
-      if (e.key === "[" || e.key === "]") {
-        e.preventDefault()
-        setDesign((d) => {
-          const allIds = [
-            ...d.images.map((x) => x.id),
-            ...d.primitives.map((x) => x.id),
-            ...d.texts.map((x) => x.id),
-          ]
-          if (!allIds.includes(activeId)) return d
-          // переносим только внутри своей коллекции
-          const bump = <T extends { id: string }>(arr: T[], dir: "down" | "up"): T[] => {
-            const i = arr.findIndex((x) => x.id === activeId)
-            if (i < 0) return arr
-            if (dir === "up" && i < arr.length - 1) {
-              const a = arr.slice()
-              ;[a[i], a[i + 1]] = [a[i + 1], a[i]]
-              return a
-            }
-            if (dir === "down" && i > 0) {
-              const a = arr.slice()
-              ;[a[i], a[i - 1]] = [a[i - 1], a[i]]
-              return a
-            }
-            return arr
-          }
-          if (d.images.some((x) => x.id === activeId))
-            return { ...d, images: bump(d.images, e.key === "]" ? "up" : "down") }
-          if (d.primitives.some((x) => x.id === activeId))
-            return { ...d, primitives: bump(d.primitives, e.key === "]" ? "up" : "down") }
-          if (d.texts.some((x) => x.id === activeId))
-            return { ...d, texts: bump(d.texts, e.key === "]" ? "up" : "down") }
-          return d
-        })
-      }
-      // Shift +/- — смена blend
-      if (e.shiftKey && (e.key === "+" || e.key === "_")) {
-        e.preventDefault()
-        const order: Blend[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"]
-        setDesign((d) => {
-          const step = e.key === "+" ? 1 : -1
-          const mutateBlend = <T extends { id: string; blend: Blend }>(arr: T[]) =>
-            arr.map((x) =>
-              x.id !== activeId
-                ? x
-                : { ...x, blend: order[(order.indexOf(x.blend) + step + order.length) % order.length] }
-            )
-          if (d.images.some((x) => x.id === activeId)) return { ...d, images: mutateBlend(d.images) }
-          if (d.primitives.some((x) => x.id === activeId)) return { ...d, primitives: mutateBlend(d.primitives) }
-          if (d.texts.some((x) => x.id === activeId)) return { ...d, texts: mutateBlend(d.texts) }
-          return d
-        })
+        // duplicate
+        const clone = node.clone()
+        clone.x(node.x() + 20)
+        clone.y(node.y() + 20)
+        const id = uid()
+        ;(clone as any).id(id)
+        const meta = { ...(layers.find((l) => l.id === selectedId) as AnyLayer).meta }
+        const sideNow = side
+        setLayers((prev) => [...prev, wrapNodeToLayer(clone, sideNow, meta)])
+        select(id)
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        removeSelected()
+      } else if (e.key === "[") {
+        node.moveDown()
+        node.getLayer()?.batchDraw()
+      } else if (e.key === "]") {
+        node.moveUp()
+        node.getLayer()?.batchDraw()
+      } else if (e.shiftKey && (e.key === "+" || e.key === "=")) {
+        cycleBlend(1)
+      } else if (e.shiftKey && e.key === "-") {
+        cycleBlend(-1)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [activeId, setDesign])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, layers, side])
 
-  // ------- Кроп
-  const [cropping, setCropping] = useState(false)
-  const startCrop = () => {
-    if (activeType !== "image" || !activeId) return
-    setCropping(true)
+  const blends: Blend[] = ["source-over","multiply","screen","overlay","darken","lighten"]
+  const cycleBlend = (dir: 1|-1) => {
+    const idx = blends.indexOf(getMeta(selectedId)?.blend || "source-over")
+    const next = blends[(idx + dir + blends.length) % blends.length]
+    setBlend(next)
   }
-  const applyCrop = () => {
-    if (!cropping || activeType !== "image" || !activeId) return
-    const rect = cropRectRef.current as any
-    if (!rect) return
-    const { x, y, width, height } = rect.getClientRect()
-    // в координатах сцены → в координаты печатного холста
-    const cx = x / scale
-    const cy = y / scale
-    const cw = width / scale
-    const ch = height / scale
-    setDesign((d) => {
-      const images = d.images.map((im) => {
-        if (im.id !== activeId) return im
-        // переносим обрезку в локальные координаты картинки
-        const cropX = Math.max(0, cx - im.x)
-        const cropY = Math.max(0, cy - im.y)
-        const cropW = Math.max(1, Math.min(cw, im.w - cropX))
-        const cropH = Math.max(1, Math.min(ch, im.h - cropY))
-        const out: PlacedImage = {
-          ...im,
-          crop: { x: cropX, y: cropY, w: cropW, h: cropH },
-          // и сдвинем картинку так, чтобы обрезанный прямоугольник остался на месте
-          x: im.x + cropX,
-          y: im.y + cropY,
-          w: cropW,
-          h: cropH,
-        }
-        return out
+
+  // ───── layer helpers
+  const baseMeta = (): AnyLayer["meta"] => ({
+    blend: "source-over",
+    opacity: 1,
+    raster: 0,
+  })
+
+  const wrapNodeToLayer = (node: Konva.Node, s: Side, meta?: AnyLayer["meta"]): AnyLayer => {
+    if (node instanceof Konva.Image) return { id: (node as any)._id || uid(), side: s, node, meta: meta || baseMeta() } as ImgLayer
+    if (node instanceof Konva.Text)  return { id: (node as any)._id || uid(), side: s, node, meta: meta || baseMeta() } as TextLayer
+    if (node instanceof Konva.Line && (node as Konva.Line).tension() === 0) return { id: (node as any)._id || uid(), side: s, node, meta: meta || baseMeta() } as ShapeLayer
+    if (node instanceof Konva.Line) return { id: (node as any)._id || uid(), side: s, node, meta: meta || baseMeta() } as StrokeLayer
+    return { id: (node as any)._id || uid(), side: s, node: node as any, meta: meta || baseMeta() } as AnyLayer
+  }
+
+  const getMeta = (id: string | null) => {
+    if (!id) return undefined
+    return layers.find((l) => l.id === id)?.meta
+  }
+
+  const applyMetaToNode = (node: Konva.Node, meta: AnyLayer["meta"]) => {
+    node.opacity(meta.opacity)
+    ;(node as any).globalCompositeOperation(meta.blend)
+    // Raster/halftone — используем Pixelate (быстро и стабильно)
+    if ((node as any).filters) {
+      if (meta.raster > 0) {
+        ;(Konva as any).Filters.Pixelate && (node as any).filters([(Konva as any).Filters.Pixelate])
+        ;(node as any).pixelSize(meta.raster)
+      } else {
+        ;(node as any).filters([])
+      }
+    }
+    node.getLayer()?.batchDraw()
+  }
+
+  const setBlend = (blend: Blend) => {
+    if (!selectedId) return
+    setLayers((prev) =>
+      prev.map((l) => {
+        if (l.id !== selectedId) return l
+        const meta = { ...l.meta, blend }
+        applyMetaToNode(l.node, meta)
+        return { ...l, meta }
       })
-      return { ...d, images }
-    })
-    setCropping(false)
-    setActiveId(null)
-    setActiveType(null)
+    )
   }
-  const cancelCrop = () => setCropping(false)
 
-  // ------- Экспорт
-  const downloadSide = (which: Side) => {
-    const stage = stageRef.current as any
+  const setOpacity = (val: number) => {
+    if (!selectedId) return
+    setLayers((prev) =>
+      prev.map((l) => {
+        if (l.id !== selectedId) return l
+        const meta = { ...l.meta, opacity: val }
+        applyMetaToNode(l.node, meta)
+        return { ...l, meta }
+      })
+    )
+  }
+
+  const setRaster = (px: number) => {
+    if (!selectedId) return
+    setLayers((prev) =>
+      prev.map((l) => {
+        if (l.id !== selectedId) return l
+        const meta = { ...l.meta, raster: px }
+        applyMetaToNode(l.node, meta)
+        return { ...l, meta }
+      })
+    )
+  }
+
+  const removeSelected = () => {
+    if (!selectedId) return
+    setLayers((prev) => prev.filter((l) => l.id !== selectedId))
+    select(null)
+  }
+
+  // ───── image upload
+  const onUpload = (file: File) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const img = new window.Image()
+      img.crossOrigin = "anonymous"
+      img.onload = () => {
+        const k = new Konva.Image({ image: img, x: 700, y: 700 })
+        k.width(img.width)
+        k.height(img.height)
+        ;(k as any).id(uid())
+        const meta = baseMeta()
+        applyMetaToNode(k, meta)
+        const lay = wrapNodeToLayer(k, side, meta)
+        setLayers((prev) => [...prev, lay])
+        select(lay.id)
+        set({ tool: "move" })
+      }
+      img.src = r.result as string
+    }
+    r.readAsDataURL(file)
+  }
+
+  // ───── shapes
+  const addShape = (kind: ShapeKind) => {
+    let node: Konva.Shape
+    switch (kind) {
+      case "circle":
+        node = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 220, fill: "black" })
+        break
+      case "square":
+        node = new Konva.Rect({ x: BASE_W/2-220, y: BASE_H/2-220, width: 440, height: 440, fill: "black" })
+        break
+      case "triangle":
+        node = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 260, fill: "black" })
+        break
+      case "cross":
+        node = new Konva.Group({ x: BASE_W/2-200, y: BASE_H/2-200 })
+        const r1 = new Konva.Rect({ width: 400, height: 80, fill: "black", y: 160 })
+        const r2 = new Konva.Rect({ width: 80, height: 400, fill: "black", x: 160 })
+        ;(node as Konva.Group).add(r1); (node as Konva.Group).add(r2)
+        break
+      case "line":
+      default:
+        node = new Konva.Line({ points: [BASE_W/2-260, BASE_H/2, BASE_W/2+260, BASE_H/2], stroke: "black", strokeWidth: 20 })
+        break
+    }
+    ;(node as any).id(uid())
+    const meta = baseMeta()
+    applyMetaToNode(node as any, meta)
+    const lay = wrapNodeToLayer(node as any, side, meta)
+    setLayers((prev) => [...prev, lay])
+    select(lay.id)
+    set({ tool: "move" })
+  }
+
+  // ───── text
+  const addText = () => {
+    const t = new Konva.Text({
+      text: "Your text",
+      x: BASE_W/2-200,
+      y: BASE_H/2-40,
+      fontSize: 72,
+      fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+      fill: "black",
+    })
+    ;(t as any).id(uid())
+    const meta = baseMeta()
+    applyMetaToNode(t, meta)
+    const lay = wrapNodeToLayer(t, side, meta)
+    setLayers((prev) => [...prev, lay])
+    select(lay.id)
+    set({ tool: "move" })
+  }
+
+  // ───── brush/erase (как штрихи-слои)
+  const startStroke = (pos: Konva.Vector2d) => {
+    const line = new Konva.Line({
+      points: [pos.x, pos.y],
+      stroke: tool === "erase" ? "rgba(255,255,255,1)" : brushColor,
+      strokeWidth: brushSize,
+      lineCap: "round",
+      lineJoin: "round",
+      globalCompositeOperation: tool === "erase" ? "destination-out" : "source-over",
+    })
+    ;(line as any).id(uid())
+    const lay = wrapNodeToLayer(line, side, { ...baseMeta(), blend: "source-over" })
+    setLayers((prev) => [...prev, lay])
+    select(lay.id)
+    setIsDrawing(true)
+  }
+  const appendStroke = (pos: Konva.Vector2d) => {
+    const node = findNode(selectedId)
+    if (!(node instanceof Konva.Line)) return
+    const pts = node.points().concat([pos.x, pos.y])
+    node.points(pts)
+    node.getLayer()?.batchDraw()
+  }
+
+  // мобильная блокировка скролла во время рисования
+  useEffect(() => {
+    const prevent = (e: TouchEvent) => {
+      if (tool === "brush" || tool === "erase") e.preventDefault()
+    }
+    document.addEventListener("touchmove", prevent, { passive: false })
+    return () => document.removeEventListener("touchmove", prevent as any)
+  }, [tool])
+
+  // ───── crop: показываем рамку поверх выбранного Image/Text/Shape; применяем к выбранному ноду
+  const beginCrop = () => {
+    const node = findNode(selectedId)
+    if (!node) return
+    set({ isCropping: true })
+    // рамка = границы выделенного нода
+    const b = node.getClientRect({ relativeTo: stageRef.current })
+    cropRectRef.current?.position({ x: b.x, y: b.y })
+    cropRectRef.current?.size({ width: b.width, height: b.height })
+    cropRectRef.current?.visible(true)
+    cropRectRef.current?.getLayer()?.batchDraw()
+  }
+
+  const applyCrop = () => {
+    const node = findNode(selectedId)
+    const rect = cropRectRef.current
+    if (!node || !rect) { set({ isCropping: false }); return }
+    const { x, y, width, height } = rect
+    // считаем координаты внутри самого нода (учитывая scale stage)
+    const s = scale
+    const rx = x() / s - node.x()
+    const ry = y() / s - node.y()
+    const rw = width() / s
+    const rh = height() / s
+
+    if (node instanceof Konva.Image) {
+      const img = node.image()
+      if (img) {
+        node.crop({ x: rx, y: ry, width: rw, height: rh })
+        node.width(rw)
+        node.height(rh)
+        node.getLayer()?.batchDraw()
+      }
+    } else {
+      // для фигур/текста — оборачиваем в группу с clip
+      const g = new Konva.Group({ x: node.x(), y: node.y(), clip: { x: rx, y: ry, width: rw, height: rh } })
+      node.x(0); node.y(0)
+      const parent = node.getParent()
+      parent?.add(g)
+      node.moveTo(g)
+      g.cache() // для фильтров/бленда
+      g.draw()
+    }
+
+    rect.visible(false)
+    set({ isCropping: false })
+    rect.getLayer()?.batchDraw()
+  }
+
+  const cancelCrop = () => {
+    cropRectRef.current?.visible(false)
+    set({ isCropping: false })
+    cropRectRef.current?.getLayer()?.batchDraw()
+  }
+
+  // ───── export per side
+  const exportSide = async (s: Side) => {
+    const stage = stageRef.current
     if (!stage) return
-    // рендерим текущую сторону: временно подменим state
-    const prev = side
-    setSide(which)
-    requestAnimationFrame(() => {
-      const uri = stage.toDataURL({ pixelRatio: 2 }) // ~ 4000 x 5200
-      const a = document.createElement("a")
-      a.href = uri
-      a.download = `darkroom-${which}.png`
-      a.click()
-      setSide(prev)
-    })
+    const oldScale = stage.scaleX()
+    stage.scale({ x: 1, y: 1 })
+    // временно скрыть другой side
+    const toHide = layers.filter((l) => l.side !== s)
+    toHide.forEach((l) => l.node.visible(false))
+    stage.draw()
+    const data = stage.toDataURL({ pixelRatio: 1, mimeType: "image/png" })
+    toHide.forEach((l) => l.node.visible(true))
+    stage.scale({ x: oldScale, y: oldScale })
+    stage.draw()
+
+    const a = document.createElement("a")
+    a.href = data
+    a.download = `darkroom-${s}.png`
+    a.click()
   }
 
-  // ------- Рендер
-  const bg = side === "front" ? mockFront : mockBack
+  // ───── stage pointer routing
+  const pointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+  const down = () => {
+    if (isCropping) return
+    const p = pointer()
+    if (tool === "brush" || tool === "erase") startStroke({ x: p.x / scale, y: p.y / scale })
+    else if (tool === "shape") addShape(shapeKind)
+    else if (tool === "text") addText()
+  }
+  const move = () => {
+    if (!isDrawing) return
+    const p = pointer()
+    appendStroke({ x: p.x / scale, y: p.y / scale })
+  }
+  const up = () => setIsDrawing(false)
+
+  // ───── panel (UI)
+  const Panel = (
+    <div
+      className={`fixed ${isMobile ? "left-0 right-0 bottom-0" : "right-6 top-1/2 -translate-y-1/2 w-[320px]"} 
+                  bg-white/70 backdrop-blur md:rounded-xl border border-black/10 shadow-xl p-4 z-50`}
+      style={!isMobile ? { cursor: "grab" } : undefined}
+    >
+      {/* Tabs */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        {([
+          ["brush","Brush"],
+          ["erase","Erase"],
+          ["text","Text"],
+          ["shape","Shapes"],
+          ["image","Image"],
+          ["crop","Crop"],
+        ] as const).map(([id,label]) => (
+          <button
+            key={id}
+            onClick={() => set({ tool: id as any })}
+            className={`px-3 py-2 border text-sm uppercase tracking-wide ${ (tool===id) ? "bg-black text-white" : "bg-white text-black"} `}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tool bodies */}
+      {/* Brush / Erase */}
+      {(tool==="brush" || tool==="erase") && (
+        <div className="space-y-3">
+          <div className="text-xs tracking-wide">Brush size: {brushSize}px</div>
+          <input type="range" min={1} max={60} value={brushSize}
+            onChange={(e)=>set({ brushSize: Number(e.target.value) })}
+            className="w-full accent-black"/>
+          <div className="text-xs tracking-wide">Brush color</div>
+          <input type="color" value={brushColor} onChange={(e)=>set({ brushColor: e.target.value })}
+            className="w-10 h-10 border"/>
+        </div>
+      )}
+
+      {/* Text */}
+      {tool==="text" && (
+        <div className="space-y-2 text-xs">
+          <div>Tap canvas to add “Your text”. Редактируй двойным кликом.</div>
+          <button onClick={addText} className="mt-2 w-full border px-3 py-2 bg-black text-white">Add text</button>
+        </div>
+      )}
+
+      {/* Shapes */}
+      {tool==="shape" && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-5 gap-2">
+            {(["circle","square","triangle","cross","line"] as ShapeKind[]).map((s)=>(
+              <button key={s} onClick={()=>addShape(s)} className="border px-2 py-2 bg-white hover:bg-black hover:text-white text-xs uppercase">{s}</button>
+            ))}
+          </div>
+          <div className="text-xs mt-2">Цвет для новых фигур</div>
+          <input type="color" defaultValue="#000000" onChange={(e)=>{/* фигуры создаются чёрными; если нужно — позже сделаем палитру per-shape */}} className="w-8 h-8 border"/>
+        </div>
+      )}
+
+      {/* Image */}
+      {tool==="image" && (
+        <div className="space-y-2">
+          <input type="file" accept="image/*" onChange={(e)=>{
+            const f = e.target.files?.[0]; if (f) onUpload(f)
+          }}/>
+        </div>
+      )}
+
+      {/* Crop */}
+      {tool==="crop" && (
+        <div className="space-y-3 text-xs">
+          <div>Выдели слой → Start Crop → потяни ручки → Apply.</div>
+          <div className="flex gap-2">
+            <button className="border px-3 py-2" onClick={beginCrop}>Start Crop</button>
+            <button className="border px-3 py-2" onClick={applyCrop} disabled={!isCropping}>Apply</button>
+            <button className="border px-3 py-2" onClick={cancelCrop} disabled={!isCropping}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Selected layer controls */}
+      <div className="mt-4 space-y-2">
+        <div className="text-xs">Selected opacity</div>
+        <input type="range" min={0.1} max={1} step={0.01}
+          value={getMeta(selectedId)?.opacity ?? 1}
+          onChange={(e)=>setOpacity(Number(e.target.value))}
+          className="w-full accent-black"/>
+        <div className="text-xs mt-2">Blend</div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            ["source-over","Normal"],
+            ["multiply","Multiply"],
+            ["screen","Screen"],
+            ["overlay","Overlay"],
+            ["darken","Darken"],
+            ["lighten","Lighten"],
+          ].map(([b,label])=>(
+            <button key={b} onClick={()=>setBlend(b as Blend)} className="border px-2 py-2 text-xs">{label}</button>
+          ))}
+        </div>
+        <div className="text-xs mt-2">Raster (halftone)</div>
+        <input type="range" min={0} max={16} step={1}
+          value={getMeta(selectedId)?.raster ?? 0}
+          onChange={(e)=>setRaster(Number(e.target.value))}
+          className="w-full accent-black"/>
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <button className="border px-2 py-2" onClick={()=>{
+            const n = findNode(selectedId); if (!n) return; const clone = n.clone()
+            clone.x(n.x()+20); clone.y(n.y()+20); (clone as any).id(uid())
+            const meta = { ...(getMeta(selectedId)!) }
+            setLayers((p)=>[...p, wrapNodeToLayer(clone, side, meta)])
+          }}>Duplicate</button>
+          <button className="border px-2 py-2" onClick={removeSelected}>Delete</button>
+          <button className="border px-2 py-2" onClick={()=>setLayers((p)=>p.filter(l=>!(l.side===side && l.kind==="stroke")))}>Clear strokes</button>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button className="border px-2 py-2" onClick={()=>exportSide("front")}>Download Front</button>
+          <button className="border px-2 py-2" onClick={()=>exportSide("back")}>Download Back</button>
+        </div>
+      </div>
+
+      {isMobile ? (
+        <button onClick={togglePanel} className="mt-4 w-full border px-3 py-2 bg-black text-white">Close</button>
+      ) : null}
+    </div>
+  )
 
   return (
-    <div className="w-screen h-[calc(100vh-64px)] overflow-hidden relative">
-      {/* канвас по центру относительно логотипа */}
-      <div className="w-full h-full flex items-center justify-center">
+    <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
+      {/* топовая кнопка на мобиле */}
+      {isMobile && !showPanel && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-4 z-40">
+          <button onClick={togglePanel} className="px-6 py-3 bg-black text-white border">Create</button>
+        </div>
+      )}
+      {/* боковая панель на десктопе */}
+      {!isMobile && Panel}
+      {isMobile && showPanel && Panel}
+
+      <div className="absolute inset-0 flex items-center justify-center">
         <Stage
+          width={viewW}
+          height={viewH}
+          scale={{ x: scale, y: scale }}
           ref={stageRef}
-          width={displayW}
-          height={displayH}
-          scaleX={scale}
-          scaleY={scale}
-          onMouseDown={startDraw}
-          onMousemove={moveDraw}
-          onMouseup={endDraw}
-          onTouchStart={startDraw}
-          onTouchMove={moveDraw}
-          onTouchEnd={endDraw}
-          draggable={false}
+          onMouseDown={down}
+          onMouseMove={move}
+          onMouseUp={up}
+          onTouchStart={down}
+          onTouchMove={move}
+          onTouchEnd={up}
         >
-          <Layer>
-            {bg && <KImage image={bg} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} perfectDrawEnabled={false} />}
+          {/* Front */}
+          <Layer listening={false}>
+            {frontMock && side==="front" && (
+              <KImage image={frontMock} width={BASE_W} height={BASE_H}/>
+            )}
+            {backMock && side==="back" && (
+              <KImage image={backMock} width={BASE_W} height={BASE_H}/>
+            )}
           </Layer>
 
-          {/* основной слой дизайна */}
+          {/* рабочий слой — ВСЕ объекты, фильтры/бленды применяются к нодам */}
           <Layer>
-            {/* изображения */}
-            {design.images.map((im) => {
-              const filters: any[] = []
-              if ((im.raster || 0) > 0) filters.push(Konva.Filters.Pixelate)
-              return (
-                <KImage
-                  key={im.id}
-                  id={im.id}
-                  image={im.image}
-                  x={im.x}
-                  y={im.y}
-                  width={im.w}
-                  height={im.h}
-                  opacity={im.opacity}
-                  rotation={im.rotation}
-                  draggable={mode === "move" && !cropping}
-                  onClick={() => {
-                    setActiveId(im.id)
-                    setActiveType("image")
-                  }}
-                  onTap={() => {
-                    setActiveId(im.id)
-                    setActiveType("image")
-                  }}
-                  globalCompositeOperation={im.blend}
-                  crop={
-                    im.crop
-                      ? { x: im.crop.x, y: im.crop.y, width: im.crop.w, height: im.crop.h }
-                      : undefined
-                  }
-                  filters={filters}
-                  pixelSize={Math.max(1, Math.round((im.raster || 0) * 12))}
-                />
-              )
+            {activeLayers.map((l) => {
+              l.node.listening(true)
+              l.node.on("click tap", () => select(l.id))
+              return <Group key={l.id} ref={(g)=>{ /* noop: ноды уже живут вне React */ }} />
             })}
-
-            {/* примитивы */}
-            {design.primitives.map((p) => {
-              const common = {
-                key: p.id,
-                id: p.id,
-                x: p.x,
-                y: p.y,
-                opacity: p.opacity,
-                rotation: p.rotation,
-                draggable: mode === "move",
-                onClick: () => {
-                  setActiveId(p.id)
-                  setActiveType("primitive")
-                },
-                onTap: () => {
-                  setActiveId(p.id)
-                  setActiveType("primitive")
-                },
-                globalCompositeOperation: p.blend as any,
-              } as any
-
-              if (p.kind === "rect" || p.kind === "cross") {
-                return (
-                  <Group {...common}>
-                    <Rect width={p.w} height={p.h} fill={p.kind === "rect" ? p.fill : undefined} />
-                    {p.kind === "cross" && (
-                      <>
-                        <Rect x={p.w / 2 - p.w * 0.05} width={p.w * 0.1} height={p.h} fill={p.fill} />
-                        <Rect y={p.h / 2 - p.h * 0.05} width={p.w} height={p.h * 0.1} fill={p.fill} />
-                      </>
-                    )}
-                  </Group>
-                )
-              }
-              if (p.kind === "circle") {
-                return (
-                  <Group {...common}>
-                    <Rect width={p.w} height={p.h} cornerRadius={Math.min(p.w, p.h) / 2} fill={p.fill} />
-                  </Group>
-                )
-              }
-              if (p.kind === "triangle") {
-                // делаем как прямоугольник + clip
-                return (
-                  <Group
-                    {...common}
-                    clipFunc={(ctx) => {
-                      ctx.beginPath()
-                      ctx.moveTo(0, p.h)
-                      ctx.lineTo(p.w / 2, 0)
-                      ctx.lineTo(p.w, p.h)
-                      ctx.closePath()
-                    }}
-                  >
-                    <Rect width={p.w} height={p.h} fill={p.fill} />
-                  </Group>
-                )
-              }
-              // линия
-              return (
-                <Group {...common}>
-                  <Rect y={(p.h - (p.strokeWidth || 8)) / 2} width={p.w} height={p.strokeWidth || 8} fill={p.fill} />
-                </Group>
-              )
-            })}
-
-            {/* текст */}
-            {design.texts.map((t) => (
-              <KText
-                key={t.id}
-                id={t.id}
-                x={t.x}
-                y={t.y}
-                text={t.text}
-                fontSize={t.fontSize}
-                fontFamily={t.fontFamily}
-                fill={t.fill}
-                opacity={t.opacity}
-                rotation={t.rotation}
-                draggable={mode === "move"}
-                onClick={() => {
-                  setActiveId(t.id)
-                  setActiveType("text")
-                }}
-                globalCompositeOperation={t.blend as any}
-              />
-            ))}
-
-            {/* кисти/ластик */}
-            {design.strokes.map((s) => (
-              <Line
-                key={s.id}
-                points={s.points}
-                stroke={s.mode === "erase" ? "#000" : s.color}
-                strokeWidth={s.size}
-                lineCap="round"
-                lineJoin="round"
-                globalCompositeOperation={s.mode === "erase" ? "destination-out" : "source-over"}
-              />
-            ))}
-
-            {/* трансформер к текущему объекту */}
-            {!!activeId && !cropping && <Transformer ref={trRef} rotateEnabled={true} anchorCornerRadius={0} />}
-            {/* прямоугольник кропа */}
-            {cropping && (
-              <Rect
-                ref={cropRectRef}
-                x={displayW * 0.2}
-                y={displayH * 0.2}
-                width={displayW * 0.6}
-                height={displayH * 0.6}
-                draggable
-                stroke="black"
-                dash={[8, 8]}
-                strokeWidth={1 / scale}
-              />
-            )}
+            {/* фактически ноды уже добавлены напрямую; выше — просто заставляем React перерисовать */}
+            <Transformer ref={tRef} rotateEnabled={true} />
+            {/* crop-RECT */}
+            <Rect ref={cropRectRef} visible={false}
+              stroke="black" dash={[6,4]} strokeWidth={2}
+              draggable
+              dragBoundFunc={(pos)=>({ x: Math.max(0, Math.min(pos.x, BASE_W-20)), y: Math.max(0, Math.min(pos.y, BASE_H-20)) })}
+            />
           </Layer>
         </Stage>
       </div>
 
-      {/* TOOLBAR */}
-      <Toolbar
-        side={side}
-        setSide={setSide}
-        mode={mode}
-        setMode={setMode}
-        brush={{ color: brushColor, setColor: setBrushColor, size: brushSize, setSize: setBrushSize }}
-        onAddImage={handleAddImage}
-        onAddText={addText}
-        onAddPrimitive={addPrimitive}
-        onStartCrop={startCrop}
-        onApplyCrop={applyCrop}
-        onCancelCrop={cancelCrop}
-        cropping={cropping}
-        active={{ id: activeId, type: activeType }}
-        setActive={(_, __) => {}} // выбор делаем кликом на сцене
-        onDownloadFront={() => downloadSide("front")}
-        onDownloadBack={() => downloadSide("back")}
-        design={design}
-        setDesign={setDesign}
-        accent={PINK}
-      />
+      {/* переключатель Front/Back под сценой (как в исходнике) */}
+      <div className="absolute left-1/2 -translate-x-1/2 top-4 z-30 flex gap-2">
+        <button className={`px-3 py-1 border ${side==="front" ? "bg-black text-white" : "bg-white"}`} onClick={()=>set({ side: "front" })}>Front</button>
+        <button className={`px-3 py-1 border ${side==="back" ? "bg-black text-white" : "bg-white"}`} onClick={()=>set({ side: "back" })}>Back</button>
+      </div>
     </div>
   )
 }
-
-export default EditorCanvas
