@@ -107,7 +107,7 @@ export default function PaginatedProducts({
   // ВАЖНО: боковые поля и межколоночные гаттеры
   // 1 колонка → ощущение “full bleed” (px-6 как на продукте)
   // 2 колонки → уже поля (px-3), но нормальный зазор между карточками (gap-x-3)
-  const containerPadding = columns === 1 ? "px-6" : "px-3"
+  const containerPadding = columns === 1 ? "px-2" : "px-2"
   const gridColsClass =
     columns === 1 ? "grid-cols-1" : columns === 2 ? "grid-cols-2" : columns === 3 ? "grid-cols-3" : "grid-cols-4"
   const gapX = columns === 1 ? "gap-x-0" : "gap-x-3"
