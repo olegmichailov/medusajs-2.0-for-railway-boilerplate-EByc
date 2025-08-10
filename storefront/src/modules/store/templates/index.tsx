@@ -1,4 +1,3 @@
-
 // БЕЗ "use client"
 import { Suspense } from "react"
 import dynamic from "next/dynamic"
@@ -7,11 +6,10 @@ import SkeletonProductGrid from "@modules/skeletons/templates/skeleton-product-g
 import RefinementList from "@modules/store/components/refinement-list"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
-// ❗ Ключевой момент — dynamic import
-const PaginatedProducts = dynamic(
-  () => import("./paginated-products"),
-  { ssr: false }
-)
+// важное: PaginatedProducts по-прежнему грузим динамически (клиентский)
+const PaginatedProducts = dynamic(() => import("./paginated-products"), {
+  ssr: false,
+})
 
 const StoreTemplate = ({
   sortBy,
@@ -31,7 +29,9 @@ const StoreTemplate = ({
       data-testid="category-container"
     >
       <RefinementList sortBy={sort} />
-      <div className="w-full px-6 sm:px-0">
+
+      {/* ВАЖНО: убрали px-6/sm:px-0 — пусть правая колонка наследует только поля content-container */}
+      <div className="w-full">
         <h1
           data-testid="store-page-title"
           className="text-4xl font-medium tracking-wider uppercase text-left mb-6"
@@ -40,11 +40,7 @@ const StoreTemplate = ({
         </h1>
 
         <Suspense fallback={<SkeletonProductGrid />}>
-          <PaginatedProducts
-            sortBy={sort}
-            page={pageNumber}
-            countryCode={countryCode}
-          />
+          <PaginatedProducts sortBy={sort} page={pageNumber} countryCode={countryCode} />
         </Suspense>
       </div>
     </div>
