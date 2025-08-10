@@ -1,6 +1,5 @@
 "use client"
 
-import { useMemo } from "react"
 import { Eye, EyeOff, Lock, Unlock, Trash2, Copy, ArrowUp, ArrowDown } from "lucide-react"
 
 type Item = {
@@ -31,8 +30,7 @@ export default function LayersPanel({
   onMoveUp: (id: string)=>void
   onMoveDown: (id: string)=>void
 }) {
-  const list = useMemo(()=> [...items].reverse(), [items])
-
+  const list = [...items].reverse()
   return (
     <div className="fixed right-4 top-1/2 -translate-y-1/2 w-[280px] max-h-[70vh] overflow-auto backdrop-blur-md bg-white/70 border border-black/10 shadow-xl rounded-none p-3 z-40 hidden lg:block">
       <div className="text-[11px] uppercase tracking-wide mb-2">Layers</div>
