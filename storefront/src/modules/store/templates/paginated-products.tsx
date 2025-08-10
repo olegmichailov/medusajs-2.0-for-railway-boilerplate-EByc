@@ -129,7 +129,7 @@ export default function PaginatedProducts({
   return (
     <>
       <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
-        <div className="text-sm sm:text-base font-medium tracking-wide uppercase"></div>
+        <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
             <button
@@ -149,19 +149,17 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* full-bleed на мобиле: выравниваем сетку по краям экрана */}
-      <div className="-mx-4 small:mx-0">
-        <ul
-          className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-0`}
-          data-testid="products-list"
-        >
-          {products.map((p) => (
-            <li key={p.id} className="w-full">
-              <ProductPreview product={p} region={region} />
-            </li>
-          ))}
-        </ul>
-      </div>
+      {/* ВАЖНО: такие же боковые поля, как на странице товара */}
+      <ul
+        className={`grid ${gridColsClass} gap-x-0 sm:gap-x-4 gap-y-10 px-6 small:px-0`}
+        data-testid="products-list"
+      >
+        {products.map((p) => (
+          <li key={p.id} className="w-full">
+            <ProductPreview product={p} region={region} />
+          </li>
+        ))}
+      </ul>
 
       {hasMore && <div ref={loader} className="h-10 mt-10" />}
     </>
