@@ -109,33 +109,39 @@ export default function PaginatedProducts({
 
   return (
     <>
-      {/* панель: тот же контейнер, что и список; переключатель прибит к правому краю */}
-      <div className="pt-4 pb-2 flex items-center">
-        <div className="ml-auto flex gap-1">
-          {columnOptions.map((col) => (
-            <button
-              key={col}
-              onClick={() => setColumns(col)}
-              className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
-                columns === col ? "bg-black text-white border-black" : "bg-white text-black border-gray-300 hover:border-black"
-              }`}
-              aria-pressed={columns === col}
-              aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
-            >
-              {col}
-            </button>
-          ))}
+      {/* обнуляем мобильные боковые паддинги родителя только для этой секции */}
+      <div className="-mx-6 small:mx-0">
+        {/* панель переключения — прибита к правому краю изображения */}
+        <div className="pt-4 pb-2 flex items-center px-6 small:px-0">
+          <div className="ml-auto flex gap-1">
+            {columnOptions.map((col) => (
+              <button
+                key={col}
+                onClick={() => setColumns(col)}
+                className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
+                  columns === col ? "bg-black text-white border-black" : "bg-white text-black border-gray-300 hover:border-black"
+                }`}
+                aria-pressed={columns === col}
+                aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
+              >
+                {col}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* список: без дополнительных px — поля берём из родителя (StoreTemplate) */}
-      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10`} data-testid="products-list">
-        {products.map((p) => (
-          <li key={p.id} className="w-full">
-            <ProductPreview product={p} region={region} />
-          </li>
-        ))}
-      </ul>
+        {/* список — теперь реально «в ширину» (тем же краем, что и на PDP) */}
+        <ul
+          className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-6 small:px-0`}
+          data-testid="products-list"
+        >
+          {products.map((p) => (
+            <li key={p.id} className="w-full">
+              <ProductPreview product={p} region={region} />
+            </li>
+          ))}
+        </ul>
+      </div>
 
       {hasMore && <div ref={loader} className="h-10 mt-10" />}
     </>
