@@ -3,14 +3,14 @@
 import { Button } from "@medusajs/ui"
 import { OnApproveActions, OnApproveData } from "@paypal/paypal-js"
 import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
-import React, { useContext, useState } from "react"
+import React, { useContext, useState, useEffect } from "react"
 import ErrorMessage from "../error-message"
 import Spinner from "@modules/common/icons/spinner"
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { isManual, isPaypal, isStripe } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { useStripeSafe, useElementsSafe } from "@lib/stripe/safe-hooks"
 
 type PaymentButtonProps = {
@@ -86,10 +86,11 @@ const StripePaymentButton = ({
 
   const stripe = useStripeSafe()
   const elements = useElementsSafe()
+  const searchParams = useSearchParams()
 
   const disabled = !stripe || !elements || notReady
 
-  // Вспомогательный чекер статуса PI по client_secret
+  // Вспомогательный чекер статуса PI по client_secret из сессии
   const checkPiAndCompleteIfDone = async (): Promise<boolean> => {
     try {
       const clientSecret =
@@ -105,8 +106,7 @@ const StripePaymentButton = ({
 
       if (
         paymentIntent.status === "succeeded" ||
-        paymentIntent.status === "processing" ||
-        paymentIntent.status === "requires_capture"
+        paymentIntent.status === "processing"
       ) {
         await onPaymentCompleted()
         return true
@@ -116,6 +116,51 @@ const StripePaymentButton = ({
     }
     return false
   }
+
+  // Автодовершение заказа после возврата с редиректа (Klarna/Revolut и т.п.)
+  // Берём client_secret из query (?payment_intent_client_secret=...)
+  // и завершаем заказ, если Intent уже succeeded/processing.
+  useEffect(() => {
+    if (!stripe) return
+
+    const clientSecret =
+      searchParams.get("payment_intent_client_secret") ||
+      searchParams.get("setup_intent_client_secret")
+
+    if (!clientSecret) return
+
+    const redirectStatus = searchParams.get("redirect_status")
+    if (
+      redirectStatus &&
+      !["succeeded", "completed", "processing"].includes(redirectStatus)
+    ) {
+      // canceled/failed — не завершаем
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { paymentIntent } = await stripe.retrievePaymentIntent(
+          clientSecret
+        )
+        if (cancelled || !paymentIntent) return
+        if (
+          paymentIntent.status === "succeeded" ||
+          paymentIntent.status === "processing"
+        ) {
+          setSubmitting(true)
+          await onPaymentCompleted()
+        }
+      } catch {
+        /* молча остаёмся на кнопке */
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [stripe, searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePayment = async () => {
     setSubmitting(true)
@@ -160,8 +205,7 @@ const StripePaymentButton = ({
 
     if (
       paymentIntent &&
-      (paymentIntent.status === "requires_capture" ||
-        paymentIntent.status === "succeeded" ||
+      (paymentIntent.status === "succeeded" ||
         paymentIntent.status === "processing")
     ) {
       await onPaymentCompleted()
