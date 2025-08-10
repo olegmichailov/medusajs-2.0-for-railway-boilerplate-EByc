@@ -54,11 +54,7 @@ export default function PaginatedProducts({
       setRegion(regionData)
       setOffset(0)
 
-      const queryParams: PaginatedProductsParams = {
-        limit: PRODUCT_LIMIT,
-        offset: 0,
-      }
-
+      const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset: 0 }
       if (collectionId) queryParams["collection_id"] = [collectionId]
       if (categoryId) queryParams["category_id"] = [categoryId]
       if (productsIds) queryParams["id"] = productsIds
@@ -73,16 +69,11 @@ export default function PaginatedProducts({
       setHasMore(newProducts.length >= PRODUCT_LIMIT)
       setInitialLoaded(true)
     }
-
     fetchInitial()
   }, [sortBy, collectionId, categoryId, productsIds, countryCode])
 
   const fetchMore = useCallback(async () => {
-    const queryParams: PaginatedProductsParams = {
-      limit: PRODUCT_LIMIT,
-      offset,
-    }
-
+    const queryParams: PaginatedProductsParams = { limit: PRODUCT_LIMIT, offset }
     if (collectionId) queryParams["collection_id"] = [collectionId]
     if (categoryId) queryParams["category_id"] = [categoryId]
     if (productsIds) queryParams["id"] = productsIds
@@ -98,37 +89,28 @@ export default function PaginatedProducts({
       const ids = new Set(prev.map((p) => p.id))
       return [...prev, ...newProducts.filter((p) => !ids.has(p.id))]
     })
-
     setOffset((prev) => prev + PRODUCT_LIMIT)
   }, [offset, sortBy, collectionId, categoryId, productsIds, countryCode])
 
   useEffect(() => {
-    if (!region || !initialLoaded) return
-    if (!loader.current) return
-
+    if (!region || !initialLoaded || !loader.current) return
     const obs = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore) fetchMore()
       },
       { threshold: 0.25 }
     )
-
     obs.observe(loader.current)
     return () => obs.disconnect()
   }, [fetchMore, region, hasMore, initialLoaded])
 
   const gridColsClass =
-    columns === 1
-      ? "grid-cols-1"
-      : columns === 2
-      ? "grid-cols-2"
-      : columns === 3
-      ? "grid-cols-3"
-      : "grid-cols-4"
+    columns === 1 ? "grid-cols-1" : columns === 2 ? "grid-cols-2" : columns === 3 ? "grid-cols-3" : "grid-cols-4"
 
   return (
     <>
-      <div className="px-0 sm:px-0 pt-4 pb-2 flex items-center justify-between">
+      {/* панель с переключателем колонок — те же поля, что и у списка ниже */}
+      <div className="px-6 small:px-0 pt-4 pb-2 flex items-center justify-between">
         <div className="text-sm sm:text-base font-medium tracking-wide uppercase" />
         <div className="flex gap-1 ml-auto">
           {columnOptions.map((col) => (
@@ -136,9 +118,7 @@ export default function PaginatedProducts({
               key={col}
               onClick={() => setColumns(col)}
               className={`w-6 h-6 flex items-center justify-center border text-xs font-medium transition-all duration-200 rounded-none ${
-                columns === col
-                  ? "bg-black text-white border-black"
-                  : "bg-white text-black border-gray-300 hover:border-black"
+                columns === col ? "bg-black text-white border-black" : "bg-white text-black border-gray-300 hover:border-black"
               }`}
               aria-pressed={columns === col}
               aria-label={`Set ${col} column${col > 1 ? "s" : ""}`}
@@ -149,11 +129,8 @@ export default function PaginatedProducts({
         </div>
       </div>
 
-      {/* ВАЖНО: такие же боковые поля, как на странице товара */}
-      <ul
-        className={`grid ${gridColsClass} gap-x-0 sm:gap-x-4 gap-y-10 px-6 small:px-0`}
-        data-testid="products-list"
-      >
+      {/* список — такие же боковые поля, как на странице товара */}
+      <ul className={`grid ${gridColsClass} gap-x-0 small:gap-x-4 gap-y-10 px-6 small:px-0`} data-testid="products-list">
         {products.map((p) => (
           <li key={p.id} className="w-full">
             <ProductPreview product={p} region={region} />
