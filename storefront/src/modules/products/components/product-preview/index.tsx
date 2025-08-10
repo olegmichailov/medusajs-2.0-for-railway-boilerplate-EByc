@@ -1,5 +1,3 @@
-// storefront/src/modules/products/components/product-preview.tsx
-
 "use client"
 
 import { Text } from "@medusajs/ui"
@@ -24,15 +22,18 @@ export default function ProductPreview({
   })
 
   return (
-    <LocalizedClientLink href={`/products/${product.handle}`} className="group">
-      <div data-testid="product-wrapper">
+    // Мобайл: делаем ссылку блочным элементом на всю ширину
+    <LocalizedClientLink href={`/products/${product.handle}`} className="group block w-full">
+      <div data-testid="product-wrapper" className="w-full">
         <Thumbnail
           thumbnail={product.thumbnail}
           images={product.images}
           size="full"
           isFeatured={isFeatured}
         />
-        <div className="flex txt-compact-medium mt-2 justify-between px-1">
+
+        {/* Мобайл: убираем боковые паддинги, чтобы текст шёл вровень с изображением */}
+        <div className="flex txt-compact-medium mt-2 justify-between px-0 small:px-1">
           <Text className="text-ui-fg-subtle text-sm sm:text-base" data-testid="product-title">
             {product.title}
           </Text>
