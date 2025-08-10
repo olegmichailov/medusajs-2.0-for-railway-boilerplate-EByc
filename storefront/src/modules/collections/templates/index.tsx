@@ -21,8 +21,7 @@ export default function CollectionTemplate({
   const sort = sortBy || "created_at"
 
   return (
-    {/* ⬇️ На мобиле убираем внутренние паддинги контейнера */}
-    <div className="content-container px-0 small:px-6 flex flex-col small:flex-row small:items-start py-6">
+    <div className="content-container flex flex-col small:flex-row small:items-start py-6">
       <RefinementList sortBy={sort} />
 
       <div className="w-full">
@@ -30,7 +29,7 @@ export default function CollectionTemplate({
           <h1>{collection.title}</h1>
         </div>
 
-        {/* ⬇️ Full-bleed приём: компенсируем стандартный mobile-gutter (-mx-6, т.к. у content-container обычно px-6) */}
+        {/* на мобиле растягиваем сетку на всю ширину, компенсируя внутренние паддинги контейнера */}
         <div className="-mx-6 small:mx-0">
           <Suspense fallback={<SkeletonProductGrid />}>
             <PaginatedProducts
