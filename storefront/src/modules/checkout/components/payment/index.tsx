@@ -48,21 +48,17 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  // ---------- NEW #A: refresh при возврате из bfcache (например, Back на Revolut) ----------
+  // Показывать радиогруппу только если провайдеров больше одного (например, Stripe + PayPal)
+  const showProviderPicker = (availablePaymentMethods?.length ?? 0) > 1
+
+  // bfcache/back — форсим обновление серверных компонентов (шапка, корзина)
   useEffect(() => {
-    const onPageShow = () => {
-      // заставляем серверные компоненты перечитать корзину и шапку
-      router.refresh()
-    }
-    if (typeof window !== "undefined") {
-      window.addEventListener("pageshow", onPageShow)
-      return () => window.removeEventListener("pageshow", onPageShow)
-    }
+    const onPageShow = () => router.refresh()
+    window.addEventListener("pageshow", onPageShow)
+    return () => window.removeEventListener("pageshow", onPageShow)
   }, [router])
 
-  /**
-   * CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ.
-   */
+  // CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -84,14 +80,13 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // ---------- NEW #B: сторожок «вернулись без redirect_status» (часто при Back на Revolut) ----------
+  // «Сторожок»: пришли с client_secret, но без redirect_status — считаем отменой через 8 сек
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
       searchParams.get("setup_intent_client_secret")
 
-    // если пришли с секретом, но без redirect_status — через 8с считаем отменой
     if (clientSecret && !redirectStatus) {
       const t = setTimeout(() => {
         const params = new URLSearchParams(searchParams.toString())
@@ -103,9 +98,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  /**
-   * Авто-инициация stripe-сессии — чтобы PaymentElement появился сразу.
-   */
+  // Авто-инициация stripe-сессии — чтобы PaymentElement появился сразу
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -126,9 +119,9 @@ const Payment = ({
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
   /**
-   * Успешное завершение после возврата/без редиректа.
-   * placeOrder вызываем ТОЛЬКО если redirect_status отсутствует
-   * (карточный флоу) ИЛИ равен "succeeded"/"completed".
+   * ВАЖНО: завершаем заказ ТОЛЬКО при `succeeded` или `processing`.
+   * `requires_capture` ИСКЛЮЧЕН — не считаем это финальным успехом с фронта.
+   * Это даёт корректное поведение для редирект-методов (Klarna/RevolutPay).
    */
   useEffect(() => {
     const clientSecret =
@@ -151,7 +144,6 @@ const Payment = ({
 
         if (
           paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "requires_capture" ||
           paymentIntent.status === "processing"
         ) {
           try {
@@ -243,27 +235,30 @@ const Payment = ({
         <div className={isOpen ? "block" : "hidden"}>
           {!paidByGiftcard && !!availablePaymentMethods?.length && (
             <>
-              <RadioGroup
-                value={selectedPaymentMethod}
-                onChange={(value: string) => setSelectedPaymentMethod(value)}
-              >
-                {availablePaymentMethods
-                  .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
-                  .map((paymentMethod) => (
-                    <PaymentContainer
-                      paymentInfoMap={paymentInfoMap}
-                      paymentProviderId={paymentMethod.id}
-                      key={paymentMethod.id}
-                      selectedPaymentOptionId={selectedPaymentMethod}
-                    />
-                  ))}
-              </RadioGroup>
+              {showProviderPicker && (
+                <RadioGroup
+                  value={selectedPaymentMethod}
+                  onChange={(value: string) => setSelectedPaymentMethod(value)}
+                >
+                  {availablePaymentMethods
+                    .sort((a, b) => (a.provider_id > b.provider_id ? 1 : -1))
+                    .map((paymentMethod) => (
+                      <PaymentContainer
+                        paymentInfoMap={paymentInfoMap}
+                        paymentProviderId={paymentMethod.id}
+                        key={paymentMethod.id}
+                        selectedPaymentOptionId={selectedPaymentMethod}
+                      />
+                    ))}
+                </RadioGroup>
+              )}
 
               {choseStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
                     Enter your payment details:
                   </Text>
+                  {/* вкладки Card / Klarna / Revolut Pay и т.п. */}
                   <PaymentElement options={{ layout: "tabs" }} />
                 </div>
               )}
