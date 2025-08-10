@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useRef } from "react"
 import { isMobile } from "react-device-detect"
 
 type Side = "front" | "back"
@@ -30,8 +30,8 @@ export default function Toolbar({
   onOpenChange: (v: boolean) => void
   side: Side
   onSideChange: (s: Side) => void
-  mode: "move" | "brush" | "crop"
-  onModeChange: (m: "move" | "brush" | "crop") => void
+  mode: "move" | "brush" | "erase" | "crop"
+  onModeChange: (m: "move" | "brush" | "erase" | "crop") => void
   brushColor: string
   onBrushColor: (c: string) => void
   brushSize: number
@@ -47,49 +47,37 @@ export default function Toolbar({
   onDownloadBack: () => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [imgOpacity, setImgOpacity] = useState(100)
 
-  const Panel = (
-    <div className="w-full max-w-[360px] bg-white border border-black/10 shadow-lg p-3 sm:p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex gap-2">
+  const Controls = (
+    <div className="w-full max-w-[420px] bg-white/90 backdrop-blur border border-black p-4 shadow-[0_8px_40px_rgba(0,0,0,0.2)]">
+      {/* кнопки режимов */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {[
+          ["move", "Move"],
+          ["brush", "Brush"],
+          ["erase", "Erase"],
+          ["crop", "Crop"],
+        ].map(([key, label]) => (
           <button
-            className={`px-3 py-1 border ${mode === "move" ? "bg-black text-white" : ""}`}
-            onClick={() => onModeChange("move")}
+            key={key}
+            className={`px-3 py-1 border ${mode === key ? "bg-black text-white" : ""}`}
+            onClick={() => onModeChange(key as any)}
           >
-            Move
+            {label}
           </button>
-          <button
-            className={`px-3 py-1 border ${mode === "brush" ? "bg-black text-white" : ""}`}
-            onClick={() => onModeChange("brush")}
-          >
-            Brush
-          </button>
-          <button
-            className={`px-3 py-1 border ${mode === "crop" ? "bg-black text-white" : ""}`}
-            onClick={() => onModeChange("crop")}
-          >
-            Crop
-          </button>
-        </div>
-
-        <div className="flex gap-1">
-          <button
-            className={`px-3 py-1 border ${side === "front" ? "bg-black text-white" : ""}`}
-            onClick={() => onSideChange("front")}
-          >
+        ))}
+        <div className="ml-auto flex gap-2">
+          <button className={`px-3 py-1 border ${side === "front" ? "bg-black text-white" : ""}`} onClick={() => onSideChange("front")}>
             Front
           </button>
-          <button
-            className={`px-3 py-1 border ${side === "back" ? "bg-black text-white" : ""}`}
-            onClick={() => onSideChange("back")}
-          >
+          <button className={`px-3 py-1 border ${side === "back" ? "bg-black text-white" : ""}`} onClick={() => onSideChange("back")}>
             Back
           </button>
         </div>
       </div>
 
-      <div className="flex gap-2">
+      {/* добавление/дублирование/удаление */}
+      <div className="flex gap-2 mb-3">
         <button className="px-3 py-1 border" onClick={() => fileRef.current?.click()}>
           Add image
         </button>
@@ -112,87 +100,99 @@ export default function Toolbar({
         </button>
       </div>
 
-      <div>
-        <div className="text-xs mb-1">Selected image opacity: {imgOpacity}%</div>
+      {/* кисть */}
+      <div className="mb-3">
+        <div className="text-xs mb-1">Brush size: {brushSize}px</div>
         <input
           type="range"
-          min={0}
-          max={100}
-          value={imgOpacity}
-          onChange={(e) => setImgOpacity(+e.target.value)}
-          className="w-full"
+          min={1}
+          max={60}
+          value={brushSize}
+          onChange={(e) => onBrushSize(+e.target.value)}
+          className="w-full h-2 appearance-none bg-black cursor-pointer touch-none
+            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
+            [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-white
+            [&::-webkit-slider-thumb]:rounded-none
+            [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:background-black"
+          style={{ WebkitTapHighlightColor: "transparent" }}
         />
-        <div className="text-xs text-black/50 mt-1">* Прозрачность применяется у выбранного объекта через трансформер (слайдер сохранится при следующем выборе).</div>
       </div>
 
-      <div>
-        <div className="text-xs mb-1">Brush size: {brushSize}px</div>
-        <input type="range" min={1} max={40} value={brushSize} onChange={(e) => onBrushSize(+e.target.value)} className="w-full" />
-      </div>
-
-      <div>
+      <div className="mb-3">
         <div className="text-xs mb-1">Brush color</div>
-        <input type="color" value={brushColor} onChange={(e) => onBrushColor(e.target.value)} className="w-8 h-8 border" />
+        <input type="color" value={brushColor} onChange={(e) => onBrushColor(e.target.value)} className="w-8 h-8 border p-0" />
       </div>
 
+      {/* crop */}
+      {mode === "crop" && (
+        <div className="flex gap-2 mb-3">
+          <button className="px-3 py-1 border" onClick={onCancelCrop}>
+            Cancel crop
+          </button>
+          <button className="px-3 py-1 border" onClick={onApplyCrop} disabled={!hasCrop}>
+            Apply crop
+          </button>
+        </div>
+      )}
+
+      {/* прочее */}
       <div className="flex gap-2">
         <button className="px-3 py-1 border" onClick={onClearStrokes}>
           Clear strokes
         </button>
-        {mode === "crop" && (
-          <>
-            <button className="px-3 py-1 border" onClick={onCancelCrop}>
-              Cancel crop
-            </button>
-            <button className="px-3 py-1 border" onClick={onApplyCrop} disabled={!hasCrop}>
-              Apply crop
-            </button>
-          </>
-        )}
+        <div className="ml-auto flex gap-2">
+          <button className="px-3 py-1 border" onClick={onDownloadFront}>
+            Download Front
+          </button>
+          <button className="px-3 py-1 border" onClick={onDownloadBack}>
+            Download Back
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-2">
-        <button className="px-3 py-1 border" onClick={onDownloadFront}>
-          Download Front
-        </button>
-        <button className="px-3 py-1 border" onClick={onDownloadBack}>
-          Download Back
-        </button>
+      <div className="text-[11px] text-black/60 mt-3 leading-relaxed">
+        Shortcuts: Delete — remove, ⌘/Ctrl+C/⌘/Ctrl+V — copy/paste, ⌘/Ctrl+D — duplicate, [ / ] — layer back/forward,
+        Shift+ / Shift− — blend mode (Normal/Multiply/Screen/Overlay/Darken/Lighten).
       </div>
     </div>
   )
 
+  // Мобайл — нижний шит
   if (isMobile) {
-    // Мобайл: кнопка Create и снизу sheet
     return (
-      <div className="fixed left-0 right-0 bottom-4 flex justify-center pointer-events-none">
-        {!open && (
-          <button
-            className="pointer-events-auto px-5 py-3 bg-black text-white"
-            onClick={() => onOpenChange(true)}
-          >
+      <div className="fixed inset-x-0 bottom-4 flex justify-center pointer-events-none">
+        {!open ? (
+          <button className="pointer-events-auto px-5 py-3 bg-black text-white" onClick={() => onOpenChange(true)}>
             Create
           </button>
-        )}
-        {open && (
-          <div className="pointer-events-auto fixed left-0 right-0 bottom-0 p-3 bg-white border-t shadow-2xl">
-            <div className="flex justify-between items-center mb-2">
-              <div className="font-medium">Darkroom</div>
-              <button className="px-3 py-1 border" onClick={() => onOpenChange(false)}>
+        ) : (
+          <div className="pointer-events-auto fixed inset-x-0 bottom-0 p-3">
+            <div className="flex justify-end mb-2">
+              <button className="px-3 py-1 border bg-white/90 backdrop-blur border-black" onClick={() => onOpenChange(false)}>
                 Close
               </button>
             </div>
-            {Panel}
+            {Controls}
           </div>
         )}
       </div>
     )
   }
 
-  // Desktop: выезжающая справа панель
+  // Десктоп — оверлей по центру (в стиле существующих модалок)
   return (
-    <div className="fixed right-4 top-[96px]">{open ? Panel : (
-      <button className="px-5 py-3 bg-black text-white" onClick={() => onOpenChange(true)}>Create</button>
-    )}</div>
+    <div className="fixed inset-0 flex items-start justify-center pointer-events-none">
+      {!open ? (
+        <div className="pointer-events-auto fixed top-[92px] right-6">
+          <button className="px-5 py-3 bg-black text-white" onClick={() => onOpenChange(true)}>
+            Create
+          </button>
+        </div>
+      ) : (
+        <div className="pointer-events-auto fixed top-[92px] flex justify-center w-full">
+          {Controls}
+        </div>
+      )}
+    </div>
   )
 }
