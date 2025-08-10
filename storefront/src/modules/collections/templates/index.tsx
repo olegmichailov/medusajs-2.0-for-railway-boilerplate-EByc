@@ -21,25 +21,25 @@ export default function CollectionTemplate({
   const sort = sortBy || "created_at"
 
   return (
-    <div className="content-container flex flex-col small:flex-row small:items-start py-6">
+    <div
+      // ⬇️ на мобиле обнуляем горизонтальные паддинги контейнера
+      className="content-container px-0 small:px-6 flex flex-col small:flex-row small:items-start py-6"
+    >
       <RefinementList sortBy={sort} />
 
       <div className="w-full">
-        <div className="mb-8 text-2xl-semi">
+        <div className="mb-8 text-2xl-semi px-0 small:px-0">
           <h1>{collection.title}</h1>
         </div>
 
-        {/* на мобиле растягиваем сетку на всю ширину, компенсируя внутренние паддинги контейнера */}
-        <div className="-mx-6 small:mx-0">
-          <Suspense fallback={<SkeletonProductGrid />}>
-            <PaginatedProducts
-              sortBy={sort}
-              page={pageNumber}
-              collectionId={collection.id}
-              countryCode={countryCode}
-            />
-          </Suspense>
-        </div>
+        <Suspense fallback={<SkeletonProductGrid />}>
+          <PaginatedProducts
+            sortBy={sort}
+            page={pageNumber}
+            collectionId={collection.id}
+            countryCode={countryCode}
+          />
+        </Suspense>
       </div>
     </div>
   )
