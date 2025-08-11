@@ -39,15 +39,28 @@ export default function EditorCanvas() {
   const [isCropping, setIsCropping] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
 
+  // mobile UI state
+  const [isMobileUI, setIsMobileUI] = useState(false)
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
+  const [mobileLayersOpen, setMobileLayersOpen] = useState(false)
+
+  // detect mobile by width
+  useEffect(() => {
+    const check = () => setIsMobileUI(window.innerWidth < 768)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
+  }, [])
+
   // autoscale
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const maxW = vw - 440
-    const maxH = vh - 200
-    const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
+    const reserveW = isMobileUI ? 24 : 440 // справа место под панель только на десктопе
+    const reserveH = isMobileUI ? 220 : 200 // низ под бар/маргины
+    const s = Math.min((vw - reserveW) / BASE_W, (vh - reserveH) / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
-  }, [showLayers])
+  }, [showLayers, isMobileUI])
 
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => id ? layers.find(l => l.id === id) || null : null
@@ -59,6 +72,16 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
     attachTransformer()
   }, [side, layers])
+
+  // disable page scroll/zoom while touching the stage (iOS)
+  useEffect(() => {
+    const cont = stageRef.current?.container()
+    if (!cont) return
+    cont.style.touchAction = "none" // modern iOS
+    const block = (e: TouchEvent) => { e.preventDefault() }
+    cont.addEventListener("touchmove", block, { passive: false })
+    return () => cont.removeEventListener("touchmove", block)
+  }, [])
 
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
@@ -75,15 +98,16 @@ export default function EditorCanvas() {
       uiLayerRef.current?.batchDraw()
       return
     }
-    const canDragNow = !["brush","erase","crop"].includes(tool) // видим хэндлы — можно таскать
+    const canDragNow = !["brush","erase","crop"].includes(tool)
     ;(n as any).draggable(canDragNow)
     trRef.current.nodes([n])
     trRef.current.getLayer()?.batchDraw()
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
-  // hotkeys (duplicate/delete + arrows)
+  // hotkeys (desktop only)
   useEffect(() => {
+    if (isMobileUI) return
     const onKey = (e: KeyboardEvent) => {
       const n = node(selectedId); if (!n) return
       const step = e.shiftKey ? 20 : 2
@@ -109,7 +133,7 @@ export default function EditorCanvas() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId])
+  }, [selectedId, isMobileUI])
 
   // strokes group (per side)
   const ensureStrokesGroup = () => {
@@ -151,7 +175,7 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // text (dblclick inline)
+  // text editor
   const inlineEdit = (t: Konva.Text) => {
     const st = stageRef.current; if (!st) return
     const rect = st.container().getBoundingClientRect()
@@ -174,10 +198,11 @@ export default function EditorCanvas() {
     area.addEventListener("blur", commit)
   }
 
-  const onAddText = () => {
+  // add text/shape helpers (центрированы под тап)
+  const addTextAt = (x:number, y:number) => {
     const t = new Konva.Text({
       text: "Your text",
-      x: BASE_W/2-180, y: BASE_H/2-40,
+      x: x - 180, y: y - 40,
       fontSize: 64, fontFamily: "Inter, system-ui, -apple-system, sans-serif",
       fill: brushColor, width: 360, align: "center",
     })
@@ -193,14 +218,26 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // shapes (создаются только по пустому клику)
-  const addShape = (kind: ShapeKind) => {
-    let n: AnyNode
-    if (kind === "circle")       n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
-    else if (kind === "square")  n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
-    else if (kind === "triangle")n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
-    else if (kind === "cross")   { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g }
-    else                         n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
+  const createShapeNode = (kind: ShapeKind, x:number, y:number, color:string): AnyNode => {
+    if (kind === "circle")       return new Konva.Circle({ x, y, radius: 160, fill: color })
+    if (kind === "square")       return new Konva.Rect({ x: x-160, y: y-160, width: 320, height: 320, fill: color })
+    if (kind === "triangle")     return new Konva.RegularPolygon({ x, y, sides: 3, radius: 200, fill: color })
+    if (kind === "cross") { const g=new Konva.Group({x:x-160,y:y-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:color})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:color})); return g }
+    if (kind === "line")         return new Konva.Line({ points: [x-200, y, x+200, y], stroke: color, strokeWidth: 16, lineCap: "round" })
+    if (kind === "star")         return new Konva.Star({ x, y, numPoints: 5, innerRadius: 110, outerRadius: 200, fill: color })
+    // heart path
+    const g = new Konva.Group({ x, y })
+    const path = new Konva.Path({
+      data: "M0,-80 C35,-120 110,-120 110,-40 C110,20 60,60 0,100 C-60,60 -110,20 -110,-40 C-110,-120 -35,-120 0,-80 Z",
+      fill: color,
+    })
+    path.offsetX(path.getClientRect().width/2)
+    path.offsetY(path.getClientRect().height/2)
+    g.add(path)
+    return g
+  }
+  const addShapeAt = (kind: ShapeKind, x:number, y:number) => {
+    const n = createShapeNode(kind, x, y, brushColor)
     ;(n as any).id(uid())
     const id = (n as any)._id
     const meta = baseMeta(`shape ${seqs.shape}`)
@@ -238,7 +275,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // crop (images only) — оставил как есть
+  // crop (images only) — как было
   const startCrop = () => {
     const n = node(selectedId)
     if (!n || !(n instanceof Konva.Image)) return
@@ -269,7 +306,7 @@ export default function EditorCanvas() {
     uiLayerRef.current?.batchDraw()
   }
 
-  // export: два файла подряд (mockup + art)
+  // export (2 файла)
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -277,11 +314,9 @@ export default function EditorCanvas() {
     layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
     uiLayerRef.current?.visible(false)
 
-    // 1) with mockup
     bgLayerRef.current?.visible(true); st.draw()
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
-    // 2) art only
     bgLayerRef.current?.visible(false); st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
@@ -297,7 +332,10 @@ export default function EditorCanvas() {
 
   // pointer routing — создаём по пустоте, по объекту двигаем
   const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+  const touchPrevent = (e: any) => { e.evt?.preventDefault?.() } // блокируем прокрутку страницы
+
   const onDown = (e: any) => {
+    touchPrevent(e)
     if (isCropping) return
     const tgt = e.target as Konva.Node
     const clickedEmpty = tgt === stageRef.current
@@ -306,12 +344,17 @@ export default function EditorCanvas() {
     if (tool==="brush" || tool==="erase") {
       startStroke(p.x/scale, p.y/scale)
     } else if (tool==="text") {
-      if (clickedEmpty) onAddText()
+      if (clickedEmpty) addTextAt(p.x/scale, p.y/scale)
     } else if (tool==="shape") {
-      if (clickedEmpty) addShape(shapeKind)
+      if (clickedEmpty) addShapeAt(shapeKind, p.x/scale, p.y/scale)
     }
   }
-  const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
+  const onMove = (e:any) => {
+    if (isDrawing) {
+      touchPrevent(e)
+      const p = getPos(); appendStroke(p.x/scale, p.y/scale)
+    }
+  }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
   // panel items
@@ -327,7 +370,7 @@ export default function EditorCanvas() {
       }))
   }, [layers, side])
 
-  // meta updates
+  // meta updates + layer ops
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
     setLayers(p => p.map(l => {
       if (l.id !== id) return l
@@ -351,81 +394,36 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay]); select(newLay.id)
     drawLayerRef.current?.batchDraw()
   }
-
-  // REORDER: точное before/after + пересборка zIndex по текущей стороне
   const onReorder = (srcId: string, destId: string, place: "before" | "after") => {
     setLayers((prev) => {
-      // разрезаем на две группы: активная сторона и остальные
       const current = prev.filter(l => l.side === side)
       const others  = prev.filter(l => l.side !== side)
 
       const orderTopToBottom = current
         .sort((a,b)=> a.node.zIndex() - b.node.zIndex())
-        .reverse() // top..bottom (так они отображаются в панели)
+        .reverse()
 
       const srcIdx = orderTopToBottom.findIndex(l=>l.id===srcId)
       const dstIdx = orderTopToBottom.findIndex(l=>l.id===destId)
       if (srcIdx === -1 || dstIdx === -1) return prev
 
-      // вынимаем src
       const src = orderTopToBottom.splice(srcIdx,1)[0]
-      // рассчитываем новую позицию (before/after относительно dst в списке сверху-вниз)
       const insertAt = place==="before" ? dstIdx : dstIdx+1
       orderTopToBottom.splice(insertAt > orderTopToBottom.length ? orderTopToBottom.length : insertAt, 0, src)
 
-      // теперь превращаем обратно в bottom..top и назначаем точные zIndex
       const bottomToTop = [...orderTopToBottom].reverse()
-      bottomToTop.forEach((l, i) => {
-        // гарантированно ставим индекс в пределах drawLayer
-        ;(l.node as any).zIndex(i)
-      })
+      bottomToTop.forEach((l, i) => { ;(l.node as any).zIndex(i) })
       drawLayerRef.current?.batchDraw()
 
-      // собрать новый массив prev-формата: сохраняем реальный порядок узлов (по zIndex)
-      const sortedCurrent = [...bottomToTop] // уже bottom..top
+      const sortedCurrent = [...bottomToTop]
       return [...others, ...sortedCurrent]
     })
-
-    // вернуть выделение и трансформер
     select(srcId)
     requestAnimationFrame(attachTransformer)
   }
 
   const onChangeBlend   = (id: string, blend: string) => updateMeta(id, { blend: blend as Blend })
   const onChangeOpacity = (id: string, opacity: number) => updateMeta(id, { opacity })
-
-  // selected props for toolbar
-  const sel = find(selectedId)
-  const selectedKind: "image"|"shape"|"text"|"strokes"|null = sel?.type ?? null
-  const selectedProps =
-    sel?.type === "text"  ? {
-      text: (sel.node as Konva.Text).text(),
-      fontSize: (sel.node as Konva.Text).fontSize(),
-      fontFamily: (sel.node as Konva.Text).fontFamily(),
-      fill: (sel.node as any).fill?.() ?? "#000000",
-    }
-    : sel?.type === "shape" ? {
-      fill: (sel.node as any).fill?.() ?? "#000000",
-      stroke: (sel.node as any).stroke?.() ?? "#000000",
-      strokeWidth: (sel.node as any).strokeWidth?.() ?? 0,
-    }
-    : {}
-
-  const setSelectedFill       = (hex:string) => { if (!sel) return; if ((sel.node as any).fill) (sel.node as any).fill(hex); drawLayerRef.current?.batchDraw() }
-  const setSelectedStroke     = (hex:string) => { if (!sel) return; if ((sel.node as any).stroke) (sel.node as any).stroke(hex); drawLayerRef.current?.batchDraw() }
-  const setSelectedStrokeW    = (w:number)    => { if (!sel) return; if ((sel.node as any).strokeWidth) (sel.node as any).strokeWidth(w); drawLayerRef.current?.batchDraw() }
-  const setSelectedText       = (t:string)    => { const n = sel?.node as Konva.Text; if (!n) return; n.text(t); drawLayerRef.current?.batchDraw() }
-  const setSelectedFontSize   = (n:number)    => { const t = sel?.node as Konva.Text; if (!t) return; t.fontSize(n); drawLayerRef.current?.batchDraw() }
-  const setSelectedFontFamily = (name:string) => { const t = sel?.node as Konva.Text; if (!t) return; t.fontFamily(name); drawLayerRef.current?.batchDraw() }
-  const setSelectedColor      = (hex:string)  => {
-    if (!sel) return
-    if (sel.type === "text") { (sel.node as Konva.Text).fill(hex) }
-    else if (sel.type === "shape") {
-      if ((sel.node as any).fill) (sel.node as any).fill(hex)
-      else if ((sel.node as any).stroke) (sel.node as any).stroke(hex)
-    }
-    drawLayerRef.current?.batchDraw()
-  }
 
   return (
     <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
@@ -436,25 +434,45 @@ export default function EditorCanvas() {
         brushSize={brushSize} setBrushSize={(n)=>set({ brushSize: n })}
         shapeKind={shapeKind} setShapeKind={(k)=>set({ shapeKind: k })}
         onUploadImage={onUploadImage}
-        onAddText={onAddText}
-        onAddShape={addShape}
+        onAddText={()=>set({ tool: "text" })}
+        onAddShape={(k:ShapeKind)=>{ set({ tool: "shape", shapeKind: k }) }}
         startCrop={startCrop} applyCrop={applyCrop} cancelCrop={cancelCrop} isCropping={isCropping}
         onDownloadFront={()=>downloadBoth("front")}
         onDownloadBack={()=>downloadBoth("back")}
         toggleLayers={toggleLayers}
         layersOpen={showLayers}
-        selectedKind={selectedKind as any}
-        selectedProps={selectedProps}
-        setSelectedFill={setSelectedFill}
-        setSelectedStroke={setSelectedStroke}
-        setSelectedStrokeW={setSelectedStrokeW}
-        setSelectedText={setSelectedText}
-        setSelectedFontSize={setSelectedFontSize}
-        setSelectedFontFamily={setSelectedFontFamily}
-        setSelectedColor={setSelectedColor}
+        isMobileUI={isMobileUI}
+        mobileSheets={{
+          toolsOpen: mobileToolsOpen,
+          setToolsOpen: setMobileToolsOpen,
+          layersOpen: mobileLayersOpen,
+          setLayersOpen: setMobileLayersOpen
+        }}
+        selectedKind={(find(selectedId)?.type ?? null) as any}
+        selectedProps={
+          find(selectedId)?.type === "text" ? {
+            text: (find(selectedId)!.node as Konva.Text).text(),
+            fontSize: (find(selectedId)!.node as Konva.Text).fontSize(),
+            fontFamily: (find(selectedId)!.node as Konva.Text).fontFamily(),
+            fill: (find(selectedId)!.node as any).fill?.() ?? "#000000",
+          } :
+          find(selectedId)?.type === "shape" ? {
+            fill: (find(selectedId)!.node as any).fill?.() ?? "#000000",
+            stroke: (find(selectedId)!.node as any).stroke?.() ?? "#000000",
+            strokeWidth: (find(selectedId)!.node as any).strokeWidth?.() ?? 0,
+          } : {}
+        }
+        setSelectedFill={(hex:string)=>{ const s=find(selectedId); if(!s) return; if((s.node as any).fill) (s.node as any).fill(hex); drawLayerRef.current?.batchDraw() }}
+        setSelectedStroke={(hex:string)=>{ const s=find(selectedId); if(!s) return; if((s.node as any).stroke) (s.node as any).stroke(hex); drawLayerRef.current?.batchDraw() }}
+        setSelectedStrokeW={(w:number)=>{ const s=find(selectedId); if(!s) return; if((s.node as any).strokeWidth) (s.node as any).strokeWidth(w); drawLayerRef.current?.batchDraw() }}
+        setSelectedText={(t:string)=>{ const n=find(selectedId)?.node as Konva.Text; if(!n) return; n.text(t); drawLayerRef.current?.batchDraw() }}
+        setSelectedFontSize={(n:number)=>{ const t=find(selectedId)?.node as Konva.Text; if(!t) return; t.fontSize(n); drawLayerRef.current?.batchDraw() }}
+        setSelectedFontFamily={(name:string)=>{ const t=find(selectedId)?.node as Konva.Text; if(!t) return; t.fontFamily(name); drawLayerRef.current?.batchDraw() }}
+        setSelectedColor={(hex:string)=>{ const s=find(selectedId); if(!s) return; if(s.type==="text"){ (s.node as Konva.Text).fill(hex) } else if(s.type==="shape"){ if((s.node as any).fill) (s.node as any).fill(hex); else if((s.node as any).stroke) (s.node as any).stroke(hex) } drawLayerRef.current?.batchDraw() }}
       />
 
-      {showLayers && (
+      {/* mobile layers sheet */}
+      {isMobileUI ? (
         <LayersPanel
           items={layerItems}
           selectId={selectedId}
@@ -466,15 +484,39 @@ export default function EditorCanvas() {
           onReorder={onReorder}
           onChangeBlend={onChangeBlend}
           onChangeOpacity={onChangeOpacity}
+          mode="mobile"
+          open={mobileLayersOpen}
+          onClose={()=>setMobileLayersOpen(false)}
         />
+      ) : (
+        showLayers && (
+          <LayersPanel
+            items={layerItems}
+            selectId={selectedId}
+            onSelect={onLayerSelect}
+            onToggleVisible={onToggleVisible}
+            onToggleLock={onToggleLock}
+            onDelete={onDelete}
+            onDuplicate={onDuplicate}
+            onReorder={onReorder}
+            onChangeBlend={onChangeBlend}
+            onChangeOpacity={onChangeOpacity}
+          />
+        )
       )}
 
       <div className="absolute inset-0 flex items-center justify-center">
         <Stage
-          width={viewW} height={viewH} scale={{ x: scale, y: scale }}
+          width={viewW}
+          height={viewH}
+          scale={{ x: scale, y: scale }}
           ref={stageRef}
-          onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
-          onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+          onMouseDown={onDown}
+          onMouseMove={onMove}
+          onMouseUp={onUp}
+          onTouchStart={onDown}
+          onTouchMove={onMove}
+          onTouchEnd={onUp}
         >
           <Layer ref={bgLayerRef} listening={false}>
             {side==="front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H} />}
