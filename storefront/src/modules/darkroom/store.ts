@@ -1,38 +1,40 @@
-
 "use client"
-
 import { create } from "zustand"
 
 export type Side = "front" | "back"
-export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
-export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line" | "star" | "heart"
+export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "image" | "crop"
+export type ShapeKind = "circle" | "square" | "triangle" | "line" | "cross" | "star" | "heart"
 export type Blend =
-  | "source-over" | "destination-over" | "lighter"
-  | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
+  | "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge"
+  | "color-burn" | "hard-light" | "soft-light" | "difference" | "exclusion" | "hue"
+  | "saturation" | "color" | "luminosity" | "lighter" | "destination-out"
 
-type State = {
+type UIState = {
   side: Side
   tool: Tool
+  shapeKind: ShapeKind
   brushColor: string
   brushSize: number
-  shapeKind: ShapeKind
   selectedId: string | null
   showLayers: boolean
-  set: (p: Partial<State>) => void
+  fontFamily: string
+  fontSize: number
+  set: (patch: Partial<UIState>) => void
   select: (id: string | null) => void
   toggleLayers: () => void
 }
 
-// дефолт — Brush (Move показываем первым, но не активируем)
-export const useDarkroom = create<State>((set) => ({
+export const useDarkroom = create<UIState>((set) => ({
   side: "front",
   tool: "brush",
-  brushColor: "#ff2a7f",
-  brushSize: 36,
   shapeKind: "circle",
+  brushColor: "#ff2b7a",
+  brushSize: 36,
   selectedId: null,
   showLayers: true,
-  set: (p) => set(p),
+  fontFamily: "Inter",
+  fontSize: 64,
+  set: (patch) => set(patch),
   select: (id) => set({ selectedId: id }),
-  toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
+  toggleLayers: () => set(s => ({ showLayers: !s.showLayers }))
 }))
