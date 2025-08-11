@@ -4,7 +4,7 @@ import { create } from "zustand"
 
 export type Side = "front" | "back"
 export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
-export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
+export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line" | "star" | "heart"
 export type Blend =
   | "source-over" | "destination-over" | "lighter"
   | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
