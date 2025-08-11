@@ -1,10 +1,11 @@
+// storefront/src/modules/checkout/components/payment-wrapper/stripe-wrapper.tsx
 "use client"
 
-import { Elements } from "@stripe/react-stripe-js"
-import type { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
-import { HttpTypes } from "@medusajs/types"
 import React from "react"
-import { StripeContext } from "@" /* путь alias ниже в index.tsx, см. импорт */ + "modules/checkout/components/payment-wrapper"
+import type { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
+import { Elements } from "@stripe/react-stripe-js"
+import type { HttpTypes } from "@medusajs/types"
+import { StripeContext } from "@/modules/checkout/components/payment-wrapper"
 
 type Props = {
   paymentSession: HttpTypes.StorePaymentSession
@@ -14,10 +15,8 @@ type Props = {
 }
 
 /**
- * Обёртка, которая:
- * - НЕ кидает исключений, если данных мало
- * - отдаёт StripeContext=false, пока Elements НЕ смонтирован
- * - включает StripeContext=true ТОЛЬКО внутри <Elements>
+ * Безопасная обёртка для Stripe Elements.
+ * Если чего-то не хватает (ключ/промис/client_secret), просто отдаёт детей как есть — без падений.
  */
 const StripeWrapper: React.FC<Props> = ({
   paymentSession,
@@ -25,35 +24,25 @@ const StripeWrapper: React.FC<Props> = ({
   stripePromise,
   children,
 }) => {
-  const clientSecret =
-    (paymentSession?.data?.client_secret as string | undefined) || undefined
+  const clientSecret = (paymentSession?.data as any)?.client_secret as
+    | string
+    | undefined
 
-  const ready =
-    Boolean(stripeKey) && Boolean(stripePromise) && typeof clientSecret === "string"
-
-  if (!ready) {
-    if (typeof window !== "undefined") {
-      console.warn("[StripeWrapper] Elements not mounted", {
-        hasStripeKey: !!stripeKey,
-        hasStripePromise: !!stripePromise,
-        hasClientSecret: !!clientSecret,
-        provider: paymentSession?.provider_id,
-      })
-    }
-    // Критично: здесь контекст FALSE → Payment не попытается рендерить PaymentElement
-    return <StripeContext.Provider value={false}>{children}</StripeContext.Provider>
+  if (!stripeKey || !stripePromise || !clientSecret) {
+    // ничего не монтируем — вернём детей, чтобы UI не падал
+    return <>{children}</>
   }
 
   const options: StripeElementsOptions = {
     clientSecret,
-    appearance: { theme: "stripe" },
     locale: "en",
+    appearance: { theme: "stripe" },
   }
 
+  // key заставляет Elements корректно переинициализироваться при смене client_secret
   return (
-    <Elements key={clientSecret} options={options} stripe={stripePromise!}>
-      {/* Здесь контекст TRUE только если Elements реально смонтирован */}
-      <StripeContext.Provider value={true}>{children}</StripeContext.Provider>
+    <Elements key={clientSecret} options={options} stripe={stripePromise}>
+      {children}
     </Elements>
   )
 }
