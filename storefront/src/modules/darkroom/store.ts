@@ -3,39 +3,34 @@
 import { create } from "zustand"
 
 export type Side = "front" | "back"
-export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "image" | "crop"
-export type Blend = "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten"
+export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
 export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
+export type Blend =
+  | "source-over" | "destination-over" | "lighter"
+  | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
 
-type UIState = {
-  showLayers: boolean
-  toggleLayers: () => void
-}
-
-type DrawState = {
+type State = {
   side: Side
   tool: Tool
   brushColor: string
   brushSize: number
   shapeKind: ShapeKind
   selectedId: string | null
-  isCropping: boolean
-  set: (s: Partial<DrawState & UIState>) => void
+  showLayers: boolean
+  set: (p: Partial<State>) => void
   select: (id: string | null) => void
+  toggleLayers: () => void
 }
 
-export const useDarkroom = create<UIState & DrawState>((set) => ({
-  showLayers: true,
-  toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
-
+export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush",
-  brushColor: "#ff2a7a",
-  brushSize: 6,
+  tool: "move",
+  brushColor: "#ff2a7f",
+  brushSize: 36,
   shapeKind: "circle",
   selectedId: null,
-  isCropping: false,
-
-  set: (s) => set(s),
+  showLayers: true,
+  set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
+  toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
 }))
