@@ -1,10 +1,12 @@
 "use client"
 
-import { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
 import { Elements } from "@stripe/react-stripe-js"
+import type { Stripe, StripeElementsOptions } from "@stripe/stripe-js"
 import { HttpTypes } from "@medusajs/types"
+import React from "react"
+import { StripeContext } from "@" /* путь alias ниже в index.tsx, см. импорт */ + "modules/checkout/components/payment-wrapper"
 
-type StripeWrapperProps = {
+type Props = {
   paymentSession: HttpTypes.StorePaymentSession
   stripeKey?: string
   stripePromise: Promise<Stripe | null> | null
@@ -12,47 +14,46 @@ type StripeWrapperProps = {
 }
 
 /**
- * Безопасная обёртка Stripe Elements:
- * - не бросает исключений во время рендера;
- * - если нет данных для инициализации, просто рендерит детей как есть.
+ * Обёртка, которая:
+ * - НЕ кидает исключений, если данных мало
+ * - отдаёт StripeContext=false, пока Elements НЕ смонтирован
+ * - включает StripeContext=true ТОЛЬКО внутри <Elements>
  */
-const StripeWrapper: React.FC<StripeWrapperProps> = ({
+const StripeWrapper: React.FC<Props> = ({
   paymentSession,
   stripeKey,
   stripePromise,
   children,
 }) => {
-  const clientSecret = paymentSession?.data?.client_secret as
-    | string
-    | undefined
+  const clientSecret =
+    (paymentSession?.data?.client_secret as string | undefined) || undefined
 
-  // если что-то не готово — ничего не падает, просто возвращаем детей
-  if (!stripeKey || !stripePromise || !clientSecret) {
+  const ready =
+    Boolean(stripeKey) && Boolean(stripePromise) && typeof clientSecret === "string"
+
+  if (!ready) {
     if (typeof window !== "undefined") {
-      // только в браузере, чтобы не шуметь на сервере
-      console.warn(
-        "[StripeWrapper] Elements not mounted:",
-        {
-          hasStripeKey: !!stripeKey,
-          hasStripePromise: !!stripePromise,
-          hasClientSecret: !!clientSecret,
-          provider: paymentSession?.provider_id,
-        }
-      )
+      console.warn("[StripeWrapper] Elements not mounted", {
+        hasStripeKey: !!stripeKey,
+        hasStripePromise: !!stripePromise,
+        hasClientSecret: !!clientSecret,
+        provider: paymentSession?.provider_id,
+      })
     }
-    return <>{children}</>
+    // Критично: здесь контекст FALSE → Payment не попытается рендерить PaymentElement
+    return <StripeContext.Provider value={false}>{children}</StripeContext.Provider>
   }
 
   const options: StripeElementsOptions = {
     clientSecret,
-    locale: "en",
     appearance: { theme: "stripe" },
+    locale: "en",
   }
 
-  // key заставляет Elements переинициализироваться при смене client_secret
   return (
-    <Elements key={clientSecret} options={options} stripe={stripePromise}>
-      {children}
+    <Elements key={clientSecret} options={options} stripe={stripePromise!}>
+      {/* Здесь контекст TRUE только если Elements реально смонтирован */}
+      <StripeContext.Provider value={true}>{children}</StripeContext.Provider>
     </Elements>
   )
 }
