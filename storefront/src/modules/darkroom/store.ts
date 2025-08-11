@@ -4,9 +4,11 @@ import { create } from "zustand"
 
 export type Side = "front" | "back"
 export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
-export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
+export type ShapeKind =
+  | "circle" | "square" | "triangle" | "cross" | "line" | "star" | "heart"
 export type Blend =
-  | "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
+  | "source-over" | "multiply" | "screen" | "overlay"
+  | "darken" | "lighten" | "xor" | "lighter"
 
 type State = {
   side: Side
