@@ -16,7 +16,8 @@ type Props = {
 
 /**
  * Безопасная обёртка для Stripe Elements.
- * Если чего-то не хватает (ключ/промис/client_secret), просто отдаёт детей как есть — без падений.
+ * ВАЖНО: контекст StripeContext = true только если Elements реально смонтирован.
+ * Иначе — возвращаем детей как есть (контекст не задаём), чтобы UI не пытался звать useElements().
  */
 const StripeWrapper: React.FC<Props> = ({
   paymentSession,
@@ -29,7 +30,7 @@ const StripeWrapper: React.FC<Props> = ({
     | undefined
 
   if (!stripeKey || !stripePromise || !clientSecret) {
-    // ничего не монтируем — вернём детей, чтобы UI не падал
+    // Elements ещё нет — отдаём детей без провайдера (stripeReady=false)
     return <>{children}</>
   }
 
@@ -39,11 +40,13 @@ const StripeWrapper: React.FC<Props> = ({
     appearance: { theme: "stripe" },
   }
 
-  // key заставляет Elements корректно переинициализироваться при смене client_secret
   return (
-    <Elements key={clientSecret} options={options} stripe={stripePromise}>
-      {children}
-    </Elements>
+    <StripeContext.Provider value={true}>
+      {/* key реинициализирует Elements при смене client_secret */}
+      <Elements key={clientSecret} options={options} stripe={stripePromise}>
+        {children}
+      </Elements>
+    </StripeContext.Provider>
   )
 }
 
