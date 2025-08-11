@@ -28,9 +28,9 @@ export default function EditorCanvas() {
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
   const stageRef     = useRef<Konva.Stage>(null)
-  const bgLayerRef   = useRef<Konva.Layer>(null)   // mockup
-  const drawLayerRef = useRef<Konva.Layer>(null)   // art
-  const uiLayerRef   = useRef<Konva.Layer>(null)   // UI
+  const bgLayerRef   = useRef<Konva.Layer>(null)
+  const drawLayerRef = useRef<Konva.Layer>(null)
+  const uiLayerRef   = useRef<Konva.Layer>(null)
 
   const trRef        = useRef<Konva.Transformer>(null)
   const cropRectRef  = useRef<Konva.Rect>(null)
@@ -39,7 +39,11 @@ export default function EditorCanvas() {
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [isCropping, setIsCropping] = useState(false)
+
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
+  const [activeStrokesIdBySide, setActiveStrokesIdBySide] = useState<{front:string|null, back:string|null}>({front:null, back:null})
+  const [lastNonBrushTool, setLastNonBrushTool] = useState<string>("move")
+  useEffect(()=>{ if (tool!=="brush" && tool!=="erase") setLastNonBrushTool(tool) }, [tool])
 
   // autoscale
   const { viewW, viewH, scale } = useMemo(() => {
@@ -67,7 +71,7 @@ export default function EditorCanvas() {
     ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  // Transformer/Move — FRIS 0728: move разрешён всегда, когда не рисуем/не кропим
+  // Transformer/Move
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -83,36 +87,70 @@ export default function EditorCanvas() {
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
-  // nudging by arrows
+  // shortcuts: duplicate/copy/paste
+  const clipboard = useRef<Konva.Node | null>(null)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const n = node(selectedId); if (!n) return
+      const n = node(selectedId)
+      if (e.metaKey || e.ctrlKey) {
+        const k = e.key.toLowerCase()
+        if (k === "d" && n) {
+          e.preventDefault()
+          const clone = n.clone({ x: n.x()+20, y: n.y()+20 }); (clone as any).id(uid())
+          drawLayerRef.current?.add(clone)
+          setLayers(p => [...p, { id: (clone as any)._id, side, node: clone, meta: { ...find(selectedId)!.meta, name: find(selectedId)!.meta.name+" copy" }, type: find(selectedId)!.type }])
+          select((clone as any)._id)
+          drawLayerRef.current?.batchDraw()
+        }
+        if (k === "c" && n) { e.preventDefault(); clipboard.current = n.clone() }
+        if (k === "v" && clipboard.current) {
+          e.preventDefault()
+          const c = clipboard.current.clone({ x: (n?.x() ?? BASE_W/2)+20, y: (n?.y() ?? BASE_H/2)+20 }); (c as any).id(uid())
+          drawLayerRef.current?.add(c)
+          const src = n ? find(selectedId)! : { meta: baseMeta("paste"), type: "shape" as LayerType }
+          setLayers(p => [...p, { id: (c as any)._id, side, node: c, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }])
+          select((c as any)._id)
+          drawLayerRef.current?.batchDraw()
+        }
+      }
+      // nudging
+      if (!n) return
       const step = e.shiftKey ? 20 : 2
       if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) e.preventDefault()
-      if (e.key === "ArrowLeft")  { n.x(n.x() - step) }
-      if (e.key === "ArrowRight") { n.x(n.x() + step) }
-      if (e.key === "ArrowUp")    { n.y(n.y() - step) }
-      if (e.key === "ArrowDown")  { n.y(n.y() + step) }
+      if (e.key === "ArrowLeft")  n.x(n.x() - step)
+      if (e.key === "ArrowRight") n.x(n.x() + step)
+      if (e.key === "ArrowUp")    n.y(n.y() - step)
+      if (e.key === "ArrowDown")  n.y(n.y() + step)
       n.getLayer()?.batchDraw()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId])
+  }, [selectedId, side])
 
-  // strokes group per side
+  // strokes group (persist until tool changes от кисти к другому)
   const ensureStrokesGroup = () => {
-    const exist = [...layers].reverse().find(l => l.side === side && l.type === "strokes")
-    if (exist) return exist
-    const g = new Konva.Group({ x: 0, y: 0 })
-    ;(g as any).id(uid())
-    const id = (g as any)._id
+    let id = activeStrokesIdBySide[side]
+    if (id) {
+      const found = layers.find(l => l.id === id && l.side === side && l.type === "strokes")
+      if (found) return found
+      id = null
+    }
+    const g = new Konva.Group({ x: 0, y: 0 }); (g as any).id(uid())
+    const gid = (g as any)._id
     const meta = baseMeta(`strokes ${seqs.strokes}`)
     drawLayerRef.current?.add(g)
-    const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
+    const newLay: AnyLayer = { id: gid, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
+    setActiveStrokesIdBySide(s => ({ ...s, [side]: gid }))
     return newLay
   }
+  // когда уходим с кисти — сбрасываем активный strokes, чтобы при возврате создать новый
+  useEffect(() => {
+    if (tool !== "brush" && tool !== "erase") {
+      setActiveStrokesIdBySide(s => ({ ...s, [side]: null }))
+    }
+  }, [tool, side])
 
   // Upload image
   const onUploadImage = (file: File) => {
@@ -123,12 +161,7 @@ export default function EditorCanvas() {
       img.onload = () => {
         const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
         const w = img.width * ratio, h = img.height * ratio
-        const kimg = new Konva.Image({
-          image: img,
-          x: BASE_W/2 - w/2,
-          y: BASE_H/2 - h/2,
-          width: w, height: h,
-        })
+        const kimg = new Konva.Image({ image: img, x: BASE_W/2 - w/2, y: BASE_H/2 - h/2, width: w, height: h })
         ;(kimg as any).id(uid())
         const id = (kimg as any)._id
         const meta = baseMeta(`image ${seqs.image}`)
@@ -193,7 +226,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // Shapes
+  // Shapes (добавлены star, heart)
   const addShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")    n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
@@ -204,8 +237,17 @@ export default function EditorCanvas() {
       g.add(new Konva.Rect({ width: 320, height: 60, y: 130, fill: brushColor }))
       g.add(new Konva.Rect({ width: 60, height: 320, x: 130, fill: brushColor }))
       n = g
-    } else {
+    } else if (kind === "line") {
       n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
+    } else if (kind === "star") {
+      n = new Konva.Star({ x: BASE_W/2, y: BASE_H/2, numPoints: 5, innerRadius: 90, outerRadius: 180, fill: brushColor })
+    } else { // heart
+      const path = new Konva.Path({
+        x: BASE_W/2-160, y: BASE_H/2-140,
+        data: "M170 30 C 170 -20, 100 -20, 100 30 C 100 70, 130 90, 170 120 C 210 90, 240 70, 240 30 C 240 -20, 170 -20, 170 30 Z",
+        scaleX: 1.2, scaleY: 1.2, fill: brushColor,
+      })
+      n = path
     }
     ;(n as any).id(uid())
     const id = (n as any)._id
@@ -234,8 +276,8 @@ export default function EditorCanvas() {
     setIsDrawing(true)
   }
   const appendStroke = (x: number, y: number) => {
-    const gLay = [...layers].reverse().find(l => l.side === side && l.type === "strokes")
-    const g = gLay?.node as Konva.Group | undefined
+    const id = activeStrokesIdBySide[side]
+    const g = id ? (find(id)?.node as Konva.Group) : undefined
     if (!g) return
     const last = g.getChildren().at(-1) as Konva.Line | undefined
     if (!last) return
@@ -275,26 +317,31 @@ export default function EditorCanvas() {
     uiLayerRef.current?.batchDraw()
   }
 
-  // Export: two PNGs (mockup + art)
+  // Export: два PNG (mockup + art) в полном BASE-размере
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
-    const pr = Math.max(2, Math.round(1/scale))
+    const prevScale = st.scaleX()
+    const prevW = st.width(), prevH = st.height()
+    st.scale({ x: 1, y: 1 })
+    st.width(BASE_W); st.height(BASE_H)
+
     const hidden: AnyNode[] = []
     layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
     uiLayerRef.current?.visible(false)
 
-    // 1) with mockup
+    // 1) с мокапом
     bgLayerRef.current?.visible(true); st.draw()
-    const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
+    const withMock = st.toDataURL({ pixelRatio: 2, mimeType: "image/png" })
 
-    // 2) art only (transparent)
+    // 2) только арт
     bgLayerRef.current?.visible(false); st.draw()
-    const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
+    const artOnly = st.toDataURL({ pixelRatio: 2, mimeType: "image/png" })
 
     // restore
     bgLayerRef.current?.visible(true)
     hidden.forEach(n => n.visible(true))
     uiLayerRef.current?.visible(true)
+    st.width(prevW); st.height(prevH); st.scale({ x: prevScale, y: prevScale })
     st.draw()
 
     const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
@@ -302,12 +349,12 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // pointer routing — создаём объекты только кликом в пустоту
+  // pointer routing — создаём объекты только кликом в пустоту сцены
   const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const onDown = (e: any) => {
     if (isCropping) return
-    const tgt = e.target as Konva.Node
-    const clickedEmpty = tgt === stageRef.current
+    const stage = stageRef.current?.getStage()
+    const clickedEmpty = e.target === stage // важно: кликаем именно по Stage
     const p = getPos()
 
     if (tool === "brush" || tool === "erase") {
@@ -321,8 +368,8 @@ export default function EditorCanvas() {
   const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
-  // items for LayersPanel
-  const layerItems = useMemo(() => {
+  // panel items
+  const layerItems = React.useMemo(() => {
     return layers
       .filter(l => l.side === side)
       .sort((a,b) => a.node.zIndex() - b.node.zIndex())
@@ -351,20 +398,20 @@ export default function EditorCanvas() {
   const onToggleLock    = (id: string) => { const l = layers.find(x => x.id === id)!; (l.node as any).locked = !l.meta.locked; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }
   const onDelete        = (id: string) => { setLayers(p => { const l = p.find(x => x.id === id); l?.node.destroy(); return p.filter(x => x.id !== id) }); if (selectedId === id) select(null); drawLayerRef.current?.batchDraw() }
   const onDuplicate     = (id: string) => {
-    const src = layers.find(l => l.id === id)!; const clone = src.node.clone()
-    clone.x(src.node.x() + 20); clone.y(src.node.y() + 20); (clone as any).id(uid())
+    const src = layers.find(l => l.id === id)!; const clone = src.node.clone({ x: src.node.x()+20, y: src.node.y()+20 }); (clone as any).id(uid())
     drawLayerRef.current?.add(clone)
-    const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name + " copy" }, type: src.type }
+    const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
     setLayers(p => [...p, newLay]); select(newLay.id)
     drawLayerRef.current?.batchDraw()
   }
 
-  // drag-n-drop order (drop = поставить поверх целевого)
-  const onReorder = (srcId: string, destId: string) => {
+  // drag-n-drop — вставка до/после целевого
+  const onReorder = (srcId: string, destId: string, before: boolean) => {
     const src = layers.find(l => l.id === srcId)?.node
     const dst = layers.find(l => l.id === destId)?.node
     if (!src || !dst) return
-    src.moveToIndex(dst.index())
+    const idx = before ? dst.index() : dst.index()+1
+    src.moveToIndex(idx)
     drawLayerRef.current?.batchDraw()
     setLayers(p => [...p])
   }
@@ -372,7 +419,7 @@ export default function EditorCanvas() {
   const onChangeBlend   = (id: string, blend: string) => updateMeta(id, { blend: blend as Blend })
   const onChangeOpacity = (id: string, opacity: number) => updateMeta(id, { opacity })
 
-  // selected props for Toolbar
+  // selected props for Toolbar (без изменений)
   const sel = find(selectedId)
   const selectedKind: "image"|"shape"|"text"|"strokes"|null = sel?.type ?? null
   const selectedProps =
@@ -389,7 +436,7 @@ export default function EditorCanvas() {
     }
     : {}
 
-  // setters from Toolbar
+  // setters to Toolbar
   const setSelectedFill       = (hex:string) => { if (!sel) return; if ((sel.node as any).fill) (sel.node as any).fill(hex); drawLayerRef.current?.batchDraw() }
   const setSelectedStroke     = (hex:string) => { if (!sel) return; if ((sel.node as any).stroke) (sel.node as any).stroke(hex); drawLayerRef.current?.batchDraw() }
   const setSelectedStrokeW    = (w:number)    => { if (!sel) return; if ((sel.node as any).strokeWidth) (sel.node as any).strokeWidth(w); drawLayerRef.current?.batchDraw() }
@@ -462,25 +509,15 @@ export default function EditorCanvas() {
           onTouchMove={onMove}
           onTouchEnd={onUp}
         >
-          {/* 1. Mockup */}
           <Layer ref={bgLayerRef} listening={false}>
             {side === "front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H} />}
             {side === "back"  && backMock  && <KImage image={backMock}  width={BASE_W} height={BASE_H} />}
           </Layer>
 
-          {/* 2. Art */}
           <Layer ref={drawLayerRef} />
 
-          {/* 3. UI */}
           <Layer ref={uiLayerRef}>
-            <Transformer
-              ref={trRef}
-              rotateEnabled
-              anchorSize={10}
-              borderStroke="black"
-              anchorStroke="black"
-              anchorFill="white"
-            />
+            <Transformer ref={trRef} rotateEnabled anchorSize={10} borderStroke="black" anchorStroke="black" anchorFill="white" />
             <Rect ref={cropRectRef} visible={false} stroke="black" dash={[6,4]} strokeWidth={2} draggable />
             <Transformer ref={cropTfRef} rotateEnabled={false} anchorSize={10} borderStroke="black" anchorStroke="black" />
           </Layer>
