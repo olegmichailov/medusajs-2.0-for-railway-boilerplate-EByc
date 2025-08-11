@@ -5,6 +5,7 @@ import Addresses from "@modules/checkout/components/addresses"
 import Payment from "@modules/checkout/components/payment"
 import Review from "@modules/checkout/components/review"
 import Shipping from "@modules/checkout/components/shipping"
+import Wrapper from "@modules/checkout/components/payment-wrapper"
 
 export default async function CheckoutForm({
   cart,
@@ -13,36 +14,34 @@ export default async function CheckoutForm({
   cart: HttpTypes.StoreCart | null
   customer: HttpTypes.StoreCustomer | null
 }) {
-  if (!cart) {
-    return null
-  }
+  if (!cart) return null
 
   const shippingMethods = await listCartShippingMethods(cart.id)
   const paymentMethods = await listCartPaymentMethods(cart.region?.id ?? "")
 
-  if (!shippingMethods || !paymentMethods) {
-    return null
-  }
+  if (!shippingMethods || !paymentMethods) return null
 
   return (
-    <div>
-      <div className="w-full grid grid-cols-1 gap-y-8">
-        <div>
-          <Addresses cart={cart} customer={customer} />
-        </div>
+    <Wrapper cart={cart}>
+      <div>
+        <div className="w-full grid grid-cols-1 gap-y-8">
+          <div>
+            <Addresses cart={cart} customer={customer} />
+          </div>
 
-        <div>
-          <Shipping cart={cart} availableShippingMethods={shippingMethods} />
-        </div>
+          <div>
+            <Shipping cart={cart} availableShippingMethods={shippingMethods} />
+          </div>
 
-        <div>
-          <Payment cart={cart} availablePaymentMethods={paymentMethods} />
-        </div>
+          <div>
+            <Payment cart={cart} availablePaymentMethods={paymentMethods} />
+          </div>
 
-        <div>
-          <Review cart={cart} />
+          <div>
+            <Review cart={cart} />
+          </div>
         </div>
       </div>
-    </div>
+    </Wrapper>
   )
 }
