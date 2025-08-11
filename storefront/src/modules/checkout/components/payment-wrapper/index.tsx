@@ -1,10 +1,10 @@
 "use client"
 
-import { loadStripe } from "@stripe/stripe-js"
 import React, { createContext } from "react"
-import StripeWrapper from "./stripe-wrapper"
+import { loadStripe } from "@stripe/stripe-js"
 import { PayPalScriptProvider } from "@paypal/react-paypal-js"
 import { HttpTypes } from "@medusajs/types"
+import StripeWrapper from "./stripe-wrapper"
 import { isPaypal, isStripe } from "@lib/constants"
 
 type WrapperProps = {
@@ -12,44 +12,48 @@ type WrapperProps = {
   children: React.ReactNode
 }
 
-/** Сообщаем дочерним, что мы внутри Stripe Elements на checkout */
+/** Контекст-флажок: внутри Stripe Elements или нет */
 export const StripeContext = createContext(false)
 
-const stripeKey = process.env.NEXT_PUBLIC_STRIPE_KEY
+// Поддержим оба названия ключа, чтобы не промахнуться переменной
+const stripeKey =
+  process.env.NEXT_PUBLIC_STRIPE_KEY ||
+  process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY ||
+  ""
+
 const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 
-const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || ""
 
 const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
-  const sessions = cart.payment_collection?.payment_sessions ?? []
+  const sessions = cart?.payment_collection?.payment_sessions ?? []
 
-  // Ищем stripe-сессию с client_secret (главное для Elements)
+  // Ищем stripe-сессию с client_secret
   const stripeSession = sessions.find(
     (s) => isStripe(s.provider_id) && s?.data?.client_secret
   )
 
   if (stripeSession && stripePromise) {
+    // ВАЖНО: сам StripeWrapper решает, когда контекст TRUE
     return (
-      <StripeContext.Provider value={true}>
-        <StripeWrapper
-          paymentSession={stripeSession}
-          stripeKey={stripeKey}
-          stripePromise={stripePromise}
-        >
-          {children}
-        </StripeWrapper>
-      </StripeContext.Provider>
+      <StripeWrapper
+        paymentSession={stripeSession}
+        stripeKey={stripeKey}
+        stripePromise={stripePromise}
+      >
+        {children}
+      </StripeWrapper>
     )
   }
 
-  // PayPal (если используется)
+  // Вариант PayPal через SDK (если понадобится)
   const paypalSession = sessions.find((s) => isPaypal(s.provider_id))
   if (paypalSession && paypalClientId && cart) {
     return (
       <PayPalScriptProvider
         options={{
           "client-id": paypalClientId,
-          currency: cart.currency_code.toUpperCase(),
+          currency: cart.currency_code?.toUpperCase?.() || "EUR",
           intent: "authorize",
           components: "buttons",
         }}
@@ -59,7 +63,8 @@ const Wrapper: React.FC<WrapperProps> = ({ cart, children }) => {
     )
   }
 
-  return <div>{children}</div>
+  // Ничего не готово — контекст FALSE
+  return <StripeContext.Provider value={false}>{children}</StripeContext.Provider>
 }
 
 export default Wrapper
