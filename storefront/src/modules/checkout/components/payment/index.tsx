@@ -1,7 +1,7 @@
 // storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -51,6 +51,18 @@ const Payment = ({
 
   // Показывать радиогруппу только если провайдеров больше одного
   const showProviderPicker = (availablePaymentMethods?.length ?? 0) > 1
+
+  // --- защита от параллельных инициализаций ---
+  const initInFlight = useRef(false)
+  const safeInitiate = async (provider_id: string) => {
+    if (initInFlight.current) return
+    try {
+      initInFlight.current = true
+      await initiatePaymentSession(cart, { provider_id })
+    } finally {
+      initInFlight.current = false
+    }
+  }
 
   // ---- 0) Форсим refresh при возврате из bfcache/фонового режима ----
   useEffect(() => {
@@ -138,7 +150,7 @@ const Payment = ({
       if (!choseStripe) return
       if (activeSession) return
       try {
-        await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
+        await safeInitiate(selectedPaymentMethod)
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to start payment session")
       }
@@ -149,6 +161,54 @@ const Payment = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
+
+  // ---- 6.1) Активная сессия должна соответствовать выбранному провайдеру ----
+  useEffect(() => {
+    if (!cart) return
+    if (!choseStripe) return
+    if (!selectedPaymentMethod) return
+    const activeProv = activeSession?.provider_id
+    if (activeProv && activeProv !== selectedPaymentMethod) {
+      safeInitiate(selectedPaymentMethod).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choseStripe, selectedPaymentMethod, activeSession?.provider_id, cart?.id])
+
+  // ---- 6.2) «Оздоровление» PI: пересоздаём, если он в неподходящем состоянии ----
+  useEffect(() => {
+    let cancelled = false
+    const heal = async () => {
+      try {
+        if (!stripe) return
+        if (!choseStripe) return
+        // client_secret из активной stripe-сессии
+        const cs =
+          (activeSession?.data && (activeSession.data as any).client_secret) ||
+          (cart?.payment_session?.data && (cart.payment_session.data as any).client_secret)
+        if (!cs) return
+
+        const { paymentIntent } = await stripe.retrievePaymentIntent(cs)
+        if (!paymentIntent || cancelled) return
+
+        // Нельзя повторно подтверждать такие PI — создаём новую сессию
+        const bad =
+          paymentIntent.status === "requires_capture" ||
+          paymentIntent.status === "canceled" ||
+          paymentIntent.status === "succeeded"
+
+        if (bad) {
+          await safeInitiate(selectedPaymentMethod)
+        }
+      } catch {
+        /* тихо */
+      }
+    }
+    heal()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stripe, choseStripe, activeSession?.id, selectedPaymentMethod, cart?.id])
 
   /**
    * ---- 7) Автозавершение после редиректа/без него ----
@@ -212,9 +272,7 @@ const Payment = ({
       const shouldInputCard = choseStripe && !activeSession
 
       if (!activeSession) {
-        await initiatePaymentSession(cart, {
-          provider_id: selectedPaymentMethod,
-        })
+        await safeInitiate(selectedPaymentMethod)
       }
 
       if (!shouldInputCard) {
@@ -295,13 +353,12 @@ const Payment = ({
                       <Text className="txt-medium-plus text-ui-fg-base mb-1">
                         Enter your payment details:
                       </Text>
-                      {/* Внутри — вкладки Card/Klarna/Revolut Pay */}
+                      {/* Внутри — вкладки Card/Klarna/PayPal/Revolut Pay и т.д. */}
                       <PaymentElement options={{ layout: "tabs" }} />
                     </div>
                   )}
                 </>
               ) : (
-                // Fallback: методы ещё не подтянулись — мягкая «кнопка обновить»
                 <div className="mt-4">
                   <Text className="txt-medium text-ui-fg-subtle">
                     Payment methods are loading…
@@ -383,7 +440,7 @@ const Payment = ({
               </div>
             </div>
           ) : paidByGiftcard ? (
-            <div className="flex flex-col w-1/3">
+            <div className="flex кол flex-col w-1/3">
               <Text className="txt-medium-plus text-ui-fg-base mb-1">
                 Payment method
               </Text>
