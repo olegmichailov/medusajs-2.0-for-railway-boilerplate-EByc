@@ -4,7 +4,8 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
-  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash
+  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
+  Star, Heart
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -24,16 +25,9 @@ export default function Toolbar({
   onDownloadFront, onDownloadBack,
   toggleLayers, layersOpen,
 
-  // контекст выделенного
-  selectedKind,
-  selectedProps,
-  setSelectedFill,
-  setSelectedStroke,
-  setSelectedStrokeW,
-  setSelectedText,
-  setSelectedFontSize,
-  setSelectedFontFamily,
-  setSelectedColor,
+  selectedKind, selectedProps,
+  setSelectedFill, setSelectedStroke, setSelectedStrokeW,
+  setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
 }: {
   side: Side
   setSide: (s: Side) => void
@@ -77,15 +71,8 @@ export default function Toolbar({
     window.addEventListener("mousemove", onDragMove)
     window.addEventListener("mouseup", onDragEnd)
   }
-  const onDragMove = (e: MouseEvent) => {
-    if (!drag.current) return
-    setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy })
-  }
-  const onDragEnd = () => {
-    drag.current = null
-    window.removeEventListener("mousemove", onDragMove)
-    window.removeEventListener("mouseup", onDragEnd)
-  }
+  const onDragMove = (e: MouseEvent) => { if (!drag.current) return; setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy }) }
+  const onDragEnd = () => { drag.current = null; window.removeEventListener("mousemove", onDragMove); window.removeEventListener("mouseup", onDragEnd) }
 
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,7 +82,7 @@ export default function Toolbar({
   }
 
   return (
-    <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
+    <div className={wrap + " fixed z-40 w-[400px] p-3"} style={{ left: pos.x, top: pos.y }}>
       <div className="flex items-center justify-between mb-3" onMouseDown={onDragStart}>
         <div className="text-[11px] uppercase">Tools</div>
         <div className="flex items-center gap-2">
@@ -108,7 +95,7 @@ export default function Toolbar({
 
       {open && (
         <div className="space-y-3">
-          {/* 7 квадратных кнопок-инструментов */}
+          {/* инструменты — Move первым, активна Brush */}
           <div className="grid grid-cols-7 gap-2">
             <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
             <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
@@ -121,7 +108,6 @@ export default function Toolbar({
               title="Crop"><Crop className={ico}/></button>
           </div>
 
-          {/* параметры кисти */}
           {(tool==="brush" || tool==="erase") && (
             <div className="space-y-2">
               <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
@@ -133,26 +119,23 @@ export default function Toolbar({
                 [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
               />
               <div className="text-[11px] uppercase">Color</div>
-              <input
-                type="color" value={brushColor}
-                onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
-                className="w-10 h-10 border border-black rounded-none"
-              />
+              <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-10 h-10 border border-black rounded-none"/>
             </div>
           )}
 
-          {/* выбор фигур */}
           {tool==="shape" && (
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-7 gap-2">
               <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("star")}     title="Star"><Star className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("heart")}    title="Heart"><Heart className={ico}/></button>
             </div>
           )}
 
-          {/* КОНТЕКСТ ВЫДЕЛЕННОГО */}
+          {/* выделенное */}
           {selectedKind && (
             <div className="space-y-2 border-t pt-2">
               <div className="text-[11px] uppercase tracking-wide">Selected: {selectedKind}</div>
@@ -214,12 +197,16 @@ export default function Toolbar({
             </div>
           )}
 
-          {/* стороны + экспорт */}
-          <div className="grid grid-cols-4 gap-2">
-            <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
-            <button className={clx(btn, side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
-            <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
-            <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
+          {/* Front/Back — сдвоенные длинные кнопки */}
+          <div className="grid grid-cols-1 gap-2">
+            <div className="flex items-center gap-2">
+              <button className={clx("flex-1 h-10 border rounded-none px-3 text-left", side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
+              <button className={btn+" h-10"} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className={clx("flex-1 h-10 border rounded-none px-3 text-left", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>Back</button>
+              <button className={btn+" h-10"} onClick={onDownloadBack} title="Download back"><Download className={ico}/></button>
+            </div>
           </div>
         </div>
       )}
