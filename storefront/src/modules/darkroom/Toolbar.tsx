@@ -4,14 +4,14 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
-  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash, Star, Heart
+  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
-const btn  = "w-9 h-9 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
-const ico  = "w-4 h-4"
+const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
+const ico  = "w-5 h-5"
 
 export default function Toolbar({
   side, setSide,
@@ -62,7 +62,7 @@ export default function Toolbar({
   }
 
   return (
-    <div className={wrap + " fixed z-40 w-[360px] p-3"} style={{ left: pos.x, top: pos.y }}>
+    <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
       <div className="flex items-center justify-between mb-3" onMouseDown={onDragStart}>
         <div className="text-[11px] uppercase">Tools</div>
         <div className="flex items-center gap-2">
@@ -75,7 +75,6 @@ export default function Toolbar({
 
       {open && (
         <div className="space-y-3">
-          {/* инструменты */}
           <div className="grid grid-cols-7 gap-2">
             <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
             <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
@@ -88,86 +87,98 @@ export default function Toolbar({
               title="Crop"><Crop className={ico}/></button>
           </div>
 
-          {/* выбор фигур */}
+          {(tool==="brush" || tool==="erase") && (
+            <div className="space-y-2">
+              <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
+              <input
+                type="range" min={1} max={120} value={brushSize}
+                onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
+                className="w-full appearance-none h-[3px] bg-black
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+              />
+              <div className="text-[11px] uppercase">Color</div>
+              <input
+                type="color" value={brushColor}
+                onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
+                className="w-10 h-10 border border-black rounded-none"
+              />
+            </div>
+          )}
+
           {tool==="shape" && (
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-5 gap-2">
               <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
               <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("star")}     title="Star"><Star className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("heart")}    title="Heart"><Heart className={ico}/></button>
             </div>
           )}
 
-          {/* стороны + экспорт (длинные кнопки с даунлоадом рядом) */}
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <button className={clx("h-10 px-3 border border-black rounded-none text-left", side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
-            <button className={btn + " h-10"} onClick={onDownloadFront}  title="Download Front"><Download className={ico}/></button>
-            <button className={clx("h-10 px-3 border border-black rounded-none text-left", side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
-            <button className={btn + " h-10"} onClick={onDownloadBack}   title="Download Back"><Download className={ico}/></button>
-          </div>
-
-          {/* кисть + цвет и т.д. оставил как было — опускаю здесь для краткости */}
-          {(tool==="brush" || tool==="erase") && (
-            <div className="space-y-2">
-              <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-              <input type="range" min={1} max={120} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                className="w-full appearance-none h-[3px] bg-black
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"/>
-              <div className="text-[11px] uppercase">Color</div>
-              <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
-                className="w-10 h-10 border border-black rounded-none"/>
-            </div>
-          )}
-
-          {/* контекст выделенного (как в прошлой версии) */}
-          {selectedKind && (
+          {selectedKind === "text" && (
             <div className="space-y-2 border-t pt-2">
-              <div className="text-[11px] uppercase">Selected: {selectedKind}</div>
-              {selectedKind === "text" && (
-                <div className="space-y-2">
-                  <input type="text" defaultValue={selectedProps?.text ?? ""} onChange={(e)=> setSelectedText(e.target.value)} className="w-full border px-2 py-1 text-sm rounded-none" placeholder="Edit text…"/>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Size</div>
-                    <input type="range" min={8} max={240} defaultValue={selectedProps?.fontSize ?? 64} onChange={(e)=> setSelectedFontSize(parseInt(e.target.value))}
-                      className="flex-1 h-[3px] bg-black appearance-none
-                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                      [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"/>
-                    <select defaultValue={selectedProps?.fontFamily ?? "Inter, system-ui, -apple-system, sans-serif"} onChange={(e)=> setSelectedFontFamily(e.target.value)} className="border rounded-none text-sm" title="Font">
-                      <option value="Inter, system-ui, -apple-system, sans-serif">Inter</option>
-                      <option value="Arial, Helvetica, sans-serif">Arial</option>
-                      <option value="Helvetica, Arial, sans-serif">Helvetica</option>
-                      <option value="'Times New Roman', Times, serif">Times</option>
-                      <option value="'Courier New', Courier, monospace">Courier</option>
-                      <option value="Georgia, serif">Georgia</option>
-                      <option value="Impact, Charcoal, sans-serif">Impact</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Color</div>
-                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  </div>
-                </div>
-              )}
-              {selectedKind === "shape" && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Fill</div>
-                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Stroke</div>
-                    <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                    <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
-                  </div>
-                </div>
-              )}
+              <input
+                type="text"
+                defaultValue={selectedProps?.text ?? ""}
+                onChange={(e)=> setSelectedText(e.target.value)}
+                className="w-full border px-2 py-1 text-sm rounded-none"
+                placeholder="Edit text…"
+              />
+              <div className="flex items-center gap-2">
+                <div className="text-[11px]">Size</div>
+                <input
+                  type="range" min={8} max={240}
+                  defaultValue={selectedProps?.fontSize ?? 64}
+                  onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
+                  className="flex-1 h-[3px] bg-black appearance-none
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                    [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                />
+                <select
+                  defaultValue={selectedProps?.fontFamily ?? "Inter, system-ui, -apple-system, sans-serif"}
+                  onChange={(e)=> setSelectedFontFamily(e.target.value)}
+                  className="border rounded-none text-sm"
+                  title="Font"
+                >
+                  <option value="Inter, system-ui, -apple-system, sans-serif">Inter</option>
+                  <option value="Arial, Helvetica, sans-serif">Arial</option>
+                  <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                  <option value="'Times New Roman', Times, serif">Times</option>
+                  <option value="'Courier New', Courier, monospace">Courier</option>
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="Impact, Charcoal, sans-serif">Impact</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-[11px]">Color</div>
+                <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+              </div>
             </div>
           )}
-      </div>)}
+
+          {selectedKind === "shape" && (
+            <div className="space-y-2 border-t pt-2">
+              <div className="flex items-center gap-2">
+                <div className="text-[11px]">Fill</div>
+                <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-[11px]">Stroke</div>
+                <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-2">
+            <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
+            <button className={clx(btn, side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
+            <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
+            <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
+          </div>
+        </div>
+      )}
 
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
     </div>
