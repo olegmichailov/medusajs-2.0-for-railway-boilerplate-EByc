@@ -1,13 +1,13 @@
 // storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import { Button, Container, Heading, Text, clx } from "@medusajs/ui"
-import { PaymentElement } from "@stripe/react-stripe-js"
+import { PaymentElement, useElements } from "@stripe/react-stripe-js"
 
 import Divider from "@modules/common/components/divider"
 import PaymentContainer from "@modules/checkout/components/payment-container"
@@ -42,6 +42,7 @@ const Payment = ({
   const choseStripe = isStripeFunc(selectedPaymentMethod)
   const stripeReady = useContext(StripeContext)
   const stripe = useStripeSafe()
+  const elements = useElements()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -49,22 +50,9 @@ const Payment = ({
   const paymentReady =
     (activeSession && cart?.shipping_methods?.length !== 0) || paidByGiftcard
 
-  // Показывать радиогруппу только если провайдеров больше одного
   const showProviderPicker = (availablePaymentMethods?.length ?? 0) > 1
 
-  // --- защита от параллельных инициализаций ---
-  const initInFlight = useRef(false)
-  const safeInitiate = async (provider_id: string) => {
-    if (initInFlight.current) return
-    try {
-      initInFlight.current = true
-      await initiatePaymentSession(cart, { provider_id })
-    } finally {
-      initInFlight.current = false
-    }
-  }
-
-  // ---- 0) Форсим refresh при возврате из bfcache/фонового режима ----
+  // --- 0) Обновление при возврате/видимости
   useEffect(() => {
     const onPageShow = () => router.refresh()
     const onVisible = () => {
@@ -78,7 +66,7 @@ const Payment = ({
     }
   }, [router])
 
-  // ---- 1) CANCEL/FAILED с редиректа — чистим query и НЕ завершаем заказ ----
+  // --- 1) Очистка query после canceled/failed
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -100,7 +88,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // ---- 2) «Сторожок»: пришли с client_secret, но без redirect_status ----
+  // --- 2) Сторожок при client_secret без redirect_status
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
@@ -118,7 +106,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // ---- 3) Сброс выбора при СМЕНЕ корзины/набора методов ----
+  // --- 3) Сброс выбора при смене корзины/методов
   useEffect(() => {
     const active = cart?.payment_collection?.payment_sessions?.find(
       (s: any) => s.status === "pending"
@@ -128,21 +116,21 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart?.id, (availablePaymentMethods || []).map((m) => m.id).join(",")])
 
-  // ---- 4) Если есть активная сессия — подхватываем её как выбранный метод ----
+  // --- 4) Подхват активной сессии
   useEffect(() => {
     if (!selectedPaymentMethod && activeSession?.provider_id) {
       setSelectedPaymentMethod(activeSession.provider_id)
     }
   }, [activeSession?.provider_id, selectedPaymentMethod])
 
-  // ---- 5) Если нет выбора, но методы уже приехали — выбрать первый ----
+  // --- 5) Если нет выбора — берём первую
   useEffect(() => {
     if (!selectedPaymentMethod && (availablePaymentMethods?.length ?? 0) > 0) {
       setSelectedPaymentMethod(availablePaymentMethods[0].id)
     }
   }, [selectedPaymentMethod, availablePaymentMethods])
 
-  // ---- 6) Авто-инициация stripe-сессии (для появления PaymentElement) ----
+  // --- 6) Авто-инициация stripe-сессии (для появления PaymentElement)
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -150,7 +138,9 @@ const Payment = ({
       if (!choseStripe) return
       if (activeSession) return
       try {
-        await safeInitiate(selectedPaymentMethod)
+        await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
+        // Дадим Next перерендериться, чтобы прилетел client_secret и смонтировался PaymentElement
+        router.refresh()
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to start payment session")
       }
@@ -162,58 +152,8 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
-  // ---- 6.1) Активная сессия должна соответствовать выбранному провайдеру ----
-  useEffect(() => {
-    if (!cart) return
-    if (!choseStripe) return
-    if (!selectedPaymentMethod) return
-    const activeProv = activeSession?.provider_id
-    if (activeProv && activeProv !== selectedPaymentMethod) {
-      safeInitiate(selectedPaymentMethod).catch(() => {})
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choseStripe, selectedPaymentMethod, activeSession?.provider_id, cart?.id])
-
-  // ---- 6.2) «Оздоровление» PI: пересоздаём, если он в неподходящем состоянии ----
-  useEffect(() => {
-    let cancelled = false
-    const heal = async () => {
-      try {
-        if (!stripe) return
-        if (!choseStripe) return
-        // client_secret из активной stripe-сессии
-        const cs =
-          (activeSession?.data && (activeSession.data as any).client_secret) ||
-          (cart?.payment_session?.data && (cart.payment_session.data as any).client_secret)
-        if (!cs) return
-
-        const { paymentIntent } = await stripe.retrievePaymentIntent(cs)
-        if (!paymentIntent || cancelled) return
-
-        // Нельзя повторно подтверждать такие PI — создаём новую сессию
-        const bad =
-          paymentIntent.status === "requires_capture" ||
-          paymentIntent.status === "canceled" ||
-          paymentIntent.status === "succeeded"
-
-        if (bad) {
-          await safeInitiate(selectedPaymentMethod)
-        }
-      } catch {
-        /* тихо */
-      }
-    }
-    heal()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stripe, choseStripe, activeSession?.id, selectedPaymentMethod, cart?.id])
-
   /**
-   * ---- 7) Автозавершение после редиректа/без него ----
-   * Завершаем ТОЛЬКО при succeeded/processing. requires_capture исключён —
-   * финализацию сделает вебхук/бэк.
+   * --- 7) Авто-финиш после редиректа
    */
   useEffect(() => {
     const clientSecret =
@@ -234,10 +174,7 @@ const Payment = ({
         if (cancelled) return
         if (error || !paymentIntent) return
 
-        if (
-          paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "processing"
-        ) {
+        if (paymentIntent.status === "succeeded" || paymentIntent.status === "processing") {
           try {
             await placeOrder()
           } catch (e: any) {
@@ -266,23 +203,76 @@ const Payment = ({
     })
   }
 
+  /**
+   * --- SUBMIT ---
+   * Stripe-провайдеры всегда подтверждаем через PaymentElement:
+   * - для PayPal/Klarna/Revolut: redirect в провайдера (redirect: "always")
+   * - для Card без 3DS: вернётся без редиректа и сразу пойдём на Review
+   */
   const handleSubmit = async () => {
+    setError(null)
+
+    // Гифт-карта — идём на Review
+    if (paidByGiftcard) {
+      return router.push(pathname + "?" + createQueryString("step", "review"), {
+        scroll: false,
+      })
+    }
+
     setIsLoading(true)
     try {
-      const shouldInputCard = choseStripe && !activeSession
-
-      if (!activeSession) {
-        await safeInitiate(selectedPaymentMethod)
+      // Если Stripe-метод ещё не инициализирован — сначала запускаем сессию
+      if (choseStripe && !activeSession) {
+        await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
+        await router.refresh()
+        // Дождёмся, пока смонтируется PaymentElement
+        return
       }
 
-      if (!shouldInputCard) {
-        return router.push(
-          pathname + "?" + createQueryString("step", "review"),
-          { scroll: false }
-        )
+      // Не Stripe — просто на Review
+      if (!choseStripe) {
+        return router.push(pathname + "?" + createQueryString("step", "review"), {
+          scroll: false,
+        })
       }
+
+      // Stripe: подтверждаем элемент
+      if (!stripe || !elements) {
+        setError("Stripe is not ready. Please try again.")
+        return
+      }
+
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || ""
+
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        // ВАЖНО: для PayPal нужен редирект — пусть Stripe сам решает/редиректит
+        redirect: "always",
+        confirmParams: {
+          return_url: `${origin}/checkout?step=review`,
+        },
+      })
+
+      if (stripeError) {
+        // Ошибка валидации/интеграции — покажем пользователю
+        setError(stripeError.message || "Payment confirmation failed.")
+        return
+      }
+
+      // Если без редиректа и уже всё ок — финализируем заказ
+      if (paymentIntent && (paymentIntent.status === "succeeded" || paymentIntent.status === "processing")) {
+        try {
+          await placeOrder()
+        } catch (e: any) {
+          setError(e?.message || "Failed to complete order.")
+        }
+        return
+      }
+
+      // Иначе Stripe сам редиректит/вернёт на return_url, дальше сработает авто-финиш
     } catch (err: any) {
-      setError(err.message)
+      setError(err?.message || "Payment error. Please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -292,7 +282,6 @@ const Payment = ({
     setError(null)
   }, [isOpen])
 
-  // методы могут на мгновение быть пустыми (SSR/рефреш) — считаем это «лоадингом»
   const methodsLoaded = (availablePaymentMethods?.length ?? 0) > 0
 
   return (
@@ -353,7 +342,6 @@ const Payment = ({
                       <Text className="txt-medium-plus text-ui-fg-base mb-1">
                         Enter your payment details:
                       </Text>
-                      {/* Внутри — вкладки Card/Klarna/PayPal/Revolut Pay и т.д. */}
                       <PaymentElement options={{ layout: "tabs" }} />
                     </div>
                   )}
@@ -403,9 +391,7 @@ const Payment = ({
             disabled={(!selectedPaymentMethod && !paidByGiftcard) || !methodsLoaded}
             data-testid="submit-payment-button"
           >
-            {!activeSession && choseStripe
-              ? " Enter payment details"
-              : "Continue to review"}
+            {choseStripe ? "Confirm & continue" : "Continue to review"}
           </Button>
         </div>
 
@@ -440,7 +426,7 @@ const Payment = ({
               </div>
             </div>
           ) : paidByGiftcard ? (
-            <div className="flex кол flex-col w-1/3">
+            <div className="flex flex-col w-1/3">
               <Text className="txt-medium-plus text-ui-fg-base mb-1">
                 Payment method
               </Text>
