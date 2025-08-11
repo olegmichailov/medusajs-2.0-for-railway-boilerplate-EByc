@@ -1,10 +1,11 @@
+
 "use client"
 
 import { create } from "zustand"
 
 export type Side = "front" | "back"
 export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
-export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
+export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line" | "star" | "heart"
 export type Blend =
   | "source-over" | "destination-over" | "lighter"
   | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
@@ -22,9 +23,10 @@ type State = {
   toggleLayers: () => void
 }
 
+// дефолт — Brush (Move показываем первым, но не активируем)
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "move",
+  tool: "brush",
   brushColor: "#ff2a7f",
   brushSize: 36,
   shapeKind: "circle",
