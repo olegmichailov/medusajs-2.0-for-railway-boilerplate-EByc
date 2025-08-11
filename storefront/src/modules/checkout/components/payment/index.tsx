@@ -1,7 +1,7 @@
 // storefront/src/modules/checkout/components/payment/index.tsx
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useCallback, useContext, useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -15,97 +15,6 @@ import { isStripe as isStripeFunc, paymentInfoMap } from "@lib/constants"
 import { StripeContext } from "@modules/checkout/components/payment-wrapper"
 import { initiatePaymentSession, placeOrder } from "@lib/data/cart"
 import { useStripeSafe } from "@lib/stripe/safe-hooks"
-
-/**
- * ВНУТРЕННЯЯ КНОПКА для Stripe.
- * Здесь уже МОЖНО использовать useElements(), т.к. компонент рендерится
- * только когда обёртка <Elements> точно смонтирована (stripeReady === true).
- */
-function StripeSubmitButton({
-  cart,
-  selectedPaymentMethod,
-  activeSession,
-  setError,
-  toReview,
-}: {
-  cart: any
-  selectedPaymentMethod: string
-  activeSession: any
-  setError: (s: string | null) => void
-  toReview: () => void
-}) {
-  const [isLoading, setIsLoading] = useState(false)
-  const stripe = useStripeSafe()
-  const elements = useElements()
-
-  const onClick = async () => {
-    setError(null)
-
-    try {
-      // если сессия ещё не создана — создаём и ждём монтирования PaymentElement
-      if (!activeSession) {
-        await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
-        // дальше пользователь нажмёт кнопку ещё раз; это нормально и безопасно
-        return
-      }
-
-      if (!stripe || !elements) {
-        setError("Stripe is not ready. Please try again.")
-        return
-      }
-
-      const origin =
-        typeof window !== "undefined"
-          ? window.location.origin
-          : (process.env.NEXT_PUBLIC_SITE_URL as string) || ""
-
-      setIsLoading(true)
-
-      const { error, paymentIntent } = await stripe.confirmPayment({
-        elements,
-        redirect: "always", // PayPal/Klarna/Revolut требуют редирект — пусть решает Stripe
-        confirmParams: {
-          return_url: `${origin}/checkout?step=review`,
-        },
-      })
-
-      if (error) {
-        setError(error.message || "Payment confirmation failed.")
-        return
-      }
-
-      // Если без редиректа и уже всё ок — закрываем заказ
-      if (
-        paymentIntent &&
-        (paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "processing")
-      ) {
-        try {
-          await placeOrder()
-        } catch (e: any) {
-          setError(e?.message || "Failed to complete order.")
-        }
-      }
-      // иначе Stripe сам редиректит и после возврата сработает авто-финиш в родителе
-    } catch (e: any) {
-      setError(e?.message || "Payment error. Please try again.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  return (
-    <Button
-      size="large"
-      className="mt-6"
-      onClick={onClick}
-      isLoading={isLoading}
-      data-testid="submit-payment-button"
-    >
-      Confirm & continue
-    </Button>
-  )
-}
 
 const Payment = ({
   cart,
@@ -131,9 +40,9 @@ const Payment = ({
   const isOpen = searchParams.get("step") === "payment"
 
   const choseStripe = isStripeFunc(selectedPaymentMethod)
-  const stripeReady = useContext(StripeContext)
-
-  const stripe = useStripeSafe() // можно оставить — без Elements не падает
+  const stripeReady = useContext(StripeContext) // теперь true только когда Elements реально смонтирован
+  const stripe = useStripeSafe()
+  const elements = useElements()
 
   const paidByGiftcard =
     cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
@@ -143,7 +52,7 @@ const Payment = ({
 
   const showProviderPicker = (availablePaymentMethods?.length ?? 0) > 1
 
-  // 0) refresh после возврата/вытаскивания из фона
+  // 0) Обновление при возврате/видимости
   useEffect(() => {
     const onPageShow = () => router.refresh()
     const onVisible = () => {
@@ -157,7 +66,7 @@ const Payment = ({
     }
   }, [router])
 
-  // 1) возврат с canceled/failed
+  // 1) Очистка query после canceled/failed
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const wasCanceledOrFailed =
@@ -179,7 +88,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // 2) сторожок — есть client_secret, но нет redirect_status
+  // 2) Сторожок при client_secret без redirect_status
   useEffect(() => {
     const redirectStatus = searchParams.get("redirect_status")
     const clientSecret =
@@ -197,7 +106,7 @@ const Payment = ({
     }
   }, [searchParams, pathname, router])
 
-  // 3) сброс выбора при смене корзины/методов
+  // 3) Сброс выбора при смене корзины/методов
   useEffect(() => {
     const active = cart?.payment_collection?.payment_sessions?.find(
       (s: any) => s.status === "pending"
@@ -207,21 +116,21 @@ const Payment = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart?.id, (availablePaymentMethods || []).map((m) => m.id).join(",")])
 
-  // 4) подхват активной сессии
+  // 4) Подхват активной сессии
   useEffect(() => {
     if (!selectedPaymentMethod && activeSession?.provider_id) {
       setSelectedPaymentMethod(activeSession.provider_id)
     }
   }, [activeSession?.provider_id, selectedPaymentMethod])
 
-  // 5) если ничего не выбрано — берём первый
+  // 5) Если нет выбора — берём первую
   useEffect(() => {
     if (!selectedPaymentMethod && (availablePaymentMethods?.length ?? 0) > 0) {
       setSelectedPaymentMethod(availablePaymentMethods[0].id)
     }
   }, [selectedPaymentMethod, availablePaymentMethods])
 
-  // 6) авто-инициация stripe-сессии (для появления PaymentElement)
+  // 6) Авто-инициация stripe-сессии (чтобы появился PaymentElement)
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -230,19 +139,17 @@ const Payment = ({
       if (activeSession) return
       try {
         await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
-        router.refresh()
+        router.refresh() // подтянуть client_secret
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? "Failed to start payment session")
       }
     }
     run()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choseStripe, selectedPaymentMethod, cart?.id])
 
-  // 7) авто-финиш после редиректа (processing/succeeded)
+  // 7) Авто-финиш после редиректа
   useEffect(() => {
     const clientSecret =
       searchParams.get("payment_intent_client_secret") ||
@@ -250,9 +157,7 @@ const Payment = ({
 
     const redirectStatus = searchParams.get("redirect_status")
     const allowAutofinish =
-      !redirectStatus ||
-      redirectStatus === "succeeded" ||
-      redirectStatus === "completed"
+      !redirectStatus || redirectStatus === "succeeded" || redirectStatus === "completed"
 
     if (!allowAutofinish) return
     if (!stripe || !clientSecret) return
@@ -276,9 +181,7 @@ const Payment = ({
         }
       })
       .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [stripe, searchParams])
 
   const createQueryString = useCallback(
@@ -296,36 +199,65 @@ const Payment = ({
     })
   }
 
-  // submit для НЕ-Stripe (и гифт-карт)
+  // не-Stripe / подарочная карта — просто на Review
   const handleSubmitNonStripe = async () => {
-    setError(null)
-
     if (paidByGiftcard) {
-      return router.push(pathname + "?" + createQueryString("step", "review"), {
-        scroll: false,
-      })
+      return router.push(pathname + "?" + createQueryString("step", "review"), { scroll: false })
     }
-
     setIsLoading(true)
     try {
       if (!activeSession) {
-        await initiatePaymentSession(cart, {
-          provider_id: selectedPaymentMethod,
-        })
+        await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
       }
-      router.push(pathname + "?" + createQueryString("step", "review"), {
-        scroll: false,
-      })
+      router.push(pathname + "?" + createQueryString("step", "review"), { scroll: false })
     } catch (err: any) {
-      setError(err.message)
+      setError(err?.message || "Payment error. Please try again.")
     } finally {
       setIsLoading(false)
     }
   }
 
-  useEffect(() => {
+  // Stripe confirm
+  const confirmStripe = async () => {
+    setIsLoading(true)
     setError(null)
-  }, [isOpen])
+    try {
+      if (!stripe || !elements) {
+        setError("Stripe is not ready. Please try again.")
+        return
+      }
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : process.env.NEXT_PUBLIC_SITE_URL || ""
+
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        redirect: "always", // PayPal/Klarna потребуют редирект
+        confirmParams: { return_url: `${origin}/checkout?step=review` },
+      })
+
+      if (stripeError) {
+        setError(stripeError.message || "Payment confirmation failed.")
+        return
+      }
+
+      if (paymentIntent &&
+          (paymentIntent.status === "succeeded" || paymentIntent.status === "processing")) {
+        try {
+          await placeOrder()
+        } catch (e: any) {
+          setError(e?.message || "Failed to complete order.")
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message || "Payment error. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => { setError(null) }, [isOpen])
 
   const methodsLoaded = (availablePaymentMethods?.length ?? 0) > 0
 
@@ -336,10 +268,7 @@ const Payment = ({
           level="h2"
           className={clx(
             "flex flex-row text-3xl-regular gap-x-2 items-baseline",
-            {
-              "opacity-50 pointer-events-none select-none":
-                !isOpen && !paymentReady,
-            }
+            { "opacity-50 pointer-events-none select-none": !isOpen && !paymentReady }
           )}
         >
           Payment
@@ -387,7 +316,6 @@ const Payment = ({
                       <Text className="txt-medium-plus text-ui-fg-base mb-1">
                         Enter your payment details:
                       </Text>
-                      {/* Внутри — вкладки Card / PayPal / Klarna / Revolut */}
                       <PaymentElement options={{ layout: "tabs" }} />
                     </div>
                   )}
@@ -397,12 +325,7 @@ const Payment = ({
                   <Text className="txt-medium text-ui-fg-subtle">
                     Payment methods are loading…
                   </Text>
-                  <Button
-                    className="mt-3"
-                    size="small"
-                    variant="secondary"
-                    onClick={() => router.refresh()}
-                  >
+                  <Button className="mt-3" size="small" variant="secondary" onClick={() => router.refresh()}>
                     Refresh
                   </Button>
                 </div>
@@ -412,38 +335,53 @@ const Payment = ({
 
           {paidByGiftcard && (
             <div className="flex flex-col w-1/3">
-              <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                Payment method
-              </Text>
-              <Text
-                className="txt-medium text-ui-fg-subtle"
-                data-testid="payment-method-summary"
-              >
+              <Text className="txt-medium-plus text-ui-fg-base mb-1">Payment method</Text>
+              <Text className="txt-medium text-ui-fg-subtle" data-testid="payment-method-summary">
                 Gift card
               </Text>
             </div>
           )}
 
-          <ErrorMessage
-            error={error}
-            data-testid="payment-method-error-message"
-          />
+          <ErrorMessage error={error} data-testid="payment-method-error-message" />
 
-          {/* Кнопка сабмита */}
+          {/* Кнопки сабмита */}
           <div>
-            {choseStripe && stripeReady ? (
-              <StripeSubmitButton
-                cart={cart}
-                selectedPaymentMethod={selectedPaymentMethod}
-                activeSession={activeSession}
-                setError={setError}
-                toReview={() =>
-                  router.push(pathname + "?" + createQueryString("step", "review"), {
-                    scroll: false,
-                  })
-                }
-              />
-            ) : (
+            {/* Stripe готов → подтверждаем */}
+            {choseStripe && stripeReady && (
+              <Button
+                size="large"
+                className="mt-6"
+                onClick={confirmStripe}
+                isLoading={isLoading}
+                disabled={!methodsLoaded}
+                data-testid="submit-payment-button"
+              >
+                Confirm & continue
+              </Button>
+            )}
+
+            {/* Stripe выбран, но Elements ещё нет → запускаем сессию вручную */}
+            {choseStripe && !stripeReady && (
+              <Button
+                size="large"
+                className="mt-6"
+                onClick={async () => {
+                  setError(null)
+                  try {
+                    await initiatePaymentSession(cart, { provider_id: selectedPaymentMethod })
+                    await router.refresh()
+                  } catch (e: any) {
+                    setError(e?.message || "Failed to start Stripe session.")
+                  }
+                }}
+                data-testid="submit-payment-button"
+              >
+                Start payment (Card / PayPal)
+              </Button>
+            )}
+
+            {/* Не-Stripe / подарочная */}
+            {!choseStripe && (
               <Button
                 size="large"
                 className="mt-6"
@@ -462,25 +400,14 @@ const Payment = ({
           {cart && paymentReady && activeSession ? (
             <div className="flex items-start gap-x-1 w-full">
               <div className="flex flex-col w-1/3">
-                <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                  Payment method
-                </Text>
-                <Text
-                  className="txt-medium text-ui-fg-subtle"
-                  data-testid="payment-method-summary"
-                >
-                  {paymentInfoMap[selectedPaymentMethod]?.title ||
-                    selectedPaymentMethod}
+                <Text className="txt-medium-plus text-ui-fg-base mb-1">Payment method</Text>
+                <Text className="txt-medium text-ui-fg-subtle" data-testid="payment-method-summary">
+                  {paymentInfoMap[selectedPaymentMethod]?.title || selectedPaymentMethod}
                 </Text>
               </div>
               <div className="flex flex-col w-1/3">
-                <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                  Payment details
-                </Text>
-                <div
-                  className="flex gap-2 txt-medium text-ui-fg-subtle items-center"
-                  data-testid="payment-details-summary"
-                >
+                <Text className="txt-medium-plus text-ui-fg-base mb-1">Payment details</Text>
+                <div className="flex gap-2 txt-medium text-ui-fg-subtle items-center" data-testid="payment-details-summary">
                   <Container className="flex items-center h-7 w-fit p-2 bg-ui-button-neutral-hover">
                     <CreditCard />
                   </Container>
@@ -490,13 +417,8 @@ const Payment = ({
             </div>
           ) : paidByGiftcard ? (
             <div className="flex flex-col w-1/3">
-              <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                Payment method
-              </Text>
-              <Text
-                className="txt-medium text-ui-fg-subtle"
-                data-testid="payment-method-summary"
-              >
+              <Text className="txt-medium-plus text-ui-fg-base mb-1">Payment method</Text>
+              <Text className="txt-medium text-ui-fg-subtle" data-testid="payment-method-summary">
                 Gift card
               </Text>
             </div>
