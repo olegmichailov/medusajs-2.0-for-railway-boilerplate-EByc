@@ -37,13 +37,11 @@ export default function LayersPanel({
   onToggleLock: (id: string) => void
   onDelete: (id: string) => void
   onDuplicate: (id: string) => void
-  onReorder: (srcId: string, destId: string) => void
+  onReorder: (srcId: string, destId: string, before: boolean) => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
 }) {
   const [dragId, setDragId] = useState<string | null>(null)
-
-  // FRIS 0728: общий стоп-проп для интерактивных контролов, чтобы не срабатывал dnd
   const stop = (e: React.SyntheticEvent) => { e.stopPropagation() }
 
   return (
@@ -54,9 +52,18 @@ export default function LayersPanel({
           <div
             key={it.id}
             draggable
-            onDragStart={() => setDragId(it.id)}
+            onDragStart={(e) => { setDragId(it.id); e.dataTransfer.setData("text/plain", it.id) }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={() => { if (dragId && dragId !== it.id) onReorder(dragId, it.id); setDragId(null) }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const src = dragId || e.dataTransfer.getData("text/plain")
+              if (src && src !== it.id) {
+                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+                const before = e.clientY < rect.top + rect.height / 2
+                onReorder(src, it.id, before)
+              }
+              setDragId(null)
+            }}
             className={clx(
               "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none",
               selectId === it.id ? "bg-black text-white" : "bg-white"
@@ -64,14 +71,12 @@ export default function LayersPanel({
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            {/* ручка для dnd */}
-            <div className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing">
+            <div className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing" onMouseDown={stop}>
               <GripVertical className="w-4 h-4"/>
             </div>
 
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
-            {/* FRIS 0728: Blend + Opacity */}
             <select
               className={clx(
                 "h-8 px-1 border rounded-none text-xs",
@@ -94,32 +99,16 @@ export default function LayersPanel({
               onMouseDown={stop}
             />
 
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-              onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
-              title={it.visible ? "Hide" : "Show"}
-            >
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{e.stopPropagation(); onToggleVisible(it.id)}} title={it.visible ? "Hide" : "Show"}>
               {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-              onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
-              title={it.locked ? "Unlock" : "Lock"}
-            >
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{e.stopPropagation(); onToggleLock(it.id)}} title={it.locked ? "Unlock" : "Lock"}>
               {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-              onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
-              title="Duplicate"
-            >
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{e.stopPropagation(); onDuplicate(it.id)}} title="Duplicate">
               <Copy className="w-4 h-4"/>
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-              onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
-              title="Delete"
-            >
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{e.stopPropagation(); onDelete(it.id)}} title="Delete">
               <Trash2 className="w-4 h-4"/>
             </button>
           </div>
