@@ -1,139 +1,137 @@
 "use client"
 
 import React, { useRef, useState } from "react"
-import { clx } from "@medusajs/ui"
 import type { ShapeKind, Side, Tool } from "./store"
 
-const glass = "backdrop-blur-md bg-white/80 border border-black/10 shadow-xl"
-const btn   = "w-9 h-9 border flex items-center justify-center text-[11px]"
+const btn = "w-8 h-8 border border-black flex items-center justify-center"
+const row = "flex items-center gap-2"
 
-const FONTS = ["Inter", "Courier", "Georgia", "Arial", "Times New Roman", "Helvetica", "Futura"]
+const FONT_CHOICES = [
+  "Inter, Arial, Helvetica, sans-serif",
+  "Arial, Helvetica, sans-serif",
+  "Helvetica, Arial, sans-serif",
+  "Courier, monospace",
+  "Times New Roman, Times, serif",
+  "Georgia, serif",
+  "Impact, Charcoal, sans-serif",
+]
 
 export default function Toolbar({
-  side, setSide,
   tool, setTool,
   brushColor, setBrushColor,
   brushSize, setBrushSize,
   shapeKind, setShapeKind,
-  onUploadImage, onAddText, onAddShape,
-  startCrop, applyCrop, cancelCrop, isCropping,
+  onUploadImage,
+  onAddText,
+  onTextChange,
+  onStartCrop, onApplyCrop, onCancelCrop, isCropping,
+  side, setSide,
   onDownloadFront, onDownloadBack,
-  toggleLayers, layersOpen,
-
-  selectedId,
-  selectedIsText,
-  setTextContent, setTextFont, setTextSize,
+  toggleLayers
 }: {
-  side: Side
-  setSide: (s: Side)=>void
   tool: Tool
   setTool: (t: Tool)=>void
   brushColor: string
-  setBrushColor: (v: string)=>void
+  setBrushColor: (v:string)=>void
   brushSize: number
-  setBrushSize: (n: number)=>void
+  setBrushSize: (n:number)=>void
   shapeKind: ShapeKind
   setShapeKind: (k: ShapeKind)=>void
   onUploadImage: (f: File)=>void
-  onAddText: ()=>void
-  onAddShape: (k: ShapeKind)=>void
-  startCrop: ()=>void
-  applyCrop: ()=>void
-  cancelCrop: ()=>void
+  onAddText: (text:string, fontFamily:string, fontSize:number)=>void
+  onTextChange: (patch: Partial<{ text:string; fontFamily:string; fontSize:number; fill:string }>)=>void
+  onStartCrop: ()=>void
+  onApplyCrop: ()=>void
+  onCancelCrop: ()=>void
   isCropping: boolean
+  side: Side
+  setSide: (s: Side)=>void
   onDownloadFront: ()=>void
   onDownloadBack: ()=>void
   toggleLayers: ()=>void
-  layersOpen: boolean
-
-  selectedId: string | null
-  selectedIsText: boolean
-  setTextContent: (v: string)=>void
-  setTextFont: (f: string)=>void
-  setTextSize: (n: number)=>void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const [textValue, setTextValue] = useState("Your text")
+  const [fontFamily, setFontFamily] = useState(FONT_CHOICES[0])
+  const [fontSize, setFontSize] = useState(48)
+
   return (
-    <div className={clx(glass, "fixed left-6 top-40 z-40 w-[280px]")}>
-      <div className="flex items-center justify-between px-3 py-2 border-b">
+    <div className="fixed left-5 top-24 w-[280px] bg-white border border-black/20 shadow-xl p-10 pt-3 pb-3"
+         style={{ padding: 12 }}>
+      <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] uppercase tracking-wide">Tools</div>
-        <button className="border px-2 py-1 text-xs" onClick={toggleLayers}>{layersOpen ? "Hide Layers" : "Show Layers"}</button>
+        <button className={btn} onClick={toggleLayers} title="Show/Hide layers">≣</button>
       </div>
 
-      <div className="p-3 space-y-3">
-        {/* top row */}
-        <div className="grid grid-cols-7 gap-2">
-          <button className={clx(btn, tool==="move"  && "bg-black text-white")} onClick={()=>setTool("move")} title="Move">⬚</button>
-          <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush">🖌</button>
-          <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser">⌫</button>
-          <button className={clx(btn)} onClick={()=>onAddText()} title="Text">T</button>
-          <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes">▢</button>
-          <button className={clx(btn)} onClick={()=>fileRef.current?.click()} title="Image">🖼</button>
-          <button className={clx(btn, tool==="crop" && "bg-black text-white")} onClick={()=> isCropping ? cancelCrop() : startCrop()} title="Crop">✂</button>
+      {/* tools row (квадратные иконки, ч/б) */}
+      <div className={`${row} mb-2`}>
+        <button className={`${btn} ${tool==="move"  ? "bg-black text-white" : ""}`}  onClick={()=>setTool("move")}  title="Move">↔</button>
+        <button className={`${btn} ${tool==="brush" ? "bg-black text-white" : ""}`}  onClick={()=>setTool("brush")} title="Brush">🖊</button>
+        <button className={`${btn} ${tool==="erase" ? "bg-black text-white" : ""}`}  onClick={()=>setTool("erase")} title="Eraser">⌫</button>
+        <button className={`${btn} ${tool==="text"  ? "bg-black text-white" : ""}`}  onClick={()=>setTool("text")}  title="Text">T</button>
+        <button className={`${btn} ${tool==="shape" ? "bg-black text-white" : ""}`} onClick={()=>setTool("shape")} title="Shapes">▥</button>
+        <button className={`${btn}`} onClick={()=>fileRef.current?.click()} title="Image">🖼</button>
+        <button className={`${btn} ${tool==="crop" ? "bg-black text-white" : ""}`} onClick={()=> isCropping ? onCancelCrop() : onStartCrop()} title="Crop">✂</button>
+      </div>
+
+      {/* shape palette (8 штук, чтобы поровну) */}
+      {tool === "shape" && (
+        <div className={`${row} mb-2 flex-wrap`}>
+          {([
+            ["circle","○"],["square","□"],["triangle","△"],["line","／"],
+            ["star","★"],["heart","♥"]
+          ] as [ShapeKind,string][]).map(([k,label])=>(
+            <button key={k} className={`${btn} ${shapeKind===k ? "bg-black text-white" : ""}`} onClick={()=>setShapeKind(k)} title={k}>{label}</button>
+          ))}
         </div>
+      )}
 
-        {/* shape palette */}
-        {tool==="shape" && (
-          <div className="grid grid-cols-7 gap-2">
-            {([
-              ["circle","◯"],
-              ["square","▢"],
-              ["triangle","△"],
-              ["line","／"],
-              ["cross","✚"],
-              ["star","★"],
-              ["heart","♥"],
-            ] as [ShapeKind,string][]).map(([k, label]) => (
-              <button key={k} className={btn} onClick={()=>onAddShape(k)} title={k}>{label}</button>
-            ))}
-          </div>
-        )}
+      {/* brush controls (глобальный цвет и размер остаются всегда) */}
+      <div className="mb-2">
+        <div className="text-[11px] uppercase mb-1">Brush size: {brushSize}px</div>
+        <input type="range" min={1} max={128} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))} className="w-full"/>
+      </div>
+      <div className={`${row} mb-3`}>
+        <div className="text-[11px] uppercase">Color</div>
+        <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); onTextChange({ fill: e.target.value }) }} className="w-8 h-8 border border-black"/>
+      </div>
 
-        {/* brush */}
-        {(tool==="brush" || tool==="erase") && (
-          <div className="space-y-2">
-            <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-            <input
-              type="range" min={1} max={160} value={brushSize}
-              onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-              className="w-full h-[2px] bg-black appearance-none
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                [&::-webkit-slider-thumb]:bg-black"
-            />
-            <div className="text-[11px] uppercase">Color</div>
-            <input type="color" value={brushColor} onChange={(e)=>setBrushColor(e.target.value)} className="w-8 h-8 border"/>
-          </div>
-        )}
+      {/* text controls (поле ввода, размер, шрифты) */}
+      <div className="mb-3">
+        <div className="text-[11px] uppercase mb-1">Selected: text</div>
+        <input
+          type="text" value={textValue}
+          onChange={(e)=>{ setTextValue(e.target.value); onTextChange({ text: e.target.value }) }}
+          className="w-full border border-black px-2 py-1"
+          placeholder="Edit…"
+        />
+        <div className={`${row} mt-2`}>
+          <div className="text-[11px]">Size</div>
+          <input type="range" min={8} max={240} value={fontSize} onChange={(e)=>{ const v=parseInt(e.target.value); setFontSize(v); onTextChange({ fontSize: v }) }} className="flex-1"/>
+          <div className="w-8 text-right text-xs">{fontSize}</div>
+        </div>
+        <select className="w-full border border-black mt-2"
+                value={fontFamily}
+                onChange={(e)=>{ setFontFamily(e.target.value); onTextChange({ fontFamily: e.target.value }) }}>
+          {FONT_CHOICES.map(f => <option key={f} value={f}>{f.split(",")[0]}</option>)}
+        </select>
+        <div className={`${row} mt-2`}>
+          <button className={btn} onClick={()=> onAddText(textValue, fontFamily, fontSize)} title="Add text">＋</button>
+        </div>
+      </div>
 
-        {/* selected text controls */}
-        {selectedIsText && (
-          <div className="space-y-2 border-t pt-2">
-            <div className="text-[11px] uppercase">Selected: Text</div>
-            <input className="w-full border px-2 py-1 text-sm" placeholder="Edit…" onChange={(e)=>setTextContent(e.target.value)}/>
-            <div className="flex items-center gap-2">
-              <div className="text-xs">Size</div>
-              <input type="range" min={8} max={300} defaultValue={64} onChange={(e)=>setTextSize(parseInt(e.target.value))}
-                className="flex-1 h-[2px] bg-black appearance-none
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                  [&::-webkit-slider-thumb]:bg-black"/>
-            </div>
-            <select className="border px-2 py-1 text-sm w-full" defaultValue="Inter" onChange={(e)=>setTextFont(e.target.value)}>
-              {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-        )}
-
-        {/* front/back + downloads (двойные кнопки) */}
-        <div className="space-y-2">
-          <div className="flex">
-            <button className={clx("flex-1 border px-3 py-2 text-left", side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
-            <button className="border px-3 py-2" onClick={onDownloadFront} title="Download Front">⬇</button>
-          </div>
-          <div className="flex">
-            <button className={clx("flex-1 border px-3 py-2 text-left", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>Back</button>
-            <button className="border px-3 py-2" onClick={onDownloadBack} title="Download Back">⬇</button>
-          </div>
+      {/* side + downloads (сдвоенные кнопки) */}
+      <div className="mb-2">
+        <div className="flex">
+          <button className={`flex-1 border border-black px-2 py-2 ${side==="front" ? "bg-black text-white" : ""}`} onClick={()=>setSide("front")}>Front</button>
+          <button className="w-10 border border-black" onClick={onDownloadFront} title="Download front">⬇</button>
+        </div>
+      </div>
+      <div className="mb-3">
+        <div className="flex">
+          <button className={`flex-1 border border-black px-2 py-2 ${side==="back" ? "bg-black text-white" : ""}`} onClick={()=>setSide("back")}>Back</button>
+          <button className="w-10 border border-black" onClick={onDownloadBack} title="Download back">⬇</button>
         </div>
       </div>
 
