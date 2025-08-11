@@ -1,40 +1,36 @@
 "use client"
+
 import { create } from "zustand"
 
 export type Side = "front" | "back"
-export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "image" | "crop"
-export type ShapeKind = "circle" | "square" | "triangle" | "line" | "cross" | "star" | "heart"
+export type Tool = "move" | "brush" | "erase" | "text" | "shape" | "crop"
+export type ShapeKind = "circle" | "square" | "triangle" | "cross" | "line"
 export type Blend =
-  | "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge"
-  | "color-burn" | "hard-light" | "soft-light" | "difference" | "exclusion" | "hue"
-  | "saturation" | "color" | "luminosity" | "lighter" | "destination-out"
+  | "source-over" | "destination-over" | "lighter"
+  | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "xor"
 
-type UIState = {
+type State = {
   side: Side
   tool: Tool
-  shapeKind: ShapeKind
   brushColor: string
   brushSize: number
+  shapeKind: ShapeKind
   selectedId: string | null
   showLayers: boolean
-  fontFamily: string
-  fontSize: number
-  set: (patch: Partial<UIState>) => void
+  set: (p: Partial<State>) => void
   select: (id: string | null) => void
   toggleLayers: () => void
 }
 
-export const useDarkroom = create<UIState>((set) => ({
+export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush",
-  shapeKind: "circle",
-  brushColor: "#ff2b7a",
+  tool: "move",
+  brushColor: "#ff2a7f",
   brushSize: 36,
+  shapeKind: "circle",
   selectedId: null,
   showLayers: true,
-  fontFamily: "Inter",
-  fontSize: 64,
-  set: (patch) => set(patch),
+  set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
-  toggleLayers: () => set(s => ({ showLayers: !s.showLayers }))
+  toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
 }))
