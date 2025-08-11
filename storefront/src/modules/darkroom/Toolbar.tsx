@@ -2,17 +2,12 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import {
-  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
-  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Star, Heart
-} from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
-import { isMobile } from "react-device-detect"
 
-const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
-const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
-const ico  = "w-5 h-5"
+const glass = "backdrop-blur-md bg-white/80 border border-black/10 shadow-xl"
+const btn   = "w-9 h-9 border flex items-center justify-center text-[11px]"
+
+const FONTS = ["Inter", "Courier", "Georgia", "Arial", "Times New Roman", "Helvetica", "Futura"]
 
 export default function Toolbar({
   side, setSide,
@@ -25,193 +20,124 @@ export default function Toolbar({
   onDownloadFront, onDownloadBack,
   toggleLayers, layersOpen,
 
-  selectedKind, selectedProps,
-  setSelectedFill, setSelectedStroke, setSelectedStrokeW,
-  setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
+  selectedId,
+  selectedIsText,
+  setTextContent, setTextFont, setTextSize,
 }: {
   side: Side
-  setSide: (s: Side) => void
+  setSide: (s: Side)=>void
   tool: Tool
-  setTool: (t: Tool) => void
+  setTool: (t: Tool)=>void
   brushColor: string
-  setBrushColor: (v: string) => void
+  setBrushColor: (v: string)=>void
   brushSize: number
-  setBrushSize: (n: number) => void
+  setBrushSize: (n: number)=>void
   shapeKind: ShapeKind
-  setShapeKind: (k: ShapeKind) => void
-  onUploadImage: (f: File) => void
-  onAddText: () => void
-  onAddShape: (k: ShapeKind) => void
-  startCrop: () => void
-  applyCrop: () => void
-  cancelCrop: () => void
+  setShapeKind: (k: ShapeKind)=>void
+  onUploadImage: (f: File)=>void
+  onAddText: ()=>void
+  onAddShape: (k: ShapeKind)=>void
+  startCrop: ()=>void
+  applyCrop: ()=>void
+  cancelCrop: ()=>void
   isCropping: boolean
-  onDownloadFront: () => void
-  onDownloadBack: () => void
-  toggleLayers: () => void
+  onDownloadFront: ()=>void
+  onDownloadBack: ()=>void
+  toggleLayers: ()=>void
   layersOpen: boolean
 
-  selectedKind: "image"|"shape"|"text"|"strokes"|null
-  selectedProps: any
-  setSelectedFill: (hex:string)=>void
-  setSelectedStroke: (hex:string)=>void
-  setSelectedStrokeW: (w:number)=>void
-  setSelectedText: (t:string)=>void
-  setSelectedFontSize: (n:number)=>void
-  setSelectedFontFamily: (name:string)=>void
-  setSelectedColor: (hex:string)=>void
+  selectedId: string | null
+  selectedIsText: boolean
+  setTextContent: (v: string)=>void
+  setTextFont: (f: string)=>void
+  setTextSize: (n: number)=>void
 }) {
-  const [open, setOpen] = useState(true)
-  const [pos, setPos] = useState({ x: 24, y: 120 })
-  const drag = useRef<{ dx: number; dy: number } | null>(null)
-
-  const onDragStart = (e: React.MouseEvent) => {
-    if (isMobile) return
-    drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y }
-    window.addEventListener("mousemove", onDragMove)
-    window.addEventListener("mouseup", onDragEnd)
-  }
-  const onDragMove = (e: MouseEvent) => { if (!drag.current) return; setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy }) }
-  const onDragEnd = () => { drag.current = null; window.removeEventListener("mousemove", onDragMove); window.removeEventListener("mouseup", onDragEnd) }
-
   const fileRef = useRef<HTMLInputElement>(null)
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
-    e.currentTarget.value = ""
-  }
 
   return (
-    <div className={wrap + " fixed z-40 w-[400px] p-3"} style={{ left: pos.x, top: pos.y }}>
-      <div className="flex items-center justify-between mb-3" onMouseDown={onDragStart}>
-        <div className="text-[11px] uppercase">Tools</div>
-        <div className="flex items-center gap-2">
-          <button className={btn} onClick={toggleLayers} title="Layers">
-            {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-          </button>
-          <button className={btn} onClick={() => setOpen(!open)} title="Close / Open">{open ? "×" : "≡"}</button>
+    <div className={clx(glass, "fixed left-6 top-40 z-40 w-[280px]")}>
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <div className="text-[11px] uppercase tracking-wide">Tools</div>
+        <button className="border px-2 py-1 text-xs" onClick={toggleLayers}>{layersOpen ? "Hide Layers" : "Show Layers"}</button>
+      </div>
+
+      <div className="p-3 space-y-3">
+        {/* top row */}
+        <div className="grid grid-cols-7 gap-2">
+          <button className={clx(btn, tool==="move"  && "bg-black text-white")} onClick={()=>setTool("move")} title="Move">⬚</button>
+          <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush">🖌</button>
+          <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser">⌫</button>
+          <button className={clx(btn)} onClick={()=>onAddText()} title="Text">T</button>
+          <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes">▢</button>
+          <button className={clx(btn)} onClick={()=>fileRef.current?.click()} title="Image">🖼</button>
+          <button className={clx(btn, tool==="crop" && "bg-black text-white")} onClick={()=> isCropping ? cancelCrop() : startCrop()} title="Crop">✂</button>
+        </div>
+
+        {/* shape palette */}
+        {tool==="shape" && (
+          <div className="grid grid-cols-7 gap-2">
+            {([
+              ["circle","◯"],
+              ["square","▢"],
+              ["triangle","△"],
+              ["line","／"],
+              ["cross","✚"],
+              ["star","★"],
+              ["heart","♥"],
+            ] as [ShapeKind,string][]).map(([k, label]) => (
+              <button key={k} className={btn} onClick={()=>onAddShape(k)} title={k}>{label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* brush */}
+        {(tool==="brush" || tool==="erase") && (
+          <div className="space-y-2">
+            <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
+            <input
+              type="range" min={1} max={160} value={brushSize}
+              onChange={(e)=>setBrushSize(parseInt(e.target.value))}
+              className="w-full h-[2px] bg-black appearance-none
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                [&::-webkit-slider-thumb]:bg-black"
+            />
+            <div className="text-[11px] uppercase">Color</div>
+            <input type="color" value={brushColor} onChange={(e)=>setBrushColor(e.target.value)} className="w-8 h-8 border"/>
+          </div>
+        )}
+
+        {/* selected text controls */}
+        {selectedIsText && (
+          <div className="space-y-2 border-t pt-2">
+            <div className="text-[11px] uppercase">Selected: Text</div>
+            <input className="w-full border px-2 py-1 text-sm" placeholder="Edit…" onChange={(e)=>setTextContent(e.target.value)}/>
+            <div className="flex items-center gap-2">
+              <div className="text-xs">Size</div>
+              <input type="range" min={8} max={300} defaultValue={64} onChange={(e)=>setTextSize(parseInt(e.target.value))}
+                className="flex-1 h-[2px] bg-black appearance-none
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                  [&::-webkit-slider-thumb]:bg-black"/>
+            </div>
+            <select className="border px-2 py-1 text-sm w-full" defaultValue="Inter" onChange={(e)=>setTextFont(e.target.value)}>
+              {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* front/back + downloads (двойные кнопки) */}
+        <div className="space-y-2">
+          <div className="flex">
+            <button className={clx("flex-1 border px-3 py-2 text-left", side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
+            <button className="border px-3 py-2" onClick={onDownloadFront} title="Download Front">⬇</button>
+          </div>
+          <div className="flex">
+            <button className={clx("flex-1 border px-3 py-2 text-left", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>Back</button>
+            <button className="border px-3 py-2" onClick={onDownloadBack} title="Download Back">⬇</button>
+          </div>
         </div>
       </div>
 
-      {open && (
-        <div className="space-y-3">
-          {/* инструменты — Move первым, активна Brush */}
-          <div className="grid grid-cols-7 gap-2">
-            <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
-            <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
-            <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-            <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
-            <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
-            <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
-            <button className={clx(btn, tool==="crop" && "bg-black text-white")}
-              onClick={()=> (isCropping ? cancelCrop() : startCrop())}
-              title="Crop"><Crop className={ico}/></button>
-          </div>
-
-          {(tool==="brush" || tool==="erase") && (
-            <div className="space-y-2">
-              <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-              <input
-                type="range" min={1} max={120} value={brushSize}
-                onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                className="w-full appearance-none h-[3px] bg-black
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-              />
-              <div className="text-[11px] uppercase">Color</div>
-              <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-10 h-10 border border-black rounded-none"/>
-            </div>
-          )}
-
-          {tool==="shape" && (
-            <div className="grid grid-cols-7 gap-2">
-              <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("star")}     title="Star"><Star className={ico}/></button>
-              <button className={btn} onClick={()=>onAddShape("heart")}    title="Heart"><Heart className={ico}/></button>
-            </div>
-          )}
-
-          {/* выделенное */}
-          {selectedKind && (
-            <div className="space-y-2 border-t pt-2">
-              <div className="text-[11px] uppercase tracking-wide">Selected: {selectedKind}</div>
-
-              {selectedKind === "text" && (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    defaultValue={selectedProps?.text ?? ""}
-                    onChange={(e)=> setSelectedText(e.target.value)}
-                    className="w-full border px-2 py-1 text-sm rounded-none"
-                    placeholder="Edit text…"
-                  />
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Size</div>
-                    <input
-                      type="range" min={8} max={240}
-                      defaultValue={selectedProps?.fontSize ?? 64}
-                      onChange={(e)=> setSelectedFontSize(parseInt(e.target.value))}
-                      className="flex-1 h-[3px] bg-black appearance-none
-                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                        [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                    />
-                    <select
-                      defaultValue={selectedProps?.fontFamily ?? "Inter, system-ui, -apple-system, sans-serif"}
-                      onChange={(e)=> setSelectedFontFamily(e.target.value)}
-                      className="border rounded-none text-sm"
-                      title="Font"
-                    >
-                      <option value="Inter, system-ui, -apple-system, sans-serif">Inter</option>
-                      <option value="Arial, Helvetica, sans-serif">Arial</option>
-                      <option value="Helvetica, Arial, sans-serif">Helvetica</option>
-                      <option value="'Times New Roman', Times, serif">Times</option>
-                      <option value="'Courier New', Courier, monospace">Courier</option>
-                      <option value="Georgia, serif">Georgia</option>
-                      <option value="Impact, Charcoal, sans-serif">Impact</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Color</div>
-                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  </div>
-                </div>
-              )}
-
-              {selectedKind === "shape" && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Fill</div>
-                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px]">Stroke</div>
-                    <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                    <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Front/Back — сдвоенные длинные кнопки */}
-          <div className="grid grid-cols-1 gap-2">
-            <div className="flex items-center gap-2">
-              <button className={clx("flex-1 h-10 border rounded-none px-3 text-left", side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
-              <button className={btn+" h-10"} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className={clx("flex-1 h-10 border rounded-none px-3 text-left", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>Back</button>
-              <button className={btn+" h-10"} onClick={onDownloadBack} title="Download back"><Download className={ico}/></button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUploadImage(f); e.currentTarget.value="" }}/>
     </div>
   )
 }
