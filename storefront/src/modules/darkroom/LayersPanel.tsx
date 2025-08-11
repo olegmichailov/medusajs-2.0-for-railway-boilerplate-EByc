@@ -1,120 +1,95 @@
 "use client"
-
-import React, { useMemo } from "react"
+import React, { useCallback } from "react"
+import { useDarkroom } from "./store"
 
 type Item = {
   id: string
   name: string
   type: "image"|"shape"|"text"|"strokes"
-  blend: any
+  blend: GlobalCompositeOperation
   opacity: number
   visible: boolean
   locked: boolean
-  z: number
 }
-
-const blends = [
-  { k: "source-over",  t: "normal" },
-  { k: "lighter",      t: "add" },
-  { k: "multiply",     t: "multiply" },
-  { k: "screen",       t: "screen" },
-  { k: "overlay",      t: "overlay" },
-  { k: "darken",       t: "darken" },
-  { k: "lighten",      t: "lighten" },
-]
 
 export default function LayersPanel({
   items,
-  selectedId,
-  onSelect,
-  onToggleVisible,
-  onToggleLock,
-  onBlendChange,
-  onOpacityChange,
-  onDelete,
-  onDuplicate,
+  onBlend, onOpacity,
+  onSelect, selectedId,
+  onToggleVisible, onToggleLock,
+  onDuplicate, onDelete,
   onReorder
 }: {
   items: Item[]
-  selectedId: string | null
+  onBlend: (id:string, blend:GlobalCompositeOperation)=>void
+  onOpacity: (id:string, value:number)=>void
   onSelect: (id:string)=>void
+  selectedId: string|null
   onToggleVisible: (id:string)=>void
   onToggleLock: (id:string)=>void
-  onBlendChange: (id:string, blend:any)=>void
-  onOpacityChange: (id:string, opacity:number)=>void
-  onDelete: (id:string)=>void
   onDuplicate: (id:string)=>void
-  onReorder: (dragId:string, overId:string)=>void
+  onDelete: (id:string)=>void
+  onReorder: (srcId:string, dstId:string)=>void
 }) {
-  const sorted = useMemo(()=> {
-    // верхние сверху списка
-    return [...items].sort((a,b)=> b.z - a.z)
-  }, [items])
+  const { showLayers } = useDarkroom()
 
-  const trunc = (s:string) => s.length>14 ? s.slice(0,12)+"…" : s
+  const dragId = React.useRef<string|null>(null)
+  const onDragStart = (id:string) => (e:React.DragEvent) => {
+    dragId.current = id
+    e.dataTransfer.setData("text/plain", id)
+  }
+  const onDragOver = (e:React.DragEvent) => { e.preventDefault() }
+  const onDrop = (overId:string) => (e:React.DragEvent) => {
+    e.preventDefault()
+    const src = dragId.current
+    dragId.current = null
+    if (src && src !== overId) onReorder(src, overId)
+  }
+
+  if (!showLayers) return null
 
   return (
-    <div className="fixed right-5 top-36 w-[320px] bg-white border border-black/20 shadow-xl p-10 pt-3 pb-3"
-         style={{ padding: 12 }}>
-      <div className="text-[11px] uppercase tracking-wide mb-2">Layers</div>
-      <div className="space-y-6">
-        {sorted.map((it) => (
+    <div className="fixed right-6 top-40 z-30 w-[320px] bg-white/90 border border-black/10 p-3 shadow-xl">
+      <div className="text-[11px] uppercase mb-2">Layers</div>
+      <div className="space-y-2">
+        {items.map(it => (
           <div key={it.id}
-               className={`border ${selectedId===it.id ? "bg-black text-white" : "bg-white text-black"} `}
-               style={{ borderColor: "#000", padding: 6 }}
-               onClick={()=>onSelect(it.id)}
-               onDragOver={(e)=>{ e.preventDefault() }}
-               onDrop={(e)=> {
-                 const dragId = e.dataTransfer.getData("text/plain")
-                 if (dragId) onReorder(dragId, it.id)
-               }}
-          >
-            <div className="flex items-center gap-2">
-              {/* drag handle */}
-              <button
-                draggable
-                onDragStart={(e)=> e.dataTransfer.setData("text/plain", it.id)}
-                className="w-6 h-6 border border-current flex items-center justify-center"
-                title="Drag to reorder"
-              >
-                ⋮⋮
-              </button>
+               draggable
+               onDragStart={onDragStart(it.id)}
+               onDragOver={onDragOver}
+               onDrop={onDrop(it.id)}
+               className={`border p-2 grid grid-cols-[20px_1fr_auto_auto_auto_auto_auto] items-center gap-2 ${selectedId===it.id?"bg-black text-white":"bg-white"}`}
+               onClick={()=>onSelect(it.id)}>
+            {/* drag handle */}
+            <div className="cursor-grab select-none">⋮⋮</div>
 
-              <div className="flex-1 text-xs font-mono">{trunc(it.name)}</div>
+            {/* name + blend + opacity */}
+            <div className="text-xs truncate">{it.name}</div>
 
-              {/* lock / eye / duplicate / delete */}
-              <div className="flex items-center gap-1">
-                <button className="w-6 h-6 border border-current" onClick={(e)=>{e.stopPropagation(); onToggleLock(it.id)}} title="Lock">🔒</button>
-                <button className="w-6 h-6 border border-current" onClick={(e)=>{e.stopPropagation(); onToggleVisible(it.id)}} title="Visible">{it.visible ? "👁" : "🚫"}</button>
-                <button className="w-6 h-6 border border-current" onClick={(e)=>{e.stopPropagation(); onDuplicate(it.id)}} title="Duplicate">⧉</button>
-                <button className="w-6 h-6 border border-current" onClick={(e)=>{e.stopPropagation(); onDelete(it.id)}} title="Delete">⌫</button>
-              </div>
-            </div>
+            <select
+              className={`border text-xs px-1 py-0.5 ${selectedId===it.id?"bg-black text-white":"bg-white"}`}
+              value={it.blend}
+              onChange={(e)=>onBlend(it.id, e.target.value as GlobalCompositeOperation)}
+              onClick={(e)=>e.stopPropagation()}
+            >
+              {["source-over","multiply","screen","overlay","darken","lighten","color-dodge","color-burn","hard-light","soft-light","difference","exclusion","hue","saturation","color","luminosity","lighter","destination-out"].map(b=>
+                <option key={b} value={b}>{b}</option>
+              )}
+            </select>
 
-            {/* controls row (не мешают dnd — тянем только за «⋮⋮») */}
-            <div className="mt-2 grid grid-cols-[1fr_auto] gap-2 items-center">
-              <select
-                className={`border ${selectedId===it.id ? "bg-black text-white border-white" : "bg-white text-black border-black"}`}
-                value={it.blend as string}
-                onChange={(e)=> onBlendChange(it.id, e.target.value as any)}
-              >
-                {blends.map(b => <option key={b.k} value={b.k}>{b.t}</option>)}
-              </select>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={0} max={1} step={0.02}
-                  value={it.opacity}
-                  onChange={(e)=> onOpacityChange(it.id, parseFloat(e.target.value))}
-                />
-                <div className="w-8 text-right text-xs">{Math.round(it.opacity*100)}</div>
-              </div>
-            </div>
+            <input type="range" min={0} max={100}
+              className="w-24"
+              value={Math.round(it.opacity*100)}
+              onChange={(e)=>onOpacity(it.id, parseInt(e.target.value)/100)}
+              onClick={(e)=>e.stopPropagation()}
+            />
+
+            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onToggleVisible(it.id)}}>{it.visible?"👁":"🚫"}</button>
+            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onToggleLock(it.id)}}>{it.locked?"🔒":"🔓"}</button>
+            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onDuplicate(it.id)}}>⎘</button>
+            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onDelete(it.id)}}>🗑</button>
           </div>
         ))}
-        {sorted.length===0 && (
-          <div className="text-xs text-black/60">Нет слоёв на этой стороне</div>
-        )}
       </div>
     </div>
   )
