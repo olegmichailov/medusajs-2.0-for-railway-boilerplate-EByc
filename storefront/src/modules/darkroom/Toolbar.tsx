@@ -23,6 +23,17 @@ export default function Toolbar({
   startCrop, applyCrop, cancelCrop, isCropping,
   onDownloadFront, onDownloadBack,
   toggleLayers, layersOpen,
+
+  // контекст выделенного
+  selectedKind,
+  selectedProps,
+  setSelectedFill,
+  setSelectedStroke,
+  setSelectedStrokeW,
+  setSelectedText,
+  setSelectedFontSize,
+  setSelectedFontFamily,
+  setSelectedColor,
 }: {
   side: Side
   setSide: (s: Side) => void
@@ -45,6 +56,16 @@ export default function Toolbar({
   onDownloadBack: () => void
   toggleLayers: () => void
   layersOpen: boolean
+
+  selectedKind: "image"|"shape"|"text"|"strokes"|null
+  selectedProps: any
+  setSelectedFill: (hex:string)=>void
+  setSelectedStroke: (hex:string)=>void
+  setSelectedStrokeW: (w:number)=>void
+  setSelectedText: (t:string)=>void
+  setSelectedFontSize: (n:number)=>void
+  setSelectedFontFamily: (name:string)=>void
+  setSelectedColor: (hex:string)=>void
 }) {
   const [open, setOpen] = useState(true)
   const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -74,7 +95,7 @@ export default function Toolbar({
   }
 
   return (
-    <div className={wrap + " fixed z-40 w-[360px] p-3"} style={{ left: pos.x, top: pos.y }}>
+    <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
       <div className="flex items-center justify-between mb-3" onMouseDown={onDragStart}>
         <div className="text-[11px] uppercase">Tools</div>
         <div className="flex items-center gap-2">
@@ -105,20 +126,16 @@ export default function Toolbar({
             <div className="space-y-2">
               <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
               <input
-                type="range"
-                min={1} max={120}
-                value={brushSize}
+                type="range" min={1} max={120} value={brushSize}
                 onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                className="w-full appearance-none h-[3px] bg-black"
-                style={{
-                  WebkitAppearance: "none",
-                }}
+                className="w-full appearance-none h-[3px] bg-black
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
               />
               <div className="text-[11px] uppercase">Color</div>
               <input
-                type="color"
-                value={brushColor}
-                onChange={(e)=>setBrushColor(e.target.value)}
+                type="color" value={brushColor}
+                onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
                 className="w-10 h-10 border border-black rounded-none"
               />
             </div>
@@ -127,11 +144,73 @@ export default function Toolbar({
           {/* выбор фигур */}
           {tool==="shape" && (
             <div className="grid grid-cols-5 gap-2">
-              <button className={btn} onClick={()=>{ setShapeKind("circle");   onAddShape("circle") }} title="Circle"><Circle className={ico}/></button>
-              <button className={btn} onClick={()=>{ setShapeKind("square");   onAddShape("square") }} title="Square"><Square className={ico}/></button>
-              <button className={btn} onClick={()=>{ setShapeKind("triangle"); onAddShape("triangle") }} title="Triangle"><Triangle className={ico}/></button>
-              <button className={btn} onClick={()=>{ setShapeKind("cross");    onAddShape("cross") }} title="Cross"><Plus className={ico}/></button>
-              <button className={btn} onClick={()=>{ setShapeKind("line");     onAddShape("line") }} title="Line"><Slash className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
+              <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
+            </div>
+          )}
+
+          {/* КОНТЕКСТ ВЫДЕЛЕННОГО */}
+          {selectedKind && (
+            <div className="space-y-2 border-t pt-2">
+              <div className="text-[11px] uppercase tracking-wide">Selected: {selectedKind}</div>
+
+              {selectedKind === "text" && (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    defaultValue={selectedProps?.text ?? ""}
+                    onChange={(e)=> setSelectedText(e.target.value)}
+                    className="w-full border px-2 py-1 text-sm rounded-none"
+                    placeholder="Edit text…"
+                  />
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Size</div>
+                    <input
+                      type="range" min={8} max={240}
+                      defaultValue={selectedProps?.fontSize ?? 64}
+                      onChange={(e)=> setSelectedFontSize(parseInt(e.target.value))}
+                      className="flex-1 h-[3px] bg-black appearance-none
+                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                        [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                    />
+                    <select
+                      defaultValue={selectedProps?.fontFamily ?? "Inter, system-ui, -apple-system, sans-serif"}
+                      onChange={(e)=> setSelectedFontFamily(e.target.value)}
+                      className="border rounded-none text-sm"
+                      title="Font"
+                    >
+                      <option value="Inter, system-ui, -apple-system, sans-serif">Inter</option>
+                      <option value="Arial, Helvetica, sans-serif">Arial</option>
+                      <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                      <option value="'Times New Roman', Times, serif">Times</option>
+                      <option value="'Courier New', Courier, monospace">Courier</option>
+                      <option value="Georgia, serif">Georgia</option>
+                      <option value="Impact, Charcoal, sans-serif">Impact</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Color</div>
+                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                  </div>
+                </div>
+              )}
+
+              {selectedKind === "shape" && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Fill</div>
+                    <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Stroke</div>
+                    <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                    <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
