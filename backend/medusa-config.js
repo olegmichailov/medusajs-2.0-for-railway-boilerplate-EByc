@@ -125,7 +125,8 @@ const medusaConfig = {
               apiKey: STRIPE_API_KEY,
               webhookSecret: STRIPE_WEBHOOK_SECRET,
               payment_element: true,
-              automatic_payment_methods: true, // <------ ВОТ ЭТА СТРОКА!
+              automatic_payment_methods: true,
+              capture: true// <------ ВОТ ЭТА СТРОКА!
             },
           },
         ],
