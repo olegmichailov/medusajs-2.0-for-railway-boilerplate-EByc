@@ -1,93 +1,127 @@
 "use client"
-import React, { useCallback } from "react"
-import { useDarkroom } from "./store"
+
+import React, { useState } from "react"
+import { clx } from "@medusajs/ui"
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
+
+const blends = [
+  "source-over","multiply","screen","overlay","darken","lighten","xor"
+] as const
 
 type Item = {
   id: string
   name: string
-  type: "image"|"shape"|"text"|"strokes"
-  blend: GlobalCompositeOperation
-  opacity: number
+  type: "image" | "shape" | "text" | "strokes"
   visible: boolean
   locked: boolean
+  blend: string
+  opacity: number
 }
 
 export default function LayersPanel({
   items,
-  onBlend, onOpacity,
-  onSelect, selectedId,
-  onToggleVisible, onToggleLock,
-  onDuplicate, onDelete,
-  onReorder
+  selectId,
+  onSelect,
+  onToggleVisible,
+  onToggleLock,
+  onDelete,
+  onDuplicate,
+  onReorder,
+  onChangeBlend,
+  onChangeOpacity,
 }: {
   items: Item[]
-  onBlend: (id:string, blend:GlobalCompositeOperation)=>void
-  onOpacity: (id:string, value:number)=>void
-  onSelect: (id:string)=>void
-  selectedId: string|null
-  onToggleVisible: (id:string)=>void
-  onToggleLock: (id:string)=>void
-  onDuplicate: (id:string)=>void
-  onDelete: (id:string)=>void
-  onReorder: (srcId:string, dstId:string)=>void
+  selectId: string | null
+  onSelect: (id: string) => void
+  onToggleVisible: (id: string) => void
+  onToggleLock: (id: string) => void
+  onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
+  onReorder: (srcId: string, destId: string) => void
+  onChangeBlend: (id: string, blend: string) => void
+  onChangeOpacity: (id: string, opacity: number) => void
 }) {
-  const { showLayers } = useDarkroom()
+  const [dragId, setDragId] = useState<string | null>(null)
 
-  const dragId = React.useRef<string|null>(null)
-  const onDragStart = (id:string) => (e:React.DragEvent) => {
-    dragId.current = id
-    e.dataTransfer.setData("text/plain", id)
-  }
-  const onDragOver = (e:React.DragEvent) => { e.preventDefault() }
-  const onDrop = (overId:string) => (e:React.DragEvent) => {
-    e.preventDefault()
-    const src = dragId.current
-    dragId.current = null
-    if (src && src !== overId) onReorder(src, overId)
-  }
-
-  if (!showLayers) return null
+  // FRIS 0728: общий стоп-проп для интерактивных контролов, чтобы не срабатывал dnd
+  const stop = (e: React.SyntheticEvent) => { e.stopPropagation() }
 
   return (
-    <div className="fixed right-6 top-40 z-30 w-[320px] bg-white/90 border border-black/10 p-3 shadow-xl">
-      <div className="text-[11px] uppercase mb-2">Layers</div>
-      <div className="space-y-2">
-        {items.map(it => (
-          <div key={it.id}
-               draggable
-               onDragStart={onDragStart(it.id)}
-               onDragOver={onDragOver}
-               onDrop={onDrop(it.id)}
-               className={`border p-2 grid grid-cols-[20px_1fr_auto_auto_auto_auto_auto] items-center gap-2 ${selectedId===it.id?"bg-black text-white":"bg-white"}`}
-               onClick={()=>onSelect(it.id)}>
-            {/* drag handle */}
-            <div className="cursor-grab select-none">⋮⋮</div>
+    <div className="fixed right-6 top-40 z-40 w-[340px] border border-black/10 bg-white/95 shadow-xl rounded-none">
+      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
+      <div className="max-h-[62vh] overflow-auto p-2 space-y-1">
+        {items.map((it) => (
+          <div
+            key={it.id}
+            draggable
+            onDragStart={() => setDragId(it.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => { if (dragId && dragId !== it.id) onReorder(dragId, it.id); setDragId(null) }}
+            className={clx(
+              "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none",
+              selectId === it.id ? "bg-black text-white" : "bg-white"
+            )}
+            onClick={() => onSelect(it.id)}
+            title={it.name}
+          >
+            {/* ручка для dnd */}
+            <div className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing">
+              <GripVertical className="w-4 h-4"/>
+            </div>
 
-            {/* name + blend + opacity */}
-            <div className="text-xs truncate">{it.name}</div>
+            <div className="text-xs flex-1 truncate">{it.name}</div>
 
+            {/* FRIS 0728: Blend + Opacity */}
             <select
-              className={`border text-xs px-1 py-0.5 ${selectedId===it.id?"bg-black text-white":"bg-white"}`}
-              value={it.blend}
-              onChange={(e)=>onBlend(it.id, e.target.value as GlobalCompositeOperation)}
-              onClick={(e)=>e.stopPropagation()}
-            >
-              {["source-over","multiply","screen","overlay","darken","lighten","color-dodge","color-burn","hard-light","soft-light","difference","exclusion","hue","saturation","color","luminosity","lighter","destination-out"].map(b=>
-                <option key={b} value={b}>{b}</option>
+              className={clx(
+                "h-8 px-1 border rounded-none text-xs",
+                selectId === it.id ? "bg-black text-white border-white/40" : "bg-white"
               )}
+              value={it.blend}
+              onChange={(e) => onChangeBlend(it.id, e.target.value)}
+              onMouseDown={stop}
+            >
+              {blends.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
 
-            <input type="range" min={0} max={100}
-              className="w-24"
-              value={Math.round(it.opacity*100)}
-              onChange={(e)=>onOpacity(it.id, parseInt(e.target.value)/100)}
-              onClick={(e)=>e.stopPropagation()}
+            <input
+              type="range" min={10} max={100}
+              value={Math.round(it.opacity * 100)}
+              onChange={(e)=>onChangeOpacity(it.id, parseInt(e.target.value)/100)}
+              className="w-20 h-[2px] bg-black appearance-none
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+              [&::-webkit-slider-thumb]:bg-current [&::-webkit-slider-thumb]:rounded-none"
+              onMouseDown={stop}
             />
 
-            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onToggleVisible(it.id)}}>{it.visible?"👁":"🚫"}</button>
-            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onToggleLock(it.id)}}>{it.locked?"🔒":"🔓"}</button>
-            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onDuplicate(it.id)}}>⎘</button>
-            <button className="border px-2 py-0.5" onClick={(e)=>{e.stopPropagation(); onDelete(it.id)}}>🗑</button>
+            <button
+              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+              onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
+              title={it.visible ? "Hide" : "Show"}
+            >
+              {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
+            </button>
+            <button
+              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+              onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
+              title={it.locked ? "Unlock" : "Lock"}
+            >
+              {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+            </button>
+            <button
+              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+              onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
+              title="Duplicate"
+            >
+              <Copy className="w-4 h-4"/>
+            </button>
+            <button
+              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+              onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4"/>
+            </button>
           </div>
         ))}
       </div>
