@@ -23,7 +23,8 @@ type State = {
 
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush",                 // BRUSH ПО УМОЛЧАНИЮ (десктоп и мобайл)
+  // ⇣ Brush по умолчанию и на desktop, и на mobile
+  tool: "brush",
   brushColor: "#ff2a7f",
   brushSize: 36,
   shapeKind: "circle",
