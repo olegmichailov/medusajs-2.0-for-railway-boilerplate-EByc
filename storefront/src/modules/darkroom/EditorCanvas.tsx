@@ -17,7 +17,7 @@ const uid = () => Math.random().toString(36).slice(2)
 
 // чтобы нижняя Create/шторка не перекрывала сцену
 const TOP_SAFE = 12
-const BOTTOM_SAFE = 160   // если надо ещё поднять мокап — увеличь это число
+const BOTTOM_SAFE = 100   // если надо ещё поднять мокап — увеличь это число
 
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
 type AnyNode = Konva.Image | Konva.Line | Konva.Text | Konva.Shape | Konva.Group
