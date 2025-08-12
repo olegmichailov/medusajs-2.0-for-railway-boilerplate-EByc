@@ -43,10 +43,10 @@ export default function LayersPanel({
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   return (
-    <div className="fixed right-6 top-24 z-40 w-[340px] max-h-[80vh] overflow-auto border border-black/10 bg-white/95 shadow-xl rounded-none">
-      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase sticky top-0 bg-white/95">Layers</div>
+    <div className="fixed right-6 top-40 z-40 w-[340px] border border-black/10 bg-white/95 shadow-xl rounded-none">
+      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
 
-      <div className="p-2 space-y-1">
+      <div className="max-h-[62vh] overflow-auto p-2 space-y-1">
         {items.map((it) => (
           <div
             key={it.id}
@@ -71,8 +71,14 @@ export default function LayersPanel({
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
+            {/* drag handle */}
+            <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
+              <div className="w-2 h-4 border border-current" />
+            </div>
+
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
+            {/* Blend */}
             <select
               className={clx(
                 "h-8 px-1 border rounded-none text-xs",
@@ -85,6 +91,7 @@ export default function LayersPanel({
               {blends.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
 
+            {/* Opacity */}
             <input
               type="range" min={10} max={100}
               value={Math.round(it.opacity * 100)}
@@ -95,6 +102,7 @@ export default function LayersPanel({
                 [&::-webkit-slider-thumb]:bg-current [&::-webkit-slider-thumb]:rounded-none"
             />
 
+            {/* controls */}
             <button
               className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
@@ -109,7 +117,7 @@ export default function LayersPanel({
               onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
               title={it.locked ? "Unlock" : "Lock"}
             >
-              {it.locked ? <Unlock className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
+              {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
             </button>
             <button
               className="w-8 h-8 grid place-items-center border border-current bg-transparent"
