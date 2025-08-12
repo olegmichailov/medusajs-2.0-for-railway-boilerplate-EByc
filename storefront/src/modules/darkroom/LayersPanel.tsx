@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown } from "lucide-react"
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
 
 const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
 
@@ -24,7 +24,7 @@ export default function LayersPanel({
   onToggleLock,
   onDelete,
   onDuplicate,
-  onReorder,
+  onReorder,          // (srcId, destId, place)
   onChangeBlend,
   onChangeOpacity,
 }: {
@@ -42,21 +42,11 @@ export default function LayersPanel({
   const [dragId, setDragId] = useState<string | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // простые кнопки Up/Down — удобнее на мобиле, и не конфликтуют с тач-жестами
-  const move = (id: string, dir: "up"|"down") => {
-    const ids = items.map(i=>i.id)
-    const i = ids.indexOf(id)
-    const j = dir==="up" ? i-1 : i+1
-    if (j<0 || j>=ids.length) return
-    const target = ids[j]
-    onReorder(id, target, dir==="up" ? "after" : "before")
-  }
-
   return (
-    <div className="fixed right-3 top-20 z-40 w-[320px] border border-black/10 bg-white/95 shadow-xl rounded-none">
-      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
+    <div className="fixed right-6 top-24 z-40 w-[340px] max-h-[80vh] overflow-auto border border-black/10 bg-white/95 shadow-xl rounded-none">
+      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase sticky top-0 bg-white/95">Layers</div>
 
-      <div className="max-h-[50vh] overflow-auto p-2 space-y-1">
+      <div className="p-2 space-y-1">
         {items.map((it) => (
           <div
             key={it.id}
@@ -83,13 +73,11 @@ export default function LayersPanel({
           >
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
-            <div className="flex gap-1">
-              <button className="w-7 h-7 grid place-items-center border border-current" onClick={(e)=>{e.stopPropagation(); move(it.id,"up")}}><ArrowUp className="w-3 h-3"/></button>
-              <button className="w-7 h-7 grid place-items-center border border-current" onClick={(e)=>{e.stopPropagation(); move(it.id,"down")}}><ArrowDown className="w-3 h-3"/></button>
-            </div>
-
             <select
-              className={clx("h-8 px-1 border rounded-none text-xs", selectId === it.id ? "bg-black text-white border-white/40" : "bg-white")}
+              className={clx(
+                "h-8 px-1 border rounded-none text-xs",
+                selectId === it.id ? "bg-black text-white border-white/40" : "bg-white"
+              )}
               value={it.blend}
               onChange={(e) => onChangeBlend(it.id, e.target.value)}
               onMouseDown={(e)=>e.stopPropagation()}
@@ -121,7 +109,7 @@ export default function LayersPanel({
               onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
               title={it.locked ? "Unlock" : "Lock"}
             >
-              {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+              {it.locked ? <Unlock className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
             </button>
             <button
               className="w-8 h-8 grid place-items-center border border-current bg-transparent"
