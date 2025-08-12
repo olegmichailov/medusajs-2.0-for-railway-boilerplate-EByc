@@ -58,7 +58,7 @@ export default function Toolbar({
   mobileLayers,
 }: any & { mobileLayers: MobileLayersProps }) {
 
-  // ——— Desktop плавающая панель
+  // ——— Desktop
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -211,7 +211,7 @@ export default function Toolbar({
     )
   }
 
-  // ——— Mobile: кнопка Create + нижняя шторка
+  // ——— Mobile
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -223,7 +223,6 @@ export default function Toolbar({
 
   return (
     <>
-      {/* нижняя кнопка */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
@@ -235,7 +234,6 @@ export default function Toolbar({
         </div>
       </div>
 
-      {/* Шторка */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50" onClick={closeMobile}>
           <div className="absolute inset-0 bg-black/40" />
@@ -326,22 +324,13 @@ export default function Toolbar({
                   {mobileLayers.items.length === 0 && (
                     <div className="text-xs text-black/60">No layers yet.</div>
                   )}
-                  {mobileLayers.items.map((it, idx) => (
+                  {mobileLayers.items.map((it) => (
                     <div
                       key={it.id}
                       className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
-
-                      {/* упрощённый порядок на мобиле */}
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" title="Up">
-                        <ChevronUp className="w-4 h-4"/>
-                      </button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" title="Down">
-                        <ChevronDown className="w-4 h-4"/>
-                      </button>
-
                       <button
                         className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
