@@ -5,49 +5,62 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ChevronUp, ChevronDown
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical
 } from "lucide-react"
+import type { ShapeKind } from "./store"
 import { isMobile } from "react-device-detect"
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
-type MobileLayer = {
-  id: string
-  name: string
-  visible: boolean
-  locked: boolean
+type MobileLayersProps = {
+  items: Array<{
+    id: string
+    name: string
+    type: "image" | "shape" | "text" | "strokes"
+    visible: boolean
+    locked: boolean
+    blend: string
+    opacity: number
+  }>
+  onSelect: (id: string) => void
+  onToggleVisible: (id: string) => void
+  onToggleLock: (id: string) => void
+  onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
+  onChangeBlend: (id: string, blend: string) => void
+  onChangeOpacity: (id: string, opacity: number) => void
+  onReorder: (srcId: string, destId: string, place: "before" | "after") => void
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
 }
 
-export default function Toolbar(props: any & {
-  mobileLayers: {
-    items: MobileLayer[]
-    onSelect: (id: string) => void
-    onToggleVisible: (id: string) => void
-    onToggleLock: (id: string) => void
-    onDelete: (id: string) => void
-    onDuplicate: (id: string) => void
-    onMoveUp: (id: string) => void
-    onMoveDown: (id: string) => void
-  }
-}) {
-  const {
-    side, setSide,
-    tool, setTool,
-    brushColor, setBrushColor,
-    brushSize, setBrushSize,
-    onUploadImage, onAddText, onAddShape,
-    startCrop, cancelCrop, isCropping,
-    onDownloadFront, onDownloadBack,
-    toggleLayers, layersOpen,
-    selectedKind, selectedProps,
-    setSelectedFill, setSelectedStroke, setSelectedStrokeW,
-    setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
-    mobileLayers,
-  } = props
+export default function Toolbar({
+  side, setSide,
+  tool, setTool,
+  brushColor, setBrushColor,
+  brushSize, setBrushSize,
+  shapeKind, setShapeKind,
+  onUploadImage, onAddText, onAddShape,
+  startCrop, applyCrop, cancelCrop, isCropping,
+  onDownloadFront, onDownloadBack,
+  toggleLayers, layersOpen,
 
-  // ---------- DESKTOP ----------
+  selectedKind,
+  selectedProps,
+  setSelectedFill,
+  setSelectedStroke,
+  setSelectedStrokeW,
+  setSelectedText,
+  setSelectedFontSize,
+  setSelectedFontFamily,
+  setSelectedColor,
+
+  mobileLayers,
+}: any & { mobileLayers: MobileLayersProps }) {
+
+  // ---------- Desktop ----------
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -120,6 +133,16 @@ export default function Toolbar(props: any & {
               </div>
             )}
 
+            {tool==="shape" && (
+              <div className="grid grid-cols-5 gap-2">
+                <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
+              </div>
+            )}
+
             {selectedKind === "text" && (
               <div className="space-y-2 border-t pt-2">
                 <input
@@ -189,15 +212,21 @@ export default function Toolbar(props: any & {
     )
   }
 
-  // ---------- MOBILE ----------
+  // ---------- Mobile ----------
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
 
-  // фикс: при шторке — блокируем фон
+  // блокируем фон-скролл при открытой шторке
   useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = open ? "hidden" : prev || ""
-    return () => { document.body.style.overflow = prev }
+    if (!open) return
+    const prevOverflow = document.body.style.overflow
+    const prevTouch = (document.body.style as any).touchAction
+    document.body.style.overflow = "hidden"
+    ;(document.body.style as any).touchAction = "none"
+    return () => {
+      document.body.style.overflow = prevOverflow
+      ;(document.body.style as any).touchAction = prevTouch
+    }
   }, [open])
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -207,27 +236,47 @@ export default function Toolbar(props: any & {
     e.currentTarget.value = ""
   }
 
+  // touch DnD слоёв
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [dragId, setDragId] = useState<string | null>(null)
+
+  const beginDrag = (id: string) => setDragId(id)
+  const dragOver = (clientY: number, overId: string) => {
+    if (!dragId || dragId === overId) return
+    const rect = rowRefs.current[overId]?.getBoundingClientRect()
+    if (!rect) return
+    const place = clientY < rect.top + rect.height / 2 ? "before" : "after"
+    mobileLayers.onReorder(dragId, overId, place)
+  }
+  const endDrag = () => setDragId(null)
+
   return (
     <>
+      {/* Кнопка Create */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
             className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
-            onClick={()=> { setTab("tools"); setOpen(true) }}
+            onClick={()=> setOpen(true)}
           >
             Create
           </button>
         </div>
       </div>
 
+      {/* Шторка */}
       {open && (
         <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
+          {/* dim */}
           <div className="absolute inset-0 bg-black/40" />
+
+          {/* panel */}
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[10px]"
             style={{ height: "65vh" }}
             onClick={(e)=>e.stopPropagation()}
           >
+            {/* header */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
                 <button
@@ -246,6 +295,7 @@ export default function Toolbar(props: any & {
               <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
+            {/* content */}
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
               {tab === "tools" && (
                 <>
@@ -274,6 +324,16 @@ export default function Toolbar(props: any & {
                         onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
                         className="w-9 h-9 border border-black rounded-none"
                       />
+                    </div>
+                  )}
+
+                  {tool==="shape" && (
+                    <div className="grid grid-cols-5 gap-2">
+                      <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
+                      <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
+                      <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
+                      <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
+                      <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
                     </div>
                   )}
 
@@ -345,34 +405,52 @@ export default function Toolbar(props: any & {
 
               {tab === "layers" && (
                 <div className="space-y-2">
-                  {mobileLayers.items.length === 0 && (
-                    <div className="text-xs text-black/60">No layers yet.</div>
-                  )}
                   {mobileLayers.items.map((it) => (
                     <div
                       key={it.id}
-                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
+                      ref={(el) => (rowRefs.current[it.id] = el)}
+                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black/5"
+                      onTouchStart={()=>beginDrag(it.id)}
+                      onTouchMove={(e)=>dragOver(e.touches[0].clientY, it.id)}
+                      onTouchEnd={endDrag}
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
+                      <div className="w-6 h-8 grid place-items-center text-black/50 active:text-black">
+                        <GripVertical className="w-3 h-3"/>
+                      </div>
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
 
-                      <button className="w-8 h-8 grid place-items-center border" title="Up" onClick={(e)=>{e.stopPropagation(); mobileLayers.onMoveUp(it.id)}}>
-                        <ChevronUp className="w-4 h-4"/>
-                      </button>
-                      <button className="w-8 h-8 grid place-items-center border" title="Down" onClick={(e)=>{e.stopPropagation(); mobileLayers.onMoveDown(it.id)}}>
-                        <ChevronDown className="w-4 h-4"/>
-                      </button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }} title="Up">↑</button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }} title="Down">↓</button>
 
-                      <button className="w-8 h-8 grid place-items-center border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }} title={it.visible ? "Hide" : "Show"}>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
+                        title={it.visible ? "Hide" : "Show"}
+                      >
                         {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }} title={it.locked ? "Unlock" : "Lock"}>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
+                        title={it.locked ? "Unlock" : "Lock"}
+                      >
                         {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }} title="Duplicate">
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
+                        title="Duplicate"
+                      >
                         <Copy className="w-4 h-4"/>
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }} title="Delete">
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
+                        title="Delete"
+                      >
                         <Trash2 className="w-4 h-4"/>
                       </button>
                     </div>
