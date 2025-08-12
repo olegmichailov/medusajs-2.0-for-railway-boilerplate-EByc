@@ -1,11 +1,11 @@
 "use client"
 
-import React, { useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ChevronUp, ChevronDown
 } from "lucide-react"
 import type { ShapeKind } from "./store"
 import { isMobile } from "react-device-detect"
@@ -14,16 +14,18 @@ const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
+type MobileLayersItem = {
+  id: string
+  name: string
+  type: "image" | "shape" | "text" | "strokes"
+  visible: boolean
+  locked: boolean
+  blend: string
+  opacity: number
+}
+
 type MobileLayersProps = {
-  items: Array<{
-    id: string
-    name: string
-    type: "image" | "shape" | "text" | "strokes"
-    visible: boolean
-    locked: boolean
-    blend: string
-    opacity: number
-  }>
+  items: MobileLayersItem[]
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -31,6 +33,7 @@ type MobileLayersProps = {
   onDuplicate: (id: string) => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
+  onReorder?: (srcId: string, destId: string, place: "before" | "after") => void
 }
 
 export default function Toolbar({
@@ -56,7 +59,8 @@ export default function Toolbar({
 
   // мобилка
   mobileLayers,
-}: any & { mobileLayers: MobileLayersProps }) {
+  onBottomSheetOpenChange, // <-- сообщаем наружу открыт/закрыт
+}: any & { mobileLayers: MobileLayersProps; onBottomSheetOpenChange?: (open: boolean) => void }) {
 
   // ——— Desktop (как было) ———
   if (!isMobile) {
@@ -211,16 +215,28 @@ export default function Toolbar({
   }
 
   // ——— Mobile UI ———
-  // одна закреплённая кнопка Create снизу; по нажатию — шторка с вкладками Tools/Layers
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
 
-  // блокировка фонового скролла делается в EditorCanvas
+  useEffect(() => { onBottomSheetOpenChange?.(open) }, [open, onBottomSheetOpenChange])
+
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) onUploadImage(f)
     e.currentTarget.value = ""
+  }
+
+  // вспомогалка для порядка в слоях
+  const moveLayer = (id: string, dir: "up" | "down") => {
+    if (!mobileLayers.onReorder) return
+    const list = mobileLayers.items
+    const idx = list.findIndex(i => i.id === id)
+    if (idx === -1) return
+    const neighbor = dir === "up" ? list[idx - 1] : list[idx + 1]
+    if (!neighbor) return
+    const place = dir === "up" ? "after" : "before"
+    mobileLayers.onReorder(id, neighbor.id, place)
   }
 
   return (
@@ -240,16 +256,13 @@ export default function Toolbar({
       {/* Шторка */}
       {open && (
         <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
-          {/* dim */}
           <div className="absolute inset-0 bg-black/40" />
 
-          {/* panel */}
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[10px]"
             style={{ height: "65vh" }}
             onClick={(e)=>e.stopPropagation()}
           >
-            {/* header */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
                 <button
@@ -268,7 +281,6 @@ export default function Toolbar({
               <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
-            {/* content */}
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
               {tab === "tools" && (
                 <>
@@ -381,13 +393,26 @@ export default function Toolbar({
                   {mobileLayers.items.length === 0 && (
                     <div className="text-xs text-black/60">No layers yet.</div>
                   )}
-                  {mobileLayers.items.map((it) => (
+                  {mobileLayers.items.map((it, i) => (
                     <div
                       key={it.id}
                       className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
+
+                      {/* порядок */}
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        title="Up"
+                        onClick={(e)=>{ e.stopPropagation(); moveLayer(it.id, "up") }}
+                      ><ChevronUp className="w-4 h-4" /></button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        title="Down"
+                        onClick={(e)=>{ e.stopPropagation(); moveLayer(it.id, "down") }}
+                      ><ChevronDown className="w-4 h-4" /></button>
+
                       <button
                         className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
