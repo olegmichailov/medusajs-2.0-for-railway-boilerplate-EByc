@@ -15,7 +15,7 @@ const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 const uid = () => Math.random().toString(36).slice(2)
 
-// — маленький хук, чтобы гасить скролл, когда открыта мобильная шторка
+// — блокируем фон-скролл когда нужна модалка
 const useLockBodyScroll = (locked: boolean) => {
   useEffect(() => {
     const el = document.documentElement
@@ -40,7 +40,6 @@ export default function EditorCanvas() {
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  const containerRef = useRef<HTMLDivElement>(null)
   const stageRef     = useRef<Konva.Stage>(null)
   const bgLayerRef   = useRef<Konva.Layer>(null)
   const drawLayerRef = useRef<Konva.Layer>(null)
@@ -55,86 +54,138 @@ export default function EditorCanvas() {
   const [isCropping, setIsCropping] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
 
-  // — размеры холста: на мобилке оставляем место под «Create», Stage не прыгает
+  // — стабильный вьюпорт: не пересчитываем при открытии шторки
+  const getVH = () => (typeof window !== "undefined" && window.visualViewport?.height) ? window.visualViewport!.height : (typeof window !== "undefined" ? window.innerHeight : 900)
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
-    const vh = typeof window !== "undefined" ? window.innerHeight : 900
+    const vh = getVH()
     const bottomPad = isMobile ? 140 : 40
-    const topPad    = isMobile ? 120 : 40
-    const maxW = vw - (isMobile ? 24 : 440)               // справа под Layers на десктопе
+    const topPad    = isMobile ? 100 : 40
+    const maxW = vw - (isMobile ? 24 : 440)
     const maxH = vh - (topPad + bottomPad)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
-  }, [showLayers])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLayers]) // шторка не влияет
 
-  // гасим прокрутку, когда открыта шторка на мобилке
   useLockBodyScroll(mobileOpen)
 
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => id ? layers.find(l => l.id === id) || null : null
   const node = (id: string | null) => find(id)?.node || null
 
-  // показываем только текущую сторону
+  // видимость по стороне
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     drawLayerRef.current?.batchDraw()
     attachTransformer()
   }, [side, layers])
 
-  // — применяем метаданные слоя к узлу
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  // — Transformer/drag: активен только вне Brush/Eraser/Crop и не locked
+  // ——— ТРАНСФОРМЕР (десктоп): рабочие масштаб/поворот
+  const normalizeTransform = (target: AnyNode) => {
+    // переносим scale → в конкретные размеры, чтобы изменение было “настоящим”
+    const t = target as any
+    const sx = t.scaleX?.() ?? 1
+    const sy = t.scaleY?.() ?? 1
+
+    if (t instanceof Konva.Image || t instanceof Konva.Rect) {
+      t.width(t.width() * sx)
+      t.height(t.height() * sy)
+    } else if (t instanceof Konva.Circle) {
+      t.radius(t.radius() * Math.max(sx, sy))
+    } else if (t instanceof Konva.RegularPolygon) {
+      t.radius(t.radius() * Math.max(sx, sy))
+    } else if (t instanceof Konva.Line) {
+      // масштабируем точки линии
+      const pts = t.points()
+      const cx = t.x() + t.width() / 2
+      const cy = t.y() + t.height() / 2
+      const scaled = []
+      for (let i = 0; i < pts.length; i += 2) {
+        const dx = pts[i] - cx
+        const dy = pts[i + 1] - cy
+        scaled.push(cx + dx * sx, cy + dy * sy)
+      }
+      t.points(scaled)
+      // толщина
+      t.strokeWidth(t.strokeWidth() * ((sx + sy) / 2))
+    } else if (t instanceof Konva.Group) {
+      // группы — оставляем scale (работает как надо)
+      // ничего не делаем
+    }
+    // сбрасываем scale, иначе накапливается
+    t.scaleX?.(1)
+    t.scaleY?.(1)
+    t.getLayer()?.batchDraw()
+  }
+
   const attachTransformer = () => {
     const lay = find(selectedId)
-    const n = lay?.node
-    const disabled = isDrawing || isCropping || lay?.meta.locked || !n || !trRef.current || tool === "brush" || tool === "erase"
+    const n: AnyNode | undefined = lay?.node
+    const disabled =
+      isDrawing || isCropping || lay?.meta.locked || !n || !trRef.current ||
+      tool === "brush" || tool === "erase"
+
     if (disabled) {
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
       return
     }
+
+    // важно: чтобы хендлы “цепляли” цель
+    ;(n as any).listening(true)
     ;(n as any).draggable(true)
+
+    // вешаем transformend один раз на выбранный
+    ;(n as any).off(".__tfix")
+    ;(n as any).on("transformend.__tfix", () => normalizeTransform(n))
+
     trRef.current.nodes([n])
+    trRef.current.rotationEnabled(true)
+    trRef.current.enabledAnchors([
+      "top-left","top-center","top-right",
+      "middle-left","middle-right",
+      "bottom-left","bottom-center","bottom-right",
+    ])
+    trRef.current.ignoreStroke(false)
+    trRef.current.flipEnabled(true)
     trRef.current.getLayer()?.batchDraw()
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
-  // — горячие клавиши (desktop)
+  // — Hotkeys (desktop)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!stageRef.current) return
-      const activeTool = tool
-      // brush/erase — не двигаем, рисуем
-      if (activeTool === "brush" || activeTool === "erase") return
+      const n = node(selectedId) as any
+      if (!n) return
 
-      const n = node(selectedId)
-      const isArrow = ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)
-      if (isArrow) e.preventDefault()
+      if (tool === "brush" || tool === "erase" || tool === "crop") return
 
-      if (n) {
-        const step = e.shiftKey ? 20 : 2
-        if (e.key === "ArrowLeft")  { n.x(n.x()-step) }
-        if (e.key === "ArrowRight") { n.x(n.x()+step) }
-        if (e.key === "ArrowUp")    { n.y(n.y()-step) }
-        if (e.key === "ArrowDown")  { n.y(n.y()+step) }
-        n.getLayer()?.batchDraw()
-      }
+      const arrows = ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"]
+      if (arrows.includes(e.key)) e.preventDefault()
 
-      // duplicate
-      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d" && n) {
+      const step = e.shiftKey ? 20 : 2
+      if (e.key === "ArrowLeft")  n.x(n.x()-step)
+      if (e.key === "ArrowRight") n.x(n.x()+step)
+      if (e.key === "ArrowUp")    n.y(n.y()-step)
+      if (e.key === "ArrowDown")  n.y(n.y()+step)
+      if (arrows.includes(e.key)) n.getLayer()?.batchDraw()
+
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") {
         e.preventDefault()
-        const src = find(selectedId)!; const clone = src.node.clone()
-        clone.x(src.node.x()+20); clone.y(src.node.y()+20); (clone as any).id(uid())
+        const clone = n.clone()
+        clone.x(n.x()+20); clone.y(n.y()+20); (clone as any).id(uid())
         drawLayerRef.current?.add(clone)
-        const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
+        const srcLay = find(selectedId)!
+        const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: srcLay.side, meta: { ...srcLay.meta, name: srcLay.meta.name+" copy" }, type: srcLay.type }
         setLayers(p=>[...p, newLay]); select(newLay.id); drawLayerRef.current?.batchDraw()
       }
 
-      // delete
       if (e.key==="Backspace"||e.key==="Delete") {
         setLayers(p=>{ const l=p.find(x=>x.id===selectedId); l?.node.destroy(); return p.filter(x=>x.id!==selectedId) })
         select(null); drawLayerRef.current?.batchDraw()
@@ -144,31 +195,34 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey, { capture: true } as any)
   }, [selectedId, tool])
 
-  // — Pinch/rotate для выделенного узла (только move/shape/text/image)
+  // — Pinch/Rotate (mobile) для выделенного узла
   useEffect(() => {
     const st = stageRef.current
     if (!st) return
 
     let lastDist = 0
     let lastAngle = 0
-    let target: AnyNode | null = null
+    let target: any = null
 
-    const getTouch = () => st.getPointerPosition()
-    const getTouches = () => (st as any).getContent().ownerDocument?.touches
-
-    const handleStart = () => {
+    const onTouchStart = (e: TouchEvent) => {
       if (tool === "brush" || tool === "erase" || tool === "crop") return
+      if (e.touches.length < 2) return
       target = node(selectedId)
+      lastDist = 0
+      lastAngle = 0
     }
 
-    const handleMove = (e: any) => {
+    const onTouchMove = (e: TouchEvent) => {
       if (!target) return
-      const touches = e.evt.touches
-      if (!touches || touches.length < 2) return
+      if (e.touches.length < 2) return
+      // не даём странице скроллиться
+      e.preventDefault()
 
-      const [t1, t2] = [touches[0], touches[1]]
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
-      const angle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX)
+      const [t1, t2] = [e.touches[0], e.touches[1]]
+      const dx = t2.clientX - t1.clientX
+      const dy = t2.clientY - t1.clientY
+      const dist = Math.hypot(dx, dy)
+      const angle = Math.atan2(dy, dx)
 
       if (!lastDist) lastDist = dist
       if (!lastAngle) lastAngle = angle
@@ -176,43 +230,40 @@ export default function EditorCanvas() {
       const scaleBy = dist / lastDist
       const deltaAngle = angle - lastAngle
 
-      const k = target as any
-      k.scaleX(k.scaleX() * scaleBy)
-      k.scaleY(k.scaleY() * scaleBy)
-      k.rotation(k.rotation() + (deltaAngle * 180) / Math.PI)
+      target.scaleX(target.scaleX() * scaleBy)
+      target.scaleY(target.scaleY() * scaleBy)
+      target.rotation(target.rotation() + (deltaAngle * 180) / Math.PI)
 
       lastDist = dist
       lastAngle = angle
-      k.getLayer()?.batchDraw()
-      e.evt.preventDefault()
+      target.getLayer()?.batchDraw()
     }
 
-    const handleEnd = () => {
-      lastDist = 0; lastAngle = 0; target = null
+    const onTouchEnd = () => {
+      // нормализуем (как на desktop) чтобы scale не накапливался
+      if (target) normalizeTransform(target)
+      target = null
+      lastDist = 0
+      lastAngle = 0
     }
 
-    st.on("touchstart", handleStart)
-    st.on("touchmove", handleMove)
-    st.on("touchend", handleEnd)
+    const c = st.container()
+    c.addEventListener("touchstart", onTouchStart, { passive: false })
+    c.addEventListener("touchmove", onTouchMove, { passive: false })
+    c.addEventListener("touchend", onTouchEnd, { passive: false })
     return () => {
-      st.off("touchstart", handleStart)
-      st.off("touchmove", handleMove)
-      st.off("touchend", handleEnd)
+      c.removeEventListener("touchstart", onTouchStart as any)
+      c.removeEventListener("touchmove", onTouchMove as any)
+      c.removeEventListener("touchend", onTouchEnd as any)
     }
   }, [selectedId, tool])
 
-  // — strokes group (одна «сессия» на время рисования)
+  // — Brush session наверху
   const ensureStrokesGroupOnTop = useCallback(() => {
-    // если есть активная сессия — вернуть её
     if (activeBrushSessionId) {
       const exist = layers.find(l => l.id === activeBrushSessionId)
       if (exist) return exist
     }
-    // иначе ищем последний по текущей стороне и типу
-    const last = [...layers].reverse().find(l => l.side === side && l.type === "strokes")
-    if (last) return last
-
-    // вообще нет — создаём
     const g = new Konva.Group({ x: 0, y: 0 })
     ;(g as any).id(uid())
     const id = (g as any)._id
@@ -222,7 +273,6 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
     beginBrushSession(id)
-    // поднять наверх
     requestAnimationFrame(() => {
       (g as any).zIndex((drawLayerRef.current?.getChildren().length || 1) - 1)
       drawLayerRef.current?.batchDraw()
@@ -230,21 +280,20 @@ export default function EditorCanvas() {
     return newLay
   }, [activeBrushSessionId, layers, side, seqs.strokes, beginBrushSession])
 
-  // при смене инструмента: закрыть сессию кисти
   useEffect(() => {
     if (tool !== "brush" && tool !== "erase") {
       endBrushSession()
     } else {
-      // включили кисть — если нет активной сессии, создать поверх
       const ex = ensureStrokesGroupOnTop()
-      if (!ex) return
-      beginBrushSession(ex.id)
-      ;(ex.node as any).zIndex((drawLayerRef.current?.getChildren().length || 1) - 1)
-      drawLayerRef.current?.batchDraw()
+      if (ex) {
+        beginBrushSession(ex.id)
+        ;(ex.node as any).zIndex((drawLayerRef.current?.getChildren().length || 1) - 1)
+        drawLayerRef.current?.batchDraw()
+      }
     }
-  }, [tool])
+  }, [tool]) // eslint-disable-line
 
-  // image upload
+  // upload image
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -269,7 +318,7 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // text (двойной клик — inline)
+  // inline text
   const inlineEdit = (t: Konva.Text) => {
     const st = stageRef.current; if (!st) return
     const rect = st.container().getBoundingClientRect()
@@ -311,7 +360,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // shapes — создаём ТОЛЬКО из UI:
+  // shapes — только из UI
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")       n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor, draggable: true })
@@ -330,7 +379,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // brush / erase (всегда поверх, внутри активной сессии)
+  // brush/erase — одна сессия
   const startStroke = (x: number, y: number) => {
     const sess = ensureStrokesGroupOnTop()
     const g = sess.node as Konva.Group
@@ -360,7 +409,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // crop (images only) — исправлена математика со scale
+  // crop
   const startCrop = () => {
     const n = node(selectedId)
     if (!n || !(n instanceof Konva.Image)) return
@@ -379,12 +428,12 @@ export default function EditorCanvas() {
     if (!n || !(n instanceof Konva.Image) || !r) { cancelCrop(); return }
     const s = scale
     const abs = r.getAbsolutePosition(stageRef.current!)
-    const rx = abs.x / s - n.x()
-    const ry = abs.y / s - n.y()
+    const rx = abs.x / s - (n as any).x()
+    const ry = abs.y / s - (n as any).y()
     const rw = r.width() / s
     const rh = r.height() / s
-    n.crop({ x: rx, y: ry, width: rw, height: rh })
-    n.width(rw); n.height(rh)
+    ;(n as any).crop({ x: rx, y: ry, width: rw, height: rh })
+    ;(n as any).width(rw); (n as any).height(rh)
     r.visible(false); cropTfRef.current?.nodes([]); setIsCropping(false)
     set({ tool: "move" as any })
     drawLayerRef.current?.batchDraw()
@@ -405,11 +454,9 @@ export default function EditorCanvas() {
     layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
     uiLayerRef.current?.visible(false)
 
-    // 1) с мокапом
     bgLayerRef.current?.visible(true); st.draw()
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
-    // 2) только арт
     bgLayerRef.current?.visible(false); st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
@@ -429,15 +476,12 @@ export default function EditorCanvas() {
     if (isCropping) return
     const p = getPos()
     if (tool==="brush" || tool==="erase") {
-      // не двигаем, рисуем поверх
       startStroke(p.x/scale, p.y/scale)
       return
     }
-    // выделение
     const tgt = e.target as Konva.Node
     if (tgt && tgt !== stageRef.current) {
-      const id = (tgt as any)._id
-      select(String(id))
+      select(String((tgt as any)._id))
     } else {
       select(null)
     }
@@ -448,7 +492,6 @@ export default function EditorCanvas() {
   }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
-  // список слоёв для панелей
   const layerItems: LayerItem[] = useMemo(() => {
     return layers
       .filter(l => l.side === side)
@@ -461,7 +504,6 @@ export default function EditorCanvas() {
       }))
   }, [layers, side])
 
-  // meta updates
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
     setLayers(p => p.map(l => {
       if (l.id !== id) return l
@@ -486,7 +528,6 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // REORDER: desktop drag&drop (только для текущей стороны)
   const onReorder = (srcId: string, destId: string, place: "before" | "after") => {
     setLayers((prev) => {
       const current = prev.filter(l => l.side === side)
@@ -517,16 +558,14 @@ export default function EditorCanvas() {
   const onChangeBlend   = (id: string, blend: string) => updateMeta(id, { blend: blend as Blend })
   const onChangeOpacity = (id: string, opacity: number) => updateMeta(id, { opacity })
 
-  // — стили контейнера: Stage не двигается, жесты системы не мешают
   const stageStyle: React.CSSProperties = {
-    touchAction: "none", // чтобы iOS не скроллил страницу во время рисования
+    touchAction: "none",
     background: "transparent",
   }
 
   return (
-    <div ref={containerRef} className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
+    <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden">
       <Toolbar
-        // tools API
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t)=>set({ tool: t })}
         brushColor={brushColor} setBrushColor={(v)=>set({ brushColor: v })}
@@ -541,8 +580,6 @@ export default function EditorCanvas() {
         toggleLayers={()=>set({ showLayers: !showLayers })}
         layersOpen={showLayers}
         mobileOpen={mobileOpen} openMobile={openMobile} closeMobile={closeMobile}
-
-        // selected props (для панели свойств)
         selectedKind={(find(selectedId)?.type ?? null) as any}
         selectedProps={(find(selectedId)?.type === "text")
           ? {
@@ -566,8 +603,6 @@ export default function EditorCanvas() {
         setSelectedFontSize={(n:number)=>{ const sel=node(selectedId) as Konva.Text; if (!sel) return; sel.fontSize(n); drawLayerRef.current?.batchDraw() }}
         setSelectedFontFamily={(name:string)=>{ const sel=node(selectedId) as Konva.Text; if (!sel) return; sel.fontFamily(name); drawLayerRef.current?.batchDraw() }}
         setSelectedColor={(hex:string)=>{ const sel=node(selectedId) as any; if (!sel) return; if (sel.fill) sel.fill(hex); else if (sel.stroke) sel.stroke(hex); drawLayerRef.current?.batchDraw() }}
-
-        // mobile layers list
         mobileLayers={{
           items: layerItems,
           onSelect: onLayerSelect,
@@ -580,8 +615,7 @@ export default function EditorCanvas() {
         }}
       />
 
-      {/* DESKTOP layers panel */}
-      {showLayers && !isMobile && (
+      {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
           selectId={selectedId}
@@ -596,7 +630,6 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Stage */}
       <div className="absolute inset-0 flex items-center justify-center pt-4 md:pt-2 pb-[110px] md:pb-2">
         <Stage
           width={viewW} height={viewH} scale={{ x: scale, y: scale }}
@@ -609,9 +642,7 @@ export default function EditorCanvas() {
             {side==="front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H} />}
             {side==="back"  && backMock  && <KImage image={backMock}  width={BASE_W} height={BASE_H} />}
           </Layer>
-
           <Layer ref={drawLayerRef} />
-
           <Layer ref={uiLayerRef}>
             <Transformer ref={trRef} rotateEnabled anchorSize={10} borderStroke="black" anchorStroke="black" anchorFill="white" />
             <Rect ref={cropRectRef} visible={false} stroke="black" dash={[6,4]} strokeWidth={2} />
