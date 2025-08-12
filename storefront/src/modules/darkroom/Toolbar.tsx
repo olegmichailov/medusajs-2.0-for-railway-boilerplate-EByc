@@ -1,11 +1,11 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ChevronUp, ChevronDown
 } from "lucide-react"
 import type { ShapeKind } from "./store"
 import { isMobile } from "react-device-detect"
@@ -31,9 +31,6 @@ type MobileLayersProps = {
   onDuplicate: (id: string) => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
-  onReorder: (srcId: string, destId: string, place: "before" | "after") => void
-  onMoveUp: (id: string) => void
-  onMoveDown: (id: string) => void
 }
 
 export default function Toolbar({
@@ -46,6 +43,7 @@ export default function Toolbar({
   startCrop, applyCrop, cancelCrop, isCropping,
   onDownloadFront, onDownloadBack,
   toggleLayers, layersOpen,
+  mobileOpen, openMobile, closeMobile,
 
   selectedKind,
   selectedProps,
@@ -60,7 +58,7 @@ export default function Toolbar({
   mobileLayers,
 }: any & { mobileLayers: MobileLayersProps }) {
 
-  // ---------- Desktop ----------
+  // ——— Desktop плавающая панель
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -110,7 +108,7 @@ export default function Toolbar({
               <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
               <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
               <button className={clx(btn, tool==="crop" && "bg-black text-white")}
-                onClick={()=> (isCropping ? cancelCrop() : startCrop())}
+                onClick={()=> (isCropping ? applyCrop() : startCrop())}
                 title="Crop"><Crop className={ico}/></button>
             </div>
 
@@ -204,31 +202,16 @@ export default function Toolbar({
               <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
               <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
             </div>
+
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
           </div>
         )}
 
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
       </div>
     )
   }
 
-  // ---------- Mobile ----------
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<"tools" | "layers">("tools")
-
-  // блокируем фон-скролл при открытой шторке
-  useEffect(() => {
-    if (!open) return
-    const prevOverflow = document.body.style.overflow
-    const prevTouch = (document.body.style as any).touchAction
-    document.body.style.overflow = "hidden"
-    ;(document.body.style as any).touchAction = "none"
-    return () => {
-      document.body.style.overflow = prevOverflow
-      ;(document.body.style as any).touchAction = prevTouch
-    }
-  }, [open])
-
+  // ——— Mobile: кнопка Create + нижняя шторка
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -236,28 +219,16 @@ export default function Toolbar({
     e.currentTarget.value = ""
   }
 
-  // touch DnD слоёв
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const [dragId, setDragId] = useState<string | null>(null)
-
-  const beginDrag = (id: string) => setDragId(id)
-  const dragOver = (clientY: number, overId: string) => {
-    if (!dragId || dragId === overId) return
-    const rect = rowRefs.current[overId]?.getBoundingClientRect()
-    if (!rect) return
-    const place = clientY < rect.top + rect.height / 2 ? "before" : "after"
-    mobileLayers.onReorder(dragId, overId, place)
-  }
-  const endDrag = () => setDragId(null)
+  const [tab, setTab] = useState<"tools" | "layers">("tools")
 
   return (
     <>
-      {/* Кнопка Create */}
+      {/* нижняя кнопка */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
             className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
-            onClick={()=> setOpen(true)}
+            onClick={openMobile}
           >
             Create
           </button>
@@ -265,18 +236,14 @@ export default function Toolbar({
       </div>
 
       {/* Шторка */}
-      {open && (
-        <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
-          {/* dim */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50" onClick={closeMobile}>
           <div className="absolute inset-0 bg-black/40" />
-
-          {/* panel */}
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[10px]"
             style={{ height: "65vh" }}
             onClick={(e)=>e.stopPropagation()}
           >
-            {/* header */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
                 <button
@@ -292,10 +259,9 @@ export default function Toolbar({
                   Layers
                 </button>
               </div>
-              <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
+              <button className="px-3 h-9 border text-xs rounded-none" onClick={closeMobile}>Close</button>
             </div>
 
-            {/* content */}
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
               {tab === "tools" && (
                 <>
@@ -337,66 +303,18 @@ export default function Toolbar({
                     </div>
                   )}
 
-                  {selectedKind === "text" && (
-                    <div className="space-y-2 border-t pt-2">
-                      <input
-                        type="text"
-                        defaultValue={selectedProps?.text ?? ""}
-                        onChange={(e)=> setSelectedText(e.target.value)}
-                        className="w-full border px-2 py-1 text-sm rounded-none"
-                        placeholder="Edit text…"
-                      />
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px]">Size</div>
-                        <input
-                          type="range" min={8} max={240}
-                          defaultValue={selectedProps?.fontSize ?? 64}
-                          onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
-                          className="flex-1 h-[3px] bg-black appearance-none
-                            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                            [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                        />
-                        <select
-                          defaultValue={selectedProps?.fontFamily ?? "Inter, system-ui, -apple-system, sans-serif"}
-                          onChange={(e)=> setSelectedFontFamily(e.target.value)}
-                          className="border rounded-none text-sm"
-                          title="Font"
-                        >
-                          <option value="Inter, system-ui, -apple-system, sans-serif">Inter</option>
-                          <option value="Arial, Helvetica, sans-serif">Arial</option>
-                          <option value="Helvetica, Arial, sans-serif">Helvetica</option>
-                          <option value="'Times New Roman', Times, serif">Times</option>
-                          <option value="'Courier New', Courier, monospace">Courier</option>
-                          <option value="Georgia, serif">Georgia</option>
-                          <option value="Impact, Charcoal, sans-serif">Impact</option>
-                        </select>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px]">Color</div>
-                        <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedKind === "shape" && (
-                    <div className="space-y-2 border-t pt-2">
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px]">Fill</div>
-                        <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px]">Stroke</div>
-                        <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                        <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-4 gap-2">
                     <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
                     <button className={clx(btn, side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
                     <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
                     <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button className={clx(btn, tool==="crop" && "bg-black text-white")}
+                      onClick={()=> (isCropping ? applyCrop() : startCrop())}
+                      title="Crop"><Crop className={ico}/></button>
+                    <button className={btn} onClick={cancelCrop} title="Cancel crop">×</button>
                   </div>
 
                   <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
@@ -405,25 +323,24 @@ export default function Toolbar({
 
               {tab === "layers" && (
                 <div className="space-y-2">
-                  {mobileLayers.items.map((it) => (
+                  {mobileLayers.items.length === 0 && (
+                    <div className="text-xs text-black/60">No layers yet.</div>
+                  )}
+                  {mobileLayers.items.map((it, idx) => (
                     <div
                       key={it.id}
-                      ref={(el) => (rowRefs.current[it.id] = el)}
-                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black/5"
-                      onTouchStart={()=>beginDrag(it.id)}
-                      onTouchMove={(e)=>dragOver(e.touches[0].clientY, it.id)}
-                      onTouchEnd={endDrag}
+                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
-                      <div className="w-6 h-8 grid place-items-center text-black/50 active:text-black">
-                        <GripVertical className="w-3 h-3"/>
-                      </div>
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
 
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }} title="Up">↑</button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }} title="Down">↓</button>
+                      {/* упрощённый порядок на мобиле */}
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" title="Up">
+                        <ChevronUp className="w-4 h-4"/>
+                      </button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" title="Down">
+                        <ChevronDown className="w-4 h-4"/>
+                      </button>
 
                       <button
                         className="w-8 h-8 grid place-items-center border border-current bg-transparent"
