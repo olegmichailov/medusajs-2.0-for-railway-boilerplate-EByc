@@ -7,6 +7,7 @@ import useImage from "use-image"
 import Toolbar from "./Toolbar"
 import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side } from "./store"
+import { isMobile } from "react-device-detect"
 
 const BASE_W = 2400
 const BASE_H = 3200
@@ -14,9 +15,9 @@ const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 const uid = () => Math.random().toString(36).slice(2)
 
-// отступы, чтобы сцена не пересекалась с нижней «Create»-панелью
-const BOTTOM_SAFE = 160
+// чтобы нижняя Create/шторка не перекрывала сцену
 const TOP_SAFE = 12
+const BOTTOM_SAFE = 160   // если надо ещё поднять мокап — увеличь это число
 
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
 type AnyNode = Konva.Image | Konva.Line | Konva.Text | Konva.Shape | Konva.Group
@@ -43,19 +44,19 @@ export default function EditorCanvas() {
   const [isCropping, setIsCropping] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
 
-  // стабильный экран, ничего не «ездит» во время жестов/рисования
+  // фиксируем страницу — без «прокруток» во время жестов
   useEffect(() => {
     const prev = document.body.style.overscrollBehavior
     document.body.style.overscrollBehavior = "contain"
     return () => { document.body.style.overscrollBehavior = prev }
   }, [])
 
-  // авто-масштаб с учётом безопасных отступов
+  // авто-скейл с безопасными отступами
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const maxW = vw - 16
-    const maxH = vh - (BOTTOM_SAFE + TOP_SAFE + 20)
+    const maxH = vh - (TOP_SAFE + BOTTOM_SAFE + 20)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
   }, [showLayers])
@@ -76,7 +77,7 @@ export default function EditorCanvas() {
     ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  // трансформер — только если можно двигать
+  // трансформер
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -112,18 +113,20 @@ export default function EditorCanvas() {
         setLayers(p=>{ const l=p.find(x=>x.id===selectedId); l?.node.destroy(); return p.filter(x=>x.id!==selectedId) })
         select(null); drawLayerRef.current?.batchDraw(); return
       }
-      if (e.key === "ArrowLeft")  { (n as any).x((n as any).x()-step) }
-      if (e.key === "ArrowRight") { (n as any).x((n as any).x()+step) }
-      if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
-      if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
-      (n.getLayer?.() as any)?.batchDraw?.()
+      if ((n as any).x) {
+        if (e.key === "ArrowLeft")  { (n as any).x((n as any).x()-step) }
+        if (e.key === "ArrowRight") { (n as any).x((n as any).x()+step) }
+        if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
+        if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
+        (n.getLayer?.() as any)?.batchDraw?.()
+      }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId])
 
-  // --- strokes: всегда новая верхняя сессия
-  const ensureStrokesSession = () => {
+  // ——— strokes: новая верхняя «сессия» при каждом начале рисования ———
+  const newStrokesSession = () => {
     const g = new Konva.Group({ x: 0, y: 0 })
     ;(g as any).id(uid())
     const id = (g as any)._id
@@ -221,7 +224,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // ластик по выделенному слою: рисуем «destination-out» в его верхнем контейнере
+  // ластик: работаем над выделённым слоем (wrap), иначе обычный strokes сверху
   const wrapForEraser = (lay: AnyLayer): Konva.Group => {
     if (lay.node instanceof Konva.Group && (lay.node as any)._eraseWrap) return lay.node as Konva.Group
     const g = new Konva.Group({ x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 })
@@ -235,7 +238,7 @@ export default function EditorCanvas() {
     return g
   }
 
-  // рисование / стирание
+  // рисование/стирание
   const startStroke = (x: number, y: number) => {
     let container: Konva.Container | undefined
 
@@ -244,7 +247,7 @@ export default function EditorCanvas() {
       if (lay) container = wrapForEraser(lay)
     }
     if (!container) {
-      const s = ensureStrokesSession()
+      const s = newStrokesSession()
       container = s.node as Konva.Group
     }
 
@@ -259,29 +262,25 @@ export default function EditorCanvas() {
     container.add(line)
     setIsDrawing(true)
   }
-
   const appendStroke = (x: number, y: number) => {
     const g = (() => {
-      // если рисуем/стираем в обёрнутом контейнере выделенного слоя
       if (tool === "erase" && selectedId) {
         const lay = find(selectedId)
         return (lay?.node as Konva.Group) || null
       }
-      // иначе — последняя strokes-сессия
+      // последняя созданная strokes-сессия
       const s = [...layers].reverse().find(l => l.side === side && l.type === "strokes")
       return (s?.node as Konva.Group) || null
     })()
-
     if (!g) return
     const last = g.getChildren().at(-1) as Konva.Line | undefined
     if (!last) return
     last.points(last.points().concat([x, y]))
     drawLayerRef.current?.batchDraw()
   }
-
   const finishStroke = () => setIsDrawing(false)
 
-  // crop (как было)
+  // crop как было
   const startCrop = () => {
     const n = node(selectedId)
     if (!n || !(n instanceof Konva.Image)) return
@@ -312,7 +311,7 @@ export default function EditorCanvas() {
     uiLayerRef.current?.batchDraw()
   }
 
-  // экспорт (как было)
+  // экспорт
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -336,7 +335,7 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // маршрутизация указателя
+  // указатель/жесты
   const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const onDown = (e: any) => {
     if (isCropping) return
@@ -355,7 +354,7 @@ export default function EditorCanvas() {
   const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
-  // жесты pinch/rotate — как в Procreate
+  // pinch/rotate — как на iOS
   const gestureRef = useRef<{
     startDist: number, startAngle: number,
     node: any | null, sX: number, sY: number, r: number
@@ -380,20 +379,17 @@ export default function EditorCanvas() {
       r:  (target as any).rotation?.() ?? 0,
     }
   }
-
   const updateGesture = (e:any) => {
     const g = gestureRef.current; if (!g) return
     const t = e.evt?.touches as Touch[] | undefined
     if (!t || t.length !== 2) return
     e.evt.preventDefault()
-
     const dist = Konva.Util.getDistance(
       {x: t[0].clientX, y: t[0].clientY}, {x: t[1].clientX, y: t[1].clientY}
     )
     const angle = Konva.Util.getAngle(
       {x: t[0].clientX, y: t[0].clientY}, {x: t[1].clientX, y: t[1].clientY}
     )
-
     const k = Math.max(0.2, Math.min(5, dist / g.startDist))
     if (g.node.scaleX) { g.node.scaleX(g.sX * k); g.node.scaleY(g.sY * k) }
     if (g.node.rotation) g.node.rotation(g.r + (angle - g.startAngle))
@@ -438,7 +434,6 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay]); select(newLay.id)
     drawLayerRef.current?.batchDraw()
   }
-
   const onReorder = (srcId: string, destId: string, place: "before" | "after") => {
     setLayers((prev) => {
       const current = prev.filter(l => l.side === side)
@@ -466,9 +461,20 @@ export default function EditorCanvas() {
     select(srcId)
     requestAnimationFrame(attachTransformer)
   }
-
   const onChangeBlend   = (id: string, blend: string) => updateMeta(id, { blend: blend as Blend })
   const onChangeOpacity = (id: string, opacity: number) => updateMeta(id, { opacity })
+
+  // пропы для Toolbar (твоя мобильная шторка)
+  const mobileLayers = {
+    items: layerItems,
+    onSelect: onLayerSelect,
+    onToggleVisible,
+    onToggleLock,
+    onDelete,
+    onDuplicate,
+    onChangeBlend,
+    onChangeOpacity,
+  }
 
   const sel = find(selectedId)
   const selectedKind: "image"|"shape"|"text"|"strokes"|null = sel?.type ?? null
@@ -527,9 +533,11 @@ export default function EditorCanvas() {
         setSelectedFontSize={setSelectedFontSize}
         setSelectedFontFamily={setSelectedFontFamily}
         setSelectedColor={setSelectedColor}
+        mobileLayers={mobileLayers}   // <-- для твоей мобильной шторки
       />
 
-      {showLayers && (
+      {/* на мобиле плавающую панель слоёв не показываем */}
+      {showLayers && !isMobile && (
         <LayersPanel
           items={layerItems}
           selectId={selectedId}
@@ -544,10 +552,7 @@ export default function EditorCanvas() {
         />
       )}
 
-      <div
-        className="absolute inset-x-0"
-        style={{ top: TOP_SAFE, bottom: BOTTOM_SAFE }}
-      >
+      <div className="absolute inset-x-0" style={{ top: TOP_SAFE, bottom: BOTTOM_SAFE }}>
         <div className="w-full h-full flex items-center justify-center">
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
@@ -556,7 +561,7 @@ export default function EditorCanvas() {
             onTouchStart={(e)=>{ startGesture(e); onDown(e) }}
             onTouchMove={(e)=>{ updateGesture(e); onMove() }}
             onTouchEnd={(e)=>{ endGesture(); onUp() }}
-            style={{ touchAction: "none" }}      // блокируем скролл/зум браузера
+            style={{ touchAction: "none" }}   // блок штатного зума браузера
           >
             <Layer ref={bgLayerRef} listening={false}>
               {side==="front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H} />}
