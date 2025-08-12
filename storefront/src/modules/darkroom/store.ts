@@ -17,41 +17,39 @@ type State = {
   selectedId: string | null
   showLayers: boolean
 
-  // brush sessions
-  activeBrushSessionId: string | null
-
-  // UI sheet (mobile)
+  // моб. шторка
   mobileOpen: boolean
-
-  set: (p: Partial<State>) => void
-  select: (id: string | null) => void
-
-  toggleLayers: () => void
   openMobile: () => void
   closeMobile: () => void
 
+  // brush-сессия (группа с линиями)
+  activeBrushSessionId: string | null
   beginBrushSession: (id: string) => void
   endBrushSession: () => void
+
+  set: (p: Partial<State>) => void
+  select: (id: string | null) => void
+  toggleLayers: () => void
 }
 
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush",                 // <— Brush по умолчанию
+  tool: "brush",                     // <-- Brush по умолчанию
   brushColor: "#ff2a7f",
   brushSize: 36,
   shapeKind: "circle",
   selectedId: null,
   showLayers: true,
-  activeBrushSessionId: null,
+
   mobileOpen: false,
+  openMobile: () => set({ mobileOpen: true }),
+  closeMobile: () => set({ mobileOpen: false }),
+
+  activeBrushSessionId: null,
+  beginBrushSession: (id) => set({ activeBrushSessionId: id }),
+  endBrushSession: () => set({ activeBrushSessionId: null }),
 
   set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
-
-  openMobile: () => set({ mobileOpen: true }),
-  closeMobile: () => set({ mobileOpen: false }),
-
-  beginBrushSession: (id) => set({ activeBrushSessionId: id }),
-  endBrushSession: () => set({ activeBrushSessionId: null }),
 }))
