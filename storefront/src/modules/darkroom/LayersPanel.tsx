@@ -4,6 +4,8 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
 
+const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
+
 export type LayerItem = {
   id: string
   name: string
@@ -22,7 +24,7 @@ export default function LayersPanel({
   onToggleLock,
   onDelete,
   onDuplicate,
-  onReorder,
+  onReorder,          // (srcId, destId, place)
   onChangeBlend,
   onChangeOpacity,
 }: {
@@ -37,9 +39,21 @@ export default function LayersPanel({
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
 }) {
-  const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [dragId, setDragId] = useState<string | null>(null)
+  const [pressId, setPressId] = useState<string | null>(null)
+  const pressTimer = useRef<any>(null)
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const beginLongPress = (id: string) => {
+    clearTimeout(pressTimer.current)
+    pressTimer.current = setTimeout(() => {
+      setPressId(id)
+      setDragId(id)
+    }, 350)
+  }
+  const cancelLongPress = () => {
+    clearTimeout(pressTimer.current)
+  }
 
   return (
     <div className="fixed right-6 top-40 z-40 w-[340px] border border-black/10 bg-white/95 shadow-xl rounded-none">
@@ -50,8 +64,8 @@ export default function LayersPanel({
           <div
             key={it.id}
             ref={(el) => (rowRefs.current[it.id] = el)}
-            draggable
-            onDragStart={(e) => { setDragId(it.id); e.dataTransfer.setData("text/plain", it.id) }}
+            draggable={pressId === it.id}              // html5 dnd — включаем только после long-press
+            onDragStart={(e) => { e.dataTransfer.setData("text/plain", it.id) }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault()
@@ -61,16 +75,21 @@ export default function LayersPanel({
               const place: "before" | "after" =
                 rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
               onReorder(src, it.id, place)
-              setDragId(null)
+              setDragId(null); setPressId(null)
             }}
+            onPointerDown={() => beginLongPress(it.id)}
+            onPointerUp={() => { cancelLongPress(); setPressId(null) }}
+            onPointerCancel={() => { cancelLongPress(); setPressId(null) }}
             className={clx(
               "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
-              selectId === it.id ? "bg-black text-white" : "bg-white"
+              selectId === it.id ? "bg-black text-white" : "bg-white",
+              pressId === it.id ? "opacity-80 cursor-grabbing" : "cursor-default"
             )}
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
+            {/* drag handle */}
+            <div className="w-3 h-6 grid place-items-center">
               <div className="w-2 h-4 border border-current" />
             </div>
 
@@ -112,7 +131,7 @@ export default function LayersPanel({
               onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
               title={it.locked ? "Unlock" : "Lock"}
             >
-              {it.locked ? <Unlock className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
+              {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
             </button>
             <button
               className="w-8 h-8 grid place-items-center border border-current bg-transparent"
