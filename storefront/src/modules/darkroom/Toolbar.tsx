@@ -5,7 +5,7 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ChevronUp, ChevronDown
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2
 } from "lucide-react"
 import { isMobile } from "react-device-detect"
 
@@ -13,22 +13,25 @@ const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
+type MobileLayersItem = {
+  id: string
+  name: string
+  type: "image" | "shape" | "text" | "strokes"
+  visible: boolean
+  locked: boolean
+  blend: string
+  opacity: number
+}
+
 type MobileLayersProps = {
-  items: Array<{
-    id: string
-    name: string
-    type: "image" | "shape" | "text" | "strokes"
-    visible: boolean
-    locked: boolean
-    blend: string
-    opacity: number
-  }>
+  items: MobileLayersItem[]
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
   onDelete: (id: string) => void
   onDuplicate: (id: string) => void
-  onReorder: (id: string, dir: "up" | "down") => void
+  // НОВОЕ: dnd пальцем
+  onReorderDrag: (srcId: string, destId: string, place: "before" | "after") => void
 }
 
 export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }) {
@@ -47,7 +50,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     mobileLayers,
   } = props
 
-  // DESKTOP — плавающая панель
+  // ---------------- DESKTOP (как было) ----------------
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -189,14 +192,45 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     )
   }
 
-  // MOBILE — нижняя шторка
+  // ---------------- MOBILE: нижняя шторка + DnD пальцем ----------------
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // локальные refs для dnd
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
-    if (f) props.onUploadImage(f)
+    if (f) onUploadImage(f)
     e.currentTarget.value = ""
+  }
+
+  const startTouchDnD = (id: string) => (e: React.TouchEvent) => {
+    setDragId(id)
+    setOverId(id)
+  }
+  const moveTouchDnD = (e: React.TouchEvent) => {
+    if (!dragId) return
+    const y = e.touches[0].clientY
+    let over: string | null = null
+    for (const [id, el] of Object.entries(rowRefs.current)) {
+      if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (y >= r.top && y <= r.bottom) { over = id; break }
+    }
+    if (over) setOverId(over)
+  }
+  const endTouchDnD = (e: React.TouchEvent) => {
+    if (!dragId || !overId || dragId === overId) { setDragId(null); setOverId(null); return }
+    const el = rowRefs.current[overId]
+    const y = e.changedTouches[0].clientY
+    const place: "before" | "after" =
+      el && y < (el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2) ? "before" : "after"
+    mobileLayers.onReorderDrag(dragId, overId, place)
+    setDragId(null); setOverId(null)
   }
 
   return (
@@ -298,36 +332,46 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
                   {mobileLayers.items.map((it) => (
                     <div
                       key={it.id}
-                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
+                      ref={(el)=> (rowRefs.current[it.id] = el)}
+                      className={clx(
+                        "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none",
+                        dragId === it.id ? "opacity-70" : "",
+                        overId === it.id && dragId !== it.id ? "ring-2 ring-black/40" : ""
+                      )}
                       onClick={()=>mobileLayers.onSelect(it.id)}
+                      // DnD пальцем
+                      onTouchStart={startTouchDnD(it.id)}
+                      onTouchMove={moveTouchDnD}
+                      onTouchEnd={endTouchDnD}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
 
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"up") }} title="Up">
-                        <ChevronUp className="w-4 h-4"/>
-                      </button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"down") }} title="Down">
-                        <ChevronDown className="w-4 h-4"/>
-                      </button>
-
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
-                        title={it.visible ? "Hide" : "Show"}>
+                        title={it.visible ? "Hide" : "Show"}
+                      >
                         {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
-                        title={it.locked ? "Unlock" : "Lock"}>
+                        title={it.locked ? "Unlock" : "Lock"}
+                      >
                         {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }} title="Duplicate">
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
+                        title="Duplicate"
+                      >
                         <Copy className="w-4 h-4"/>
                       </button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }} title="Delete">
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
+                        title="Delete"
+                      >
                         <Trash2 className="w-4 h-4"/>
                       </button>
                     </div>
