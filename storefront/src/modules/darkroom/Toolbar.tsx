@@ -7,7 +7,6 @@ import {
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
   Eye, EyeOff, Lock, Unlock, Copy, Trash2
 } from "lucide-react"
-import type { ShapeKind } from "./store"
 import { isMobile } from "react-device-detect"
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
@@ -36,10 +35,8 @@ type MobileLayersProps = {
 export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }) {
   const {
     side, setSide, tool, setTool, brushColor, setBrushColor, brushSize, setBrushSize,
-    shapeKind, setShapeKind, onUploadImage, onAddText, onAddShape,
-    startCrop, applyCrop, cancelCrop, isCropping,
+    onUploadImage, onAddText, onAddShape, startCrop, applyCrop, cancelCrop, isCropping,
     onDownloadFront, onDownloadBack, toggleLayers, layersOpen,
-    mobileOpen, openMobile, closeMobile,
     selectedKind, selectedProps, setSelectedFill, setSelectedStroke, setSelectedStrokeW,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
     mobileLayers,
@@ -122,16 +119,6 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
               </div>
             )}
 
-            {tool==="shape" && (
-              <div className="grid grid-cols-5 gap-2">
-                <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
-              </div>
-            )}
-
             {selectedKind === "text" && (
               <div className="space-y-2 border-t pt-2">
                 <input
@@ -173,17 +160,13 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
               </div>
             )}
 
-            {selectedKind === "shape" && (
-              <div className="space-y-2 border-t pt-2">
-                <div className="flex items-center gap-2">
-                  <div className="text-[11px]">Fill</div>
-                  <input type="color" defaultValue={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-[11px]">Stroke</div>
-                  <input type="color" defaultValue={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  <input type="number" min={0} max={40} defaultValue={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
-                </div>
+            {tool==="shape" && (
+              <div className="grid grid-cols-5 gap-2">
+                <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
               </div>
             )}
 
@@ -199,7 +182,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
         )}
       </div>
     )
-  } // <-- ВАЖНО: закрываем desktop-блок ПОСЛЕ return
+  } // <-- важно: закрыли desktop-блок
 
   // ---------- Mobile ----------
   const fileRef = useRef<HTMLInputElement>(null)
@@ -209,24 +192,23 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     e.currentTarget.value = ""
   }
   const [tab, setTab] = useState<"tools" | "layers">("tools")
+  const [open, setOpen] = useState(false)
 
   return (
     <>
-      {/* кнопка Create */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
             className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
-            onClick={openMobile}
+            onClick={()=>setOpen(true)}
           >
             Create
           </button>
         </div>
       </div>
 
-      {/* шторка */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-50" onClick={closeMobile}>
+      {open && (
+        <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
           <div className="absolute inset-0 bg-black/40" />
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[10px]"
@@ -238,17 +220,13 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
                 <button
                   className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")}
                   onClick={()=>setTab("tools")}
-                >
-                  Tools
-                </button>
+                >Tools</button>
                 <button
                   className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")}
                   onClick={()=>setTab("layers")}
-                >
-                  Layers
-                </button>
+                >Layers</button>
               </div>
-              <button className="px-3 h-9 border text-xs rounded-none" onClick={closeMobile}>Close</button>
+              <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
@@ -322,34 +300,22 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
-                        title={it.visible ? "Hide" : "Show"}
-                      >
+                        title={it.visible ? "Hide" : "Show"}>
                         {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
-                        title={it.locked ? "Unlock" : "Lock"}
-                      >
+                        title={it.locked ? "Unlock" : "Lock"}>
                         {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
-                        title="Duplicate"
-                      >
-                        <Copy className="w-4 h-4"/>
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        title="Duplicate"><Copy className="w-4 h-4"/></button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4"/>
-                      </button>
+                        title="Delete"><Trash2 className="w-4 h-4"/></button>
                     </div>
                   ))}
                 </div>
