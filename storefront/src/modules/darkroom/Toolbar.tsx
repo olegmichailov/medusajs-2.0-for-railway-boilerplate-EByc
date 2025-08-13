@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
@@ -25,12 +25,12 @@ type MobileLayersItem = {
 
 type MobileLayersProps = {
   items: MobileLayersItem[]
+  selectedId: string | null
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
   onDelete: (id: string) => void
   onDuplicate: (id: string) => void
-  // НОВОЕ: dnd пальцем
   onReorderDrag: (srcId: string, destId: string, place: "before" | "after") => void
 }
 
@@ -50,7 +50,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     mobileLayers,
   } = props
 
-  // ---------------- DESKTOP (как было) ----------------
+  // ---------------- DESKTOP ----------------
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -192,27 +192,31 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     )
   }
 
-  // ---------------- MOBILE: нижняя шторка + DnD пальцем ----------------
+  // ---------------- MOBILE: нижняя шторка + long-press DnD ----------------
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // локальные refs для dnd
+  // long-press + drag
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [pressId, setPressId] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const pressTimer = useRef<number | null>(null)
 
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
-    e.currentTarget.value = ""
+  useEffect(() => () => { if (pressTimer.current) window.clearTimeout(pressTimer.current) }, [])
+
+  const startPress = (id: string) => (e: React.TouchEvent) => {
+    setPressId(id)
+    if (pressTimer.current) window.clearTimeout(pressTimer.current)
+    pressTimer.current = window.setTimeout(() => {
+      setDragId(id)
+      setOverId(id)
+      pressTimer.current = null
+    }, 400) // long-press
   }
 
-  const startTouchDnD = (id: string) => (e: React.TouchEvent) => {
-    setDragId(id)
-    setOverId(id)
-  }
-  const moveTouchDnD = (e: React.TouchEvent) => {
+  const moveTouch = (e: React.TouchEvent) => {
     if (!dragId) return
     const y = e.touches[0].clientY
     let over: string | null = null
@@ -223,14 +227,31 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     }
     if (over) setOverId(over)
   }
-  const endTouchDnD = (e: React.TouchEvent) => {
-    if (!dragId || !overId || dragId === overId) { setDragId(null); setOverId(null); return }
-    const el = rowRefs.current[overId]
-    const y = e.changedTouches[0].clientY
-    const place: "before" | "after" =
-      el && y < (el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2) ? "before" : "after"
-    mobileLayers.onReorderDrag(dragId, overId, place)
-    setDragId(null); setOverId(null)
+
+  const endTouch = (id: string) => (e: React.TouchEvent) => {
+    if (pressTimer.current) {
+      // короткий тап — выделение
+      window.clearTimeout(pressTimer.current)
+      pressTimer.current = null
+      setPressId(null)
+      if (!dragId) mobileLayers.onSelect(id)
+      return
+    }
+    // drop
+    if (dragId && overId && dragId !== overId) {
+      const el = rowRefs.current[overId]
+      const y = e.changedTouches[0].clientY
+      const place: "before" | "after" =
+        el && y < (el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2) ? "before" : "after"
+      mobileLayers.onReorderDrag(dragId, overId, place)
+    }
+    setPressId(null); setDragId(null); setOverId(null)
+  }
+
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) onUploadImage(f)
+    e.currentTarget.value = ""
   }
 
   return (
@@ -329,53 +350,63 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
                   {mobileLayers.items.length === 0 && (
                     <div className="text-xs text-black/60">No layers yet.</div>
                   )}
-                  {mobileLayers.items.map((it) => (
-                    <div
-                      key={it.id}
-                      ref={(el)=> (rowRefs.current[it.id] = el)}
-                      className={clx(
-                        "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none",
-                        dragId === it.id ? "opacity-70" : "",
-                        overId === it.id && dragId !== it.id ? "ring-2 ring-black/40" : ""
-                      )}
-                      onClick={()=>mobileLayers.onSelect(it.id)}
-                      // DnD пальцем
-                      onTouchStart={startTouchDnD(it.id)}
-                      onTouchMove={moveTouchDnD}
-                      onTouchEnd={endTouchDnD}
-                    >
-                      <div className="text-[11px] flex-1 truncate">{it.name}</div>
+                  {mobileLayers.items.map((it) => {
+                    const isSelected = mobileLayers.selectedId === it.id
+                    const isPressed  = pressId === it.id
+                    const isDragging = dragId === it.id
+                    const isOver     = overId === it.id && dragId !== it.id
 
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
-                        title={it.visible ? "Hide" : "Show"}
+                    return (
+                      <div
+                        key={it.id}
+                        ref={(el)=> (rowRefs.current[it.id] = el)}
+                        className={clx(
+                          "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
+                          isSelected && "bg-black text-white",
+                          isPressed && !isDragging && "ring-2 ring-black/30",
+                          isDragging && "opacity-70",
+                          isOver && "ring-2 ring-black/60"
+                        )}
+                        // выбор
+                        onClick={()=> mobileLayers.onSelect(it.id)}
+                        // long-press → drag
+                        onTouchStart={startPress(it.id)}
+                        onTouchMove={moveTouch}
+                        onTouchEnd={endTouch(it.id)}
                       >
-                        {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
-                        title={it.locked ? "Unlock" : "Lock"}
-                      >
-                        {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
-                        title="Duplicate"
-                      >
-                        <Copy className="w-4 h-4"/>
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4"/>
-                      </button>
-                    </div>
-                  ))}
+                        <div className="text-[11px] flex-1 truncate">{it.name}</div>
+
+                        <button
+                          className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                          onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
+                          title={it.visible ? "Hide" : "Show"}
+                        >
+                          {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
+                        </button>
+                        <button
+                          className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                          onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
+                          title={it.locked ? "Unlock" : "Lock"}
+                        >
+                          {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+                        </button>
+                        <button
+                          className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                          onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
+                          title="Duplicate"
+                        >
+                          <Copy className="w-4 h-4"/>
+                        </button>
+                        <button
+                          className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                          onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4"/>
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
