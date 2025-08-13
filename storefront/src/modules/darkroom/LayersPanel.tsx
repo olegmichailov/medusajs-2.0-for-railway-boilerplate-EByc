@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
 const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
 
@@ -24,7 +24,7 @@ export default function LayersPanel({
   onToggleLock,
   onDelete,
   onDuplicate,
-  onReorder,          // (srcId, destId, place)
+  onReorder,
   onChangeBlend,
   onChangeOpacity,
 }: {
@@ -40,23 +40,13 @@ export default function LayersPanel({
   onChangeOpacity: (id: string, opacity: number) => void
 }) {
   const [dragId, setDragId] = useState<string | null>(null)
-  const [pressId, setPressId] = useState<string | null>(null)
-  const pressTimer = useRef<any>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const beginLongPress = (id: string) => {
-    clearTimeout(pressTimer.current)
-    pressTimer.current = setTimeout(() => {
-      setPressId(id)
-      setDragId(id)
-    }, 350)
-  }
-  const cancelLongPress = () => {
-    clearTimeout(pressTimer.current)
-  }
+  // simple long‑press + drag for mobile
+  const longTimers = useRef<Record<string, any>>({})
 
   return (
-    <div className="fixed right-6 top-40 z-40 w-[340px] border border-black/10 bg-white/95 shadow-xl rounded-none">
+    <div className="fixed right-6 top-28 z-40 w-[340px] border border-black/10 bg-white/95 shadow-xl rounded-none max-md:right-3 max-md:top-20 max-md:w-[92vw]">
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
 
       <div className="max-h-[62vh] overflow-auto p-2 space-y-1">
@@ -64,8 +54,8 @@ export default function LayersPanel({
           <div
             key={it.id}
             ref={(el) => (rowRefs.current[it.id] = el)}
-            draggable={pressId === it.id}              // html5 dnd — включаем только после long-press
-            onDragStart={(e) => { e.dataTransfer.setData("text/plain", it.id) }}
+            draggable
+            onDragStart={(e) => { setDragId(it.id); e.dataTransfer.setData("text/plain", it.id) }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault()
@@ -75,22 +65,36 @@ export default function LayersPanel({
               const place: "before" | "after" =
                 rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
               onReorder(src, it.id, place)
-              setDragId(null); setPressId(null)
+              setDragId(null)
             }}
-            onPointerDown={() => beginLongPress(it.id)}
-            onPointerUp={() => { cancelLongPress(); setPressId(null) }}
-            onPointerCancel={() => { cancelLongPress(); setPressId(null) }}
+            onTouchStart={() => {
+              longTimers.current[it.id] = setTimeout(() => setDragId(it.id), 260)
+            }}
+            onTouchMove={(e) => {
+              if (!dragId) return
+              const touch = e.touches[0]
+              const el = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement | null
+              const row = el?.closest?.("[data-row]") as HTMLElement | null
+              if (row && row.dataset.row && row.dataset.row !== dragId) {
+                const rect = row.getBoundingClientRect()
+                const place: "before" | "after" = touch.clientY < rect.top + rect.height/2 ? "before" : "after"
+                onReorder(dragId, row.dataset.row, place)
+              }
+            }}
+            onTouchEnd={() => {
+              clearTimeout(longTimers.current[it.id])
+              setDragId(null)
+            }}
+            data-row={it.id}
             className={clx(
               "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
-              selectId === it.id ? "bg-black text-white" : "bg-white",
-              pressId === it.id ? "opacity-80 cursor-grabbing" : "cursor-default"
+              selectId === it.id ? "bg-black text-white" : "bg-white"
             )}
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            {/* drag handle */}
-            <div className="w-3 h-6 grid place-items-center">
-              <div className="w-2 h-4 border border-current" />
+            <div className="w-4 h-6 grid place-items-center text-black/60 max-[420px]:hidden">
+              <GripVertical className="w-3 h-3"/>
             </div>
 
             <div className="text-xs flex-1 truncate">{it.name}</div>
@@ -112,7 +116,7 @@ export default function LayersPanel({
               value={Math.round(it.opacity * 100)}
               onChange={(e)=>onChangeOpacity(it.id, parseInt(e.target.value,10)/100)}
               onMouseDown={(e)=>e.stopPropagation()}
-              className="w-20 h-[2px] bg-black appearance-none
+              className="w-20 h-[2px] bg-black appearance-none max-md:w-16
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                 [&::-webkit-slider-thumb]:bg-current [&::-webkit-slider-thumb]:rounded-none"
             />
