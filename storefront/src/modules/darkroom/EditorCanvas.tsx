@@ -40,10 +40,10 @@ export default function EditorCanvas() {
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
 
-  // последние «сессии» штрихов по стороне — для логики «каждый раз новая сверху»
+  // последняя stroke-сессия по стороне
   const activeStrokeSession = useRef<Record<Side, string | null>>({ front: null, back: null })
 
-  // авто-скейл сцены. На мобилке держим выше, чтобы не перекрывалось Create-кнопкой
+  // авто-скейл: на мобилке сверху/снизу больше отступ, чтобы «Create» не перекрывал мокап
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
@@ -59,7 +59,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => id ? layers.find(l => l.id === id) || null : null
   const node = (id: string | null) => find(id)?.node || null
 
-  /** ---------- ВИДИМОСТЬ ТЕКУЩЕЙ СТОРОНЫ ---------- */
+  /** видимость по стороне */
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     drawLayerRef.current?.batchDraw()
@@ -71,7 +71,7 @@ export default function EditorCanvas() {
     ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  /** ---------- ТРАНСФОРМЕР / ВЫДЕЛЕНИЕ ---------- */
+  /** трансформер: ручки видны всегда, перетаскивание — только в Move */
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -80,8 +80,6 @@ export default function EditorCanvas() {
       uiLayerRef.current?.batchDraw()
       return
     }
-
-    // двигаем только в режиме Move; но ручки трансформера видны всегда у выделенного
     ;(n as any).draggable(tool === "move")
     trRef.current.nodes([n])
     trRef.current.rotationSnaps([0, 90, 180, 270])
@@ -89,7 +87,7 @@ export default function EditorCanvas() {
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool])
 
-  /** ---------- ХОТКЕИ (desktop) ---------- */
+  /** хоткеи */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const n = node(selectedId); if (!n) return
@@ -100,7 +98,7 @@ export default function EditorCanvas() {
         e.preventDefault()
         const src = find(selectedId)!; const clone = src.node.clone()
         clone.x(src.node.x()+20); clone.y(src.node.y()+20); (clone as any).id(uid())
-        drawLayerRef.current?.add(clone)
+        drawLayerRef.current?.add(clone); clone.moveToTop()
         const newLay: AnyLayer = { id: (clone as any)._id, node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
         setLayers(p=>[...p, newLay]); select(newLay.id); drawLayerRef.current?.batchDraw()
         return
@@ -122,22 +120,19 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  /** ---------- СЕССИИ ШТРИХОВ (каждый раз новая сверху) ---------- */
+  /** stroke-сессии: каждая новая — поверх всего */
   const beginStrokeSession = () => {
-    // новая группа = новая сессия
     const g = new Konva.Group({ x: 0, y: 0 })
     ;(g as any).id(uid())
     const id = (g as any)._id
     const meta = baseMeta(`strokes ${layers.filter(l=>l.side===side && l.type==="strokes").length + 1}`)
     drawLayerRef.current?.add(g)
-    // Ставит СЕССИЮ НА ВЕРХ ВСЕГО
     g.moveToTop()
     const lay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, lay])
     activeStrokeSession.current[side] = id
     return g
   }
-
   const getOrCreateActiveStrokeGroup = (): Konva.Group => {
     const currentId = activeStrokeSession.current[side]
     const existing = layers.find(l => l.id === currentId && l.side === side && l.type === "strokes")
@@ -145,10 +140,10 @@ export default function EditorCanvas() {
     return beginStrokeSession()
   }
 
-  /** ---------- КИСТЬ / СТИРАТЕЛЬ ---------- */
+  /** кисть/стёрка */
   const startStroke = (x: number, y: number) => {
     const g = getOrCreateActiveStrokeGroup()
-    g.moveToTop() // рисуем всегда поверх всего
+    g.moveToTop()
     const line = new Konva.Line({
       points: [x, y],
       stroke: tool === "erase" ? "#000000" : brushColor,
@@ -171,7 +166,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  /** ---------- ИЗОБРАЖЕНИЯ (аплоад) — ВСЕГДА ВПЕРЕД ---------- */
+  /** аплоад картинки — всегда наверх */
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -185,7 +180,6 @@ export default function EditorCanvas() {
         const id = (kimg as any)._id
         const meta = baseMeta(`image ${layers.filter(l=>l.side===side && l.type==="image").length + 1}`)
         drawLayerRef.current?.add(kimg)
-        // КАРТИНКА — СРАЗУ НА ВЕРХ ВСЕГО (чтобы не была спрятана под штрихами)
         kimg.moveToTop()
         const newLay: AnyLayer = { id, side, node: kimg, meta, type: "image" }
         setLayers(p => [...p, newLay])
@@ -197,7 +191,7 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  /** ---------- ТЕКСТ / ФИГУРЫ (через интерфейс) ---------- */
+  /** текст/фигуры — только через UI (не по тапу на пустоту) */
   const onAddText = () => {
     const t = new Konva.Text({
       text: "Your text",
@@ -234,7 +228,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  /** ---------- КРОП (безопасный) ---------- */
+  /** кроп */
   const startCrop = () => {
     const n = node(selectedId)
     if (!n || !(n instanceof Konva.Image)) return
@@ -265,7 +259,7 @@ export default function EditorCanvas() {
     uiLayerRef.current?.batchDraw()
   }
 
-  /** ---------- ЖЕСТЫ (pinch/rotate) ТОЛЬКО В MOVE ---------- */
+  /** жесты (pinch/rotate) в Move */
   useEffect(() => {
     const st = stageRef.current
     if (!st) return
@@ -313,36 +307,24 @@ export default function EditorCanvas() {
     }
   }, [tool, selectedId])
 
-  /** ---------- РОУТИНГ ПО ИНПУТАМ МЫШИ/ТАЧА ---------- */
+  /** роутинг инпутов */
   const getPos = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
-  const onDown = (e: any) => {
-    const tgt = e.target as Konva.Node
-    const clickedEmpty = tgt === stageRef.current
+  const onDown = () => {
     const p = getPos()
-
     if (tool==="brush" || tool==="erase") {
-      // новая сессия кисти стартует автоматически при первом касании
       startStroke(p.x/scale, p.y/scale)
-      return
     }
-
-    if (tool === "move") {
-      // выбор по тапу
-      const shape = tgt as AnyNode
-      const id = (shape as any)?._id
-      if (id) select(id)
-      return
-    }
+    // в режиме shape — ничего по пустоте не создаём (только через UI)
   }
   const onMove = () => { if (isDrawing) { const p = getPos(); appendStroke(p.x/scale, p.y/scale) } }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
-  /** ---------- СПИСОК СЛОЁВ (и операции) ---------- */
-  const visibleSideItems = useMemo<LayerItem[]>(() => {
+  /** список слоёв (top..bottom для UI) */
+  const visibleSideItems = React.useMemo<LayerItem[]>(() => {
     return layers
       .filter(l => l.side === side)
       .sort((a,b) => a.node.zIndex() - b.node.zIndex())
-      .reverse() // top..bottom
+      .reverse()
       .map(l => ({
         id: l.id, name: l.meta.name, type: l.type,
         visible: l.meta.visible, locked: l.meta.locked,
@@ -374,25 +356,51 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  const onReorder = (id: string, dir: "up" | "down") => {
+  /** реордер для мобилки (up/down) */
+  const onReorderDir = (id: string, dir: "up" | "down") => {
     setLayers(prev => {
-      const current = prev.filter(l => l.side === side).sort((a,b)=>a.node.zIndex()-b.node.zIndex())
+      const current = prev.filter(l => l.side === side).sort((a,b)=>a.node.zIndex()-b.node.zIndex()) // bottom..top
       const others  = prev.filter(l => l.side !== side)
 
-      const idx = current.findIndex(l=>l.id===id)
-      if (idx === -1) return prev
-      const swapWith = dir === "up" ? idx+1 : idx-1
-      if (swapWith < 0 || swapWith >= current.length) return prev
+      const top = [...current].reverse() // top..bottom
+      const iTop = top.findIndex(l=>l.id===id)
+      if (iTop === -1) return prev
 
-      const arr = [...current]
-      const tmp = arr[idx]; arr[idx] = arr[swapWith]; arr[swapWith] = tmp
+      const jTop = dir === "up" ? iTop - 1 : iTop + 1
+      if (jTop < 0 || jTop >= top.length) return prev
 
-      // переназначаем точные zIndex bottom..top
-      arr.forEach((l, i) => { (l.node as any).zIndex(i) })
+      const t = [...top]
+      const tmp = t[iTop]; t[iTop] = t[jTop]; t[jTop] = tmp
+
+      const bottomToTop = t.reverse()
+      bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
+      drawLayerRef.current?.batchDraw()
+      return [...others, ...bottomToTop]
+    })
+    requestAnimationFrame(attachTransformer)
+  }
+
+  /** реордер для десктопа (DnD): (src, dest, before/after) — считаем в топ-списке */
+  const onReorderDnd = (srcId: string, destId: string, place: "before" | "after") => {
+    setLayers(prev => {
+      const current = prev.filter(l => l.side === side).sort((a,b)=>a.node.zIndex()-b.node.zIndex()) // bottom..top
+      const others  = prev.filter(l => l.side !== side)
+
+      const top = [...current].reverse() // top..bottom
+      const s = top.findIndex(l=>l.id===srcId)
+      const d = top.findIndex(l=>l.id===destId)
+      if (s === -1 || d === -1) return prev
+
+      const arr = [...top]
+      const [src] = arr.splice(s,1)
+      const insertAt = place === "before" ? d : d + 1
+      arr.splice(insertAt > arr.length ? arr.length : insertAt, 0, src)
+
+      const bottomToTop = arr.reverse()
+      bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
       drawLayerRef.current?.batchDraw()
 
-      // Собираем обратно
-      return [...others, ...arr]
+      return [...others, ...bottomToTop]
     })
     requestAnimationFrame(attachTransformer)
   }
@@ -400,16 +408,14 @@ export default function EditorCanvas() {
   const onChangeBlend   = (id: string, blend: string) => updateMeta(id, { blend: blend as Blend })
   const onChangeOpacity = (id: string, opacity: number) => updateMeta(id, { opacity })
 
-  /** ---------- РЕНДЕР ---------- */
+  /** фиксируем скролл страницы, чтобы ничего не «ездило» */
   useEffect(() => {
-    // блокируем скролл под модалкой/кнопкой, чтобы макет не «ездил»
     const body = document.body
     const prev = body.style.overflow
     body.style.overflow = "hidden"
     return () => { body.style.overflow = prev }
   }, [])
 
-  // выбранного узла всегда можно трансформировать (ручки), но перетаскивание — только в Move
   useEffect(() => { attachTransformer() }, [tool])
 
   return (
@@ -423,20 +429,15 @@ export default function EditorCanvas() {
         onUploadImage={onUploadImage}
         onAddText={onAddText}
         onAddShape={onAddShape}
-        startCrop={startCrop} applyCrop={applyCrop} cancelCrop={cancelCrop} isCropping={false}
-        onDownloadFront={()=>{/* опционально */}}
-        onDownloadBack={()=>{/* опционально */}}
+        startCrop={startCrop} cancelCrop={cancelCrop} isCropping={false}
+        onDownloadFront={()=>{}}
+        onDownloadBack={()=>{}}
         toggleLayers={toggleLayers}
         layersOpen={showLayers}
         selectedKind={find(selectedId)?.type ?? null}
         selectedProps={{}}
-        setSelectedFill={()=>{}}
-        setSelectedStroke={()=>{}}
-        setSelectedStrokeW={()=>{}}
-        setSelectedText={()=>{}}
-        setSelectedFontSize={()=>{}}
-        setSelectedFontFamily={()=>{}}
-        setSelectedColor={()=>{}}
+        setSelectedFill={()=>{}} setSelectedStroke={()=>{}} setSelectedStrokeW={()=>{}}
+        setSelectedText={()=>{}} setSelectedFontSize={()=>{}} setSelectedFontFamily={()=>{}} setSelectedColor={()=>{}}
         mobileLayers={{
           items: visibleSideItems,
           onSelect: onLayerSelect,
@@ -444,7 +445,7 @@ export default function EditorCanvas() {
           onToggleLock,
           onDelete,
           onDuplicate,
-          onReorder,
+          onReorder: onReorderDir, // мобилка: up/down
         }}
       />
 
@@ -457,7 +458,7 @@ export default function EditorCanvas() {
           onToggleLock={onToggleLock}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
-          onReorder={onReorder}
+          onReorder={onReorderDnd}    {/* десктоп: DnD back */}
           onChangeBlend={onChangeBlend}
           onChangeOpacity={onChangeOpacity}
         />
