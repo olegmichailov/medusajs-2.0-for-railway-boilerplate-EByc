@@ -10,7 +10,7 @@ export type Blend =
 
 type State = {
   side: Side
-  tool: Tool                 // кисть по умолчанию
+  tool: Tool
   brushColor: string
   brushSize: number
   shapeKind: ShapeKind
