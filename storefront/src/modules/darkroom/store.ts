@@ -23,13 +23,12 @@ type State = {
 
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  // ⇨ по умолчанию кисть
-  tool: "brush",
+  tool: "brush", // 👉 по умолчанию сразу рисуем (и на десктопе, и на мобилке)
   brushColor: "#ff2a7f",
-  brushSize: 36,
+  brushSize: 28,
   shapeKind: "circle",
   selectedId: null,
-  showLayers: true,
+  showLayers: false,
   set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
