@@ -38,10 +38,9 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     brushColor, setBrushColor,
     brushSize, setBrushSize,
     onUploadImage, onAddText, onAddShape,
-    startCrop, applyCrop, cancelCrop, isCropping,
+    startCrop, cancelCrop, isCropping,
     onDownloadFront, onDownloadBack,
     toggleLayers, layersOpen,
-    shapeKind, setShapeKind,
     selectedKind, selectedProps,
     setSelectedFill, setSelectedStroke, setSelectedStrokeW,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
@@ -121,16 +120,6 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
               </div>
             )}
 
-            {tool==="shape" && (
-              <div className="grid grid-cols-5 gap-2">
-                <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-                <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
-              </div>
-            )}
-
             {selectedKind === "text" && (
               <div className="space-y-2 border-t pt-2">
                 <input
@@ -192,7 +181,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
               <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
               <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
             </div>
-        </div>
+          </div>
         )}
 
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
@@ -200,7 +189,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     )
   }
 
-  /** MOBILE */
+  /** MOBILE (шторка) */
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
