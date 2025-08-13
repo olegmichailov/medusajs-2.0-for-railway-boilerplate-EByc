@@ -47,7 +47,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     mobileLayers,
   } = props
 
-  // DESKTOP (плавающая панель)
+  // DESKTOP — плавающая панель
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -189,7 +189,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     )
   }
 
-  // MOBILE (шторка)
+  // MOBILE — нижняя шторка
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
@@ -303,47 +303,31 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
 
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"up") }}
-                        title="Up"
-                      >
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"up") }} title="Up">
                         <ChevronUp className="w-4 h-4"/>
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"down") }}
-                        title="Down"
-                      >
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onReorder(it.id,"down") }} title="Down">
                         <ChevronDown className="w-4 h-4"/>
                       </button>
 
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
-                        title={it.visible ? "Hide" : "Show"}
-                      >
+                        title={it.visible ? "Hide" : "Show"}>
                         {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
-                        title={it.locked ? "Unlock" : "Lock"}
-                      >
+                        title={it.locked ? "Unlock" : "Lock"}>
                         {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
-                        title="Duplicate"
-                      >
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }} title="Duplicate">
                         <Copy className="w-4 h-4"/>
                       </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
-                        title="Delete"
-                      >
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }} title="Delete">
                         <Trash2 className="w-4 h-4"/>
                       </button>
                     </div>
