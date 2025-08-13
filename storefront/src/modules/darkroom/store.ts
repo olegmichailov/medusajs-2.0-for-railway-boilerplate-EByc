@@ -16,20 +16,28 @@ type State = {
   shapeKind: ShapeKind
   selectedId: string | null
   showLayers: boolean
+  mobileSheetOpen: boolean
+
   set: (p: Partial<State>) => void
   select: (id: string | null) => void
   toggleLayers: () => void
+  openMobileSheet: () => void
+  closeMobileSheet: () => void
 }
 
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush", // 👉 по умолчанию сразу рисуем (и на десктопе, и на мобилке)
+  tool: "brush", // Brush по умолчанию
   brushColor: "#ff2a7f",
   brushSize: 28,
   shapeKind: "circle",
   selectedId: null,
-  showLayers: false,
+  showLayers: true,
+  mobileSheetOpen: false,
+
   set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
+  openMobileSheet: () => set({ mobileSheetOpen: true }),
+  closeMobileSheet: () => set({ mobileSheetOpen: false }),
 }))
