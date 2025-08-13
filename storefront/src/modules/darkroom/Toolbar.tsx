@@ -47,7 +47,7 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     mobileLayers,
   } = props
 
-  /** DESKTOP */
+  // DESKTOP (плавающая панель)
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -189,13 +189,13 @@ export default function Toolbar(props: any & { mobileLayers: MobileLayersProps }
     )
   }
 
-  /** MOBILE (шторка) */
+  // MOBILE (шторка)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
+    if (f) props.onUploadImage(f)
     e.currentTarget.value = ""
   }
 
