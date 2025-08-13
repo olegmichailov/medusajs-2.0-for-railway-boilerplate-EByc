@@ -22,7 +22,7 @@ export default function LayersPanel({
   onToggleLock,
   onDelete,
   onDuplicate,
-  onReorder,          // (srcId, destId, place: "before" | "after")
+  onReorder,
   onChangeBlend,
   onChangeOpacity,
 }: {
@@ -38,8 +38,6 @@ export default function LayersPanel({
   onChangeOpacity: (id: string, opacity: number) => void
 }) {
   const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
-
-  // refs для точного определения before/after
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [dragId, setDragId] = useState<string | null>(null)
 
@@ -72,14 +70,12 @@ export default function LayersPanel({
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            {/* drag handle (визуально) */}
             <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
               <div className="w-2 h-4 border border-current" />
             </div>
 
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
-            {/* Blend */}
             <select
               className={clx(
                 "h-8 px-1 border rounded-none text-xs",
@@ -92,7 +88,6 @@ export default function LayersPanel({
               {blends.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
 
-            {/* Opacity */}
             <input
               type="range" min={10} max={100}
               value={Math.round(it.opacity * 100)}
@@ -103,7 +98,6 @@ export default function LayersPanel({
                 [&::-webkit-slider-thumb]:bg-current [&::-webkit-slider-thumb]:rounded-none"
             />
 
-            {/* controls */}
             <button
               className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
