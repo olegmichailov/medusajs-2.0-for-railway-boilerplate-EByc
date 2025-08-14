@@ -4,7 +4,8 @@ import React, { useEffect, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
-  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash
+  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2
 } from "lucide-react"
 import type { ShapeKind, Side } from "./store"
 
@@ -43,7 +44,6 @@ export default function Toolbar({
   onDownloadFront, onDownloadBack,
   toggleLayers, layersOpen,
 
-  // мобилка
   isMobile,
   mobileOpen,
   openMobile,
@@ -81,7 +81,7 @@ export default function Toolbar({
   mobileLayers: MobileLayersProps
 }) {
 
-  // ===== Desktop panel =====
+  // ===== Desktop =====
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -127,11 +127,11 @@ export default function Toolbar({
               <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
               <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
               <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-              <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
+              <button className={btn} onClick={()=>{ setTool("text"); onAddText() }} title="Text"><TypeIcon className={ico}/></button>
               <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
               <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
               <button className={clx(btn, tool==="crop" && "bg-black text-white")}
-                onClick={()=> (isCropping ? cancelCrop() : startCrop())}
+                onClick={()=> (isCropping ? applyCrop() : startCrop())}
                 title="Crop"><Crop className={ico}/></button>
             </div>
 
@@ -199,18 +199,14 @@ export default function Toolbar({
     e.currentTarget.value = ""
   }
 
-  // lock scroll when sheet open
   useEffect(() => {
-    if (mobileOpen) {
-      const prev = document.body.style.overflow
-      document.body.style.overflow = "hidden"
-      return () => { document.body.style.overflow = prev }
-    }
+    const prev = document.body.style.overflow
+    if (mobileOpen) document.body.style.overflow = "hidden"
+    return () => { document.body.style.overflow = prev }
   }, [mobileOpen])
 
   return (
     <>
-      {/* Bottom Create */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
@@ -222,7 +218,6 @@ export default function Toolbar({
         </div>
       </div>
 
-      {/* Sheet */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50" onClick={closeMobile}>
           <div className="absolute inset-0 bg-black/40" />
@@ -241,7 +236,7 @@ export default function Toolbar({
                 <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
                 <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
                 <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-                <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
+                <button className={btn} onClick={()=>{ setTool("text"); onAddText() }} title="Text"><TypeIcon className={ico}/></button>
                 <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
                 <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
               </div>
@@ -295,7 +290,7 @@ export default function Toolbar({
                 <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
               </div>
 
-              {/* Simple layers list on mobile (без DnD, стабильные кнопки) */}
+              {/* Mobile Layers */}
               <div className="mt-3">
                 <div className="text-[11px] uppercase mb-1">Layers</div>
                 <div className="space-y-2">
@@ -308,18 +303,46 @@ export default function Toolbar({
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
-                      <button className="w-7 h-7 border text-[10px]" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onChangeOpacity(it.id, Math.min(1, it.opacity + 0.1))}}>＋</button>
-                      <button className="w-7 h-7 border text-[10px]" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onChangeOpacity(it.id, Math.max(0.1, it.opacity - 0.1))}}>－</button>
-                      <button className="w-7 h-7 border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}>{it.visible ? "👁" : "🚫"}</button>
-                      <button className="w-7 h-7 border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}>{it.locked ? "🔒" : "🔓"}</button>
-                      <button className="w-7 h-7 border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}>⧉</button>
-                      <button className="w-7 h-7 border" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}>🗑</button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
+                        title={it.visible ? "Hide" : "Show"}
+                      >
+                        {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
+                      </button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
+                        title={it.locked ? "Unlock" : "Lock"}
+                      >
+                        {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+                      </button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
+                        title="Duplicate"
+                      >
+                        <Copy className="w-4 h-4"/>
+                      </button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4"/>
+                      </button>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e)=>{ onFile(e); closeMobile() }}
+              />
             </div>
           </div>
         </div>
