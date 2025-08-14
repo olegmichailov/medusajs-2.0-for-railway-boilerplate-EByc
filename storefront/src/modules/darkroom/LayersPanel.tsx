@@ -4,10 +4,12 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
 
+const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
+
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes" | "eraser"
+  type: "image" | "shape" | "text" | "strokes"
   visible: boolean
   locked: boolean
   blend: string
@@ -40,13 +42,11 @@ export default function LayersPanel({
   const [dragId, setDragId] = useState<string | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
-
   return (
-    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/96 shadow-2xl rounded-none">
+    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
 
-      <div className="max-h-[66vh] overflow-auto p-2 space-y-1">
+      <div className="max-h-[62vh] overflow-auto p-2 space-y-1">
         {items.map((it) => (
           <div
             key={it.id}
@@ -71,6 +71,7 @@ export default function LayersPanel({
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
+            {/* drag handle visual */}
             <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
               <div className="w-2 h-4 border border-current" />
             </div>
