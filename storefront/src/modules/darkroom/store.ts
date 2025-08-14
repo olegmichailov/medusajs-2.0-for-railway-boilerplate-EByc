@@ -16,7 +16,6 @@ type State = {
   shapeKind: ShapeKind
   selectedId: string | null
   showLayers: boolean
-  sheetOpen: boolean              // для мобилки — открыта ли «шторка»
   set: (p: Partial<State>) => void
   select: (id: string | null) => void
   toggleLayers: () => void
@@ -24,13 +23,12 @@ type State = {
 
 export const useDarkroom = create<State>((set) => ({
   side: "front",
-  tool: "brush",                  // ← Brush по умолчанию
+  tool: "brush", // кисть по умолчанию
   brushColor: "#ff2a7f",
   brushSize: 36,
   shapeKind: "circle",
   selectedId: null,
   showLayers: true,
-  sheetOpen: false,
   set: (p) => set(p),
   select: (id) => set({ selectedId: id }),
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
