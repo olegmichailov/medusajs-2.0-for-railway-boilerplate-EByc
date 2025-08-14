@@ -89,7 +89,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // === Transformer: видим на выбранном слое (кроме strokes/eraser). В кисти — видим, но НЕ интерактивен. ===
+  // === Transformer: видим на выбранном слое (кроме strokes/eraser). В кисти — виден, но НЕ интерактивен. ===
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -191,12 +191,13 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // === Текст ===
+  // === Текст (редактирование через поле в тулбаре) ===
   const onAddText = () => {
     const t = new Konva.Text({
-      text: textValue || "GMURKUL",
+      text: (textValue || "GMURKUL").toUpperCase(),
       x: BASE_W/2-240, y: BASE_H/2-48,
-      fontSize: 96, fontFamily: "Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif",
+      fontSize: 96,
+      fontFamily: "Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif",
       fontStyle: "bold",
       fill: brushColor, width: 480, align: "center",
       draggable: true,
@@ -208,11 +209,28 @@ export default function EditorCanvas() {
     setSeqs(s => ({ ...s, text: s.text + 1 }))
     setOrder(o => o + 1)
     drawLayerRef.current?.add(t)
-    t.on("click tap", () => select(id))
+    t.on("click tap", () => {
+      select(id)
+      // на мобиле сразу открываем панель редактирования текста
+      set({ tool: "text", mobileSheetOpen: true })
+    })
     pushLayer(layer)
     select(id)
     drawLayerRef.current?.batchDraw()
   }
+
+  // Связываем поле ввода с выбранным текстовым слоем
+  useEffect(() => {
+    const lay = find(selectedId)
+    if (!lay || lay.type !== "text") return
+    if (tool !== "text") return
+    const t = lay.node as Konva.Text
+    const next = (textValue || "GMURKUL").toUpperCase()
+    if (t.text() !== next) {
+      t.text(next)
+      drawLayerRef.current?.batchDraw()
+    }
+  }, [textValue, tool, selectedId])
 
   // === Шейпы только из UI ===
   const addShape = (kind: ShapeKind) => {
@@ -331,30 +349,49 @@ export default function EditorCanvas() {
   }
   const onUp   = () => { if (isDrawing) finishStroke() }
 
-  // === Multitouch (mobile): pinch+rotate на выбранном НЕ-stroke слое, вокруг центра узла ===
-  const pinch = useRef<{ id: string; d0: number; a0: number; sx: number; sy: number; rot: number } | null>(null)
+  // === iOS-style multitouch (pinch + rotate) на выбранном НЕ-stroke слое ===
+  const pinch = useRef<{
+    id: string
+    d0: number
+    a0: number
+    sx: number
+    sy: number
+    rot: number
+    px: number
+    py: number
+  } | null>(null)
+
   useEffect(() => {
     if (!isMobile) return
     const stage = stageRef.current
     if (!stage) return
+
+    const container = stage.container()
+
+    const midway = (t0: Touch, t1: Touch) => ({ x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 })
 
     const onTouchStart = (ev: TouchEvent) => {
       if (ev.touches.length < 2) return
       const lay = find(selectedId)
       if (!lay || lay.type === "strokes" || lay.type === "eraser") return
       ev.preventDefault()
+
       const t0 = ev.touches[0], t1 = ev.touches[1]
       const dx = t1.clientX - t0.clientX
       const dy = t1.clientY - t0.clientY
       const d0 = Math.hypot(dx, dy)
       const a0 = Math.atan2(dy, dx)
       const n = lay.node as any
+
+      const mid = midway(t0, t1) // экранные координаты центра жеста
       pinch.current = {
         id: lay.id,
         d0, a0,
         sx: n.scaleX?.() ?? 1,
         sy: n.scaleY?.() ?? 1,
         rot: n.rotation?.() ?? 0,
+        px: mid.x,
+        py: mid.y,
       }
     }
 
@@ -364,29 +401,60 @@ export default function EditorCanvas() {
       ev.preventDefault()
       const lay = find(pinch.current.id); if (!lay) return
       const n = lay.node as any
+
       const t0 = ev.touches[0], t1 = ev.touches[1]
       const dx = t1.clientX - t0.clientX
       const dy = t1.clientY - t0.clientY
       const d1 = Math.hypot(dx, dy)
       const a1 = Math.atan2(dy, dx)
-
-      const s = Math.max(0.2, Math.min(5, d1 / pinch.current.d0))
+      const sMul = Math.max(0.2, Math.min(5, d1 / pinch.current.d0))
       const rot = pinch.current.rot + ((a1 - pinch.current.a0) * 180) / Math.PI
 
-      const bbox = (lay.node as any).getClientRect({ relativeTo: stage })
-      const ox = bbox.x + bbox.width / 2
-      const oy = bbox.y + bbox.height / 2
-      const local = (lay.node as any).toLocal({ x: ox, y: oy })
-      n.offsetX(local.x); n.offsetY(local.y)
-      n.scaleX(pinch.current.sx * s)
-      n.scaleY(pinch.current.sy * s)
+      // абсолютный центр жеста
+      const Pc = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 }
+
+      // переводим экранные координаты в координаты сцены
+      const stageAbs = stage.getPointerPosition() // бесполезно для центра, посчитаем вручную
+      // Получим абсолютный трансформ родителя
+      const parent = n.getParent()
+      const parentAbs = parent.getAbsoluteTransform()
+      const parentAbsInv = parentAbs.copy().invert()
+
+      // Точка-пивот в координатах родителя (из экранных в локальные родителя):
+      const pivotParent = parentAbsInv.point({ x: Pc.x, y: Pc.y })
+
+      // Сохраняем позицию пивота до трансформа:
+      const before = n.getAbsoluteTransform().point({ x: 0, y: 0 })
+
+      // Ставим масштаб/поворот (вокруг pivotParent — компенсируем позицию)
+      const sx = pinch.current.sx * sMul
+      const sy = pinch.current.sy * sMul
+      n.scaleX(sx); n.scaleY(sy)
       n.rotation(rot)
+
+      // После смены scale/rotation посчитаем абсолютную позицию origin ноды
+      const after = n.getAbsoluteTransform().point({ x: 0, y: 0 })
+
+      // Нам нужно сдвинуть ноду так, чтобы точка pivotParent осталась под пальцами
+      // Разница в абсолютных координатах:
+      const dxAbs = Pc.x - (after.x + (pivotParent.x - n.x()) * parentAbs.getMatrix()[0])
+      const dyAbs = Pc.y - (after.y + (pivotParent.y - n.y()) * parentAbs.getMatrix()[3])
+
+      // Проще: берём абсолютные координаты pivot сейчас и приводим к Pc
+      const absNow = n.getAbsoluteTransform().point({ x: pivotParent.x - n.x(), y: pivotParent.y - n.y() })
+      const fixAbs = { x: Pc.x - absNow.x, y: Pc.y - absNow.y }
+      const fixLocal = parentAbsInv.point({ x: absNow.x + fixAbs.x, y: absNow.y + fixAbs.y })
+
+      // смещение (разность локальных)
+      const deltaLocal = { x: fixLocal.x - pivotParent.x, y: fixLocal.y - pivotParent.y }
+      n.x(n.x() + deltaLocal.x)
+      n.y(n.y() + deltaLocal.y)
+
       n.getLayer()?.batchDraw()
     }
 
     const onTouchEnd = () => { pinch.current = null }
 
-    const container = stage.container()
     container.addEventListener("touchstart", onTouchStart, { passive: false })
     container.addEventListener("touchmove",  onTouchMove,  { passive: false })
     container.addEventListener("touchend",   onTouchEnd)
@@ -399,7 +467,7 @@ export default function EditorCanvas() {
     }
   }, [isMobile, selectedId, layers])
 
-  // === Панель слоёв ===
+  // === Панель слоёв (десктоп) ===
   const layerItems: LayerItem[] = React.useMemo(() => {
     return layers
       .filter(l => l.side === side)
@@ -484,8 +552,8 @@ export default function EditorCanvas() {
     const s = scale
     const rx = r.x()/s - n.x(), ry = r.y()/s - n.y()
     const rw = r.width()/s, rh = r.height()/s
-    n.crop({ x: rx, y: ry, width: rw, height: rh })
-    n.width(rw); n.height(rh)
+    ;(n as Konva.Image).crop({ x: rx, y: ry, width: rw, height: rh })
+    ;(n as Konva.Image).width(rw); (n as Konva.Image).height(rh)
     r.visible(false); cropTfRef.current?.nodes([]); setIsCropping(false)
     drawLayerRef.current?.batchDraw()
   }
