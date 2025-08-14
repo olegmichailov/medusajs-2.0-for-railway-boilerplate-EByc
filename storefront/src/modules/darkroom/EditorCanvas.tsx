@@ -25,11 +25,9 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
-  // mockups
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  // refs
   const stageRef     = useRef<Konva.Stage>(null)
   const bgLayerRef   = useRef<Konva.Layer>(null)
   const drawLayerRef = useRef<Konva.Layer>(null)
@@ -38,47 +36,49 @@ export default function EditorCanvas() {
   const cropRectRef  = useRef<Konva.Rect>(null)
   const cropTfRef    = useRef<Konva.Transformer>(null)
 
-  // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [isCropping, setIsCropping] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
   const [textValue, setTextValue] = useState("GMORKUL")
 
-  // ===== viewport =====
-  // На мобиле фиксируем высоту так, чтобы мокап был виден + не перекрывался нижней кнопкой Create.
-  // Запас по низу — 80px.
+  // Вьюпорт: мокап заполняет экран, снизу резерв под кнопку Create (≈96px)
   const { viewW, viewH, scale } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const bottomPad = 96
-    const maxW = vw - 16 // компактно по ширине
-    const maxH = vh - bottomPad - 16
+    const maxW = vw - 16
+    const maxH = vh - bottomPad - 8
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
   }, [typeof window !== "undefined" ? window.innerWidth : 0, typeof window !== "undefined" ? window.innerHeight : 0])
 
-  // Заблокировать автоповорот где это возможно (лучшее, что можно в браузере)
+  // Пытаемся залочить портрет (где поддерживается)
   useEffect(() => {
-    // не критично, просто пытаемся
     const lock = async () => {
       try {
         // @ts-ignore
-        if (screen.orientation && screen.orientation.lock) {
-          // @ts-ignore
-          await screen.orientation.lock("portrait-primary")
-        }
+        if (screen.orientation?.lock) await screen.orientation.lock("portrait-primary")
       } catch {}
     }
     lock()
   }, [])
 
-  // utils
+  const toast = (msg: string) => {
+    if (typeof window === "undefined") return
+    // минимальная ненавязчивая подсказка
+    const el = document.createElement("div")
+    el.textContent = msg
+    el.className = "fixed left-1/2 -translate-x-1/2 bottom-28 z-[100] bg-black text-white text-xs px-3 py-2 rounded"
+    document.body.appendChild(el)
+    setTimeout(()=>el.remove(), 1400)
+  }
+
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // показываем на сцене только текущую сторону
+  // Показываем только текущую сторону
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     drawLayerRef.current?.batchDraw()
@@ -90,7 +90,7 @@ export default function EditorCanvas() {
     ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  /** Трансформер к выделенному узлу (если не рисуем/не кропим/не locked) */
+  // Трансформер к выделенному
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -100,60 +100,53 @@ export default function EditorCanvas() {
       uiLayerRef.current?.batchDraw()
       return
     }
-    // разрешаем drag узлу только в инструменте Move
-    const canDragNow = tool === "move"
-    ;(n as any).draggable(canDragNow)
+    ;(n as any).draggable(tool === "move")
     trRef.current.nodes([n])
     trRef.current.getLayer()?.batchDraw()
   }
   useEffect(() => { attachTransformer() }, [selectedId, layers, side, tool, isDrawing, isCropping])
 
-  // ====== hotkeys ======
+  // ==== хоткеи (десктоп) ====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const n = node(selectedId); if (!n) return
       const mod = e.metaKey || e.ctrlKey
-
-      // move by arrows
       const step = e.shiftKey ? 20 : 2
-      if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
-        if (mod) {
-          // reorder by Ctrl/Cmd + arrows
-          if (e.key === "ArrowUp") {
-            if (e.shiftKey) bringToFront(selectedId!)
-            else bringForward(selectedId!)
-          } else if (e.key === "ArrowDown") {
-            if (e.shiftKey) sendToBack(selectedId!)
-            else sendBackward(selectedId!)
-          }
+
+      // перемещение
+      if (!mod && ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
+        e.preventDefault()
+        if (e.key === "ArrowLeft")  n.x(n.x()-step)
+        if (e.key === "ArrowRight") n.x(n.x()+step)
+        if (e.key === "ArrowUp")    n.y(n.y()-step)
+        if (e.key === "ArrowDown")  n.y(n.y()+step)
+        n.getLayer()?.batchDraw()
+      }
+
+      // порядок слоёв
+      if (mod && ["ArrowUp","ArrowDown"].includes(e.key)) {
+        e.preventDefault()
+        if (e.key === "ArrowUp") {
+          if (e.shiftKey) bringToFront(selectedId!)
+          else bringForward(selectedId!)
         } else {
-          // position move
-          e.preventDefault()
-          if (e.key === "ArrowLeft")  n.x(n.x()-step)
-          if (e.key === "ArrowRight") n.x(n.x()+step)
-          if (e.key === "ArrowUp")    n.y(n.y()-step)
-          if (e.key === "ArrowDown")  n.y(n.y()+step)
-          n.getLayer()?.batchDraw()
+          if (e.shiftKey) sendToBack(selectedId!)
+          else sendBackward(selectedId!)
         }
       }
 
       // duplicate
-      if (mod && e.key.toLowerCase()==="d") {
-        e.preventDefault()
-        duplicateLayer(selectedId!)
-      }
+      if (mod && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(selectedId!) }
       // delete
-      if (e.key==="Backspace"||e.key==="Delete") {
-        e.preventDefault()
-        deleteLayer(selectedId!)
-      }
+      if (e.key==="Backspace"||e.key==="Delete") { e.preventDefault(); deleteLayer(selectedId!) }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, layers])
 
-  // reorder helpers
+  // helpers сортировки
   const zSortCurrent = () => [...layers.filter(l=>l.side===side)].sort((a,b)=>a.node.zIndex()-b.node.zIndex())
+
   const bringForward = (id: string) => {
     setLayers(prev => {
       const cur = zSortCurrent()
@@ -197,38 +190,26 @@ export default function EditorCanvas() {
     })
   }
 
-  // ===== Strokes session logic =====
+  // ==== Strokes-сессии ====
   const ensureStrokesGroupTop = () => {
-    // всегда создаём новую «сессию» штрихов поверх всего остального на текущей стороне
     const g = new Konva.Group({ x: 0, y: 0 })
     ;(g as any).id(uid())
     const id = (g as any)._id
     const meta = baseMeta(`strokes ${seqs.strokes}`)
     drawLayerRef.current?.add(g)
-    // поднять на верх именно по текущей стороне
     const topIndex = drawLayerRef.current?.getChildren((n)=>true).length ?? 1
     g.zIndex(topIndex)
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
-    // выделение не переключаем (хэндлы не мешают рисованию)
     return newLay
   }
 
-  // brush / erase: пишем в последнюю strokes-сессию
   const startStroke = (x: number, y: number) => {
-    // если стираем и нет выделения — предупреждение и выходим
-    if (tool === "erase") {
-      const sel = find(selectedId)
-      if (!sel) { toast("Select a layer to erase."); return }
-    }
-
-    // берём верхнюю strokes-сессию (если её нет после переключений — создадим новую)
+    if (tool === "erase" && !selectedId) { toast("Select a layer to erase."); return }
     let gLay = [...layers].reverse().find(l => l.side === side && l.type === "strokes")
     if (!gLay) gLay = ensureStrokesGroupTop()
     const g = gLay.node as Konva.Group
-
-    // сам штрих
     const line = new Konva.Line({
       points: [x, y],
       stroke: tool === "erase" ? "#000" : brushColor,
@@ -237,17 +218,6 @@ export default function EditorCanvas() {
       lineJoin: "round",
       globalCompositeOperation: tool === "erase" ? "destination-out" : "source-over",
     })
-
-    // если Erase — применять как маску к ВЫДЕЛЕННОМУ слою
-    if (tool === "erase") {
-      const target = node(selectedId) as AnyNode | null
-      if (!target) return
-      // создаём маску: кладём line в отдельную группу-clip поверх target
-      // проще: добавим line в ту же группу strokes (чуть быстрее и уже с destination-out;
-      // при этом стираем всё, что под stroke — но UI заранее просит выделять слой)
-      // для точной маски на один слой нужна отдельная копия: оставим лёгкую реализацию из-за производительности
-    }
-
     g.add(line)
     setIsDrawing(true)
   }
@@ -262,7 +232,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // ====== Images / Text / Shapes ======
+  // ==== Images / Text / Shapes ====
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -280,8 +250,7 @@ export default function EditorCanvas() {
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
         setSeqs(s => ({ ...s, image: s.image + 1 }))
         select(id)
-        // сразу в Move, чтобы поправить
-        set({ tool: "move" })
+        set({ tool: "move" }) // сразу можно поправить пальцами
         drawLayerRef.current?.batchDraw()
       }
       img.src = r.result as string
@@ -326,7 +295,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // ===== Crop =====
+  // ==== Crop ====
   const startCrop = () => {
     const n = node(selectedId)
     if (!n || !(n instanceof Konva.Image)) return
@@ -357,25 +326,21 @@ export default function EditorCanvas() {
     uiLayerRef.current?.batchDraw()
   }
 
-  // ===== Export (download mockup + art) =====
+  // ==== Export ====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
     const hidden: AnyNode[] = []
     layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
-    // вырубим UI
     const uiPrev = uiLayerRef.current?.visible()
     uiLayerRef.current?.visible(false)
 
-    // 1) with mockup
     bgLayerRef.current?.visible(true); st.draw()
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
-    // 2) art only
     bgLayerRef.current?.visible(false); st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
-    // restore
     bgLayerRef.current?.visible(true)
     hidden.forEach(n => n.visible(true))
     if (uiPrev) uiLayerRef.current?.visible(true)
@@ -386,33 +351,30 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ===== Pointer routing (mouse + touch) =====
+  // ==== Координаты ====
   const getStageXY = (clientX: number, clientY: number) => {
     const st = stageRef.current; if (!st) return { x: 0, y: 0 }
     const rect = st.container().getBoundingClientRect()
     return { x: (clientX - rect.left)/scale, y: (clientY - rect.top)/scale }
   }
 
-  // ——— Touch gestures (2-finger rotate/zoom around centroid) ———
+  // ==== Touch-жесты (центроид) ====
   const gesture = useRef<{
     active: boolean
     id1: number; id2: number
-    p1: {x:number;y:number}; p2: {x:number;y:number}
-    startVec: {x:number;y:number}
     startDist: number
     startAngle: number
     startScaleX: number
     startScaleY: number
     startRotation: number
     startPos: {x:number;y:number}
-    center: {x:number;y:number} // in stage coords
+    center: {x:number;y:number} // stage coords
   } | null>(null)
 
   const vec = (a:{x:number;y:number}, b:{x:number;y:number}) => ({ x: b.x-a.x, y: b.y-a.y })
   const angle = (v:{x:number;y:number}) => Math.atan2(v.y, v.x)
   const length = (v:{x:number;y:number}) => Math.hypot(v.x, v.y)
   const rotateVec = (v:{x:number;y:number}, rad:number) => ({ x: v.x*Math.cos(rad) - v.y*Math.sin(rad), y: v.x*Math.sin(rad) + v.y*Math.cos(rad) })
-
   const toParentSpace = (pt:{x:number;y:number}, parent: Konva.Container) => {
     const t = parent.getAbsoluteTransform().copy()
     t.invert()
@@ -423,29 +385,24 @@ export default function EditorCanvas() {
     const touches = e.evt.touches
     if (touches.length === 2) {
       const sel = find(selectedId)?.node
-      if (!sel || (sel as any).draggable() === false) {
-        // даже если инструмент не Move — жест 2 пальцами всё равно работает на выделенном узле
-      }
-      const p1s = getStageXY(touches[0].clientX, touches[0].clientY)
-      const p2s = getStageXY(touches[1].clientX, touches[1].clientY)
-      const c = { x: (p1s.x+p2s.x)/2, y: (p1s.y+p2s.y)/2 }
-      const v0 = vec(p1s, p2s)
+      if (!sel) return
+      const p1 = getStageXY(touches[0].clientX, touches[0].clientY)
+      const p2 = getStageXY(touches[1].clientX, touches[1].clientY)
+      const c = { x: (p1.x+p2.x)/2, y: (p1.y+p2.y)/2 }
+      const v0 = vec(p1, p2)
       gesture.current = {
         active: true,
         id1: touches[0].identifier, id2: touches[1].identifier,
-        p1: p1s, p2: p2s,
-        startVec: v0,
         startDist: length(v0),
         startAngle: angle(v0),
-        startScaleX: sel ? (sel as any).scaleX?.() ?? 1 : 1,
-        startScaleY: sel ? (sel as any).scaleY?.() ?? 1 : 1,
-        startRotation: sel ? (sel as any).rotation?.() ?? 0 : 0,
-        startPos: sel ? { x: (sel as any).x(), y: (sel as any).y() } : { x:0, y:0 },
+        startScaleX: (sel as any).scaleX?.() ?? 1,
+        startScaleY: (sel as any).scaleY?.() ?? 1,
+        startRotation: (sel as any).rotation?.() ?? 0,
+        startPos: { x: (sel as any).x(), y: (sel as any).y() },
         center: c,
       }
       e.evt.preventDefault()
     } else if (touches.length === 1) {
-      // одиночным пальцем — классическая логика инструментов
       if (tool==="brush" || tool==="erase") {
         const p = getStageXY(touches[0].clientX, touches[0].clientY)
         startStroke(p.x, p.y)
@@ -458,33 +415,27 @@ export default function EditorCanvas() {
     if (gesture.current?.active && touches.length === 2) {
       const sel = node(selectedId)
       if (!sel) return
-      const id1 = gesture.current.id1
-      const id2 = gesture.current.id2
-
-      const tA = [...touches].find(t=>t.identifier===id1)!
-      const tB = [...touches].find(t=>t.identifier===id2)!
-      const p1s = getStageXY(tA.clientX, tA.clientY)
-      const p2s = getStageXY(tB.clientX, tB.clientY)
-      const v = vec(p1s, p2s)
+      const tA = touches[0], tB = touches[1]
+      const p1 = getStageXY(tA.clientX, tA.clientY)
+      const p2 = getStageXY(tB.clientX, tB.clientY)
+      const v = vec(p1, p2)
       const dist = length(v)
       const ang = angle(v)
 
       const scaleMul = dist / (gesture.current.startDist || 1)
-      const rotDelta = (ang - gesture.current.startAngle) * 180/Math.PI
+      const rotDelta = (ang - gesture.current.startAngle)
 
-      // новая шкала/угол
       const newScaleX = gesture.current.startScaleX * scaleMul
       const newScaleY = gesture.current.startScaleY * scaleMul
-      const newRot = gesture.current.startRotation + rotDelta
+      const newRot = gesture.current.startRotation + rotDelta * 180/Math.PI
 
-      // удерживаем центроид (между пальцами) неподвижным в системе родителя node
       const parent = (sel.getParent?.() ?? drawLayerRef.current) as Konva.Container
-      const C_parent = toParentSpace({ x: gesture.current.center.x, y: gesture.current.center.y }, parent)
+      const C_parent = toParentSpace(gesture.current.center, parent)
       const pos0 = gesture.current.startPos
-      const v0 = { x: C_parent.x - pos0.x, y: C_parent.y - pos0.y }         // вектор от узла к центру в родительских координатах
-      const v1 = rotateVec(v0, rotDelta * Math.PI/180)                       // поворот
-      const v2 = { x: v1.x * scaleMul, y: v1.y * scaleMul }                 // масштаб
-      const pos1 = { x: C_parent.x - v2.x, y: C_parent.y - v2.y }           // новая позиция, чтобы центр совпал
+      const v0 = { x: C_parent.x - pos0.x, y: C_parent.y - pos0.y }
+      const v1 = rotateVec(v0, rotDelta)
+      const v2 = { x: v1.x * scaleMul, y: v1.y * scaleMul }
+      const pos1 = { x: C_parent.x - v2.x, y: C_parent.y - v2.y }
 
       ;(sel as any).scaleX(newScaleX)
       ;(sel as any).scaleY(newScaleY)
@@ -506,8 +457,8 @@ export default function EditorCanvas() {
     if (isDrawing) finishStroke()
   }
 
-  // mouse (desktop): простая версия — не мешаем уже знакомой логике
-  const onMouseDown = (e: any) => {
+  // мышь (десктоп)
+  const onMouseDown = () => {
     if (isCropping) return
     if (tool==="brush" || tool==="erase") {
       const p = stageRef.current?.getPointerPosition() || { x:0, y:0 }
@@ -522,7 +473,7 @@ export default function EditorCanvas() {
   }
   const onMouseUp = () => { if (isDrawing) finishStroke() }
 
-  // panel items for LayersPanel (desktop)
+  // items для LayersPanel (desktop)
   const layerItems: LayerItem[] = useMemo(() => {
     return layers
       .filter(l => l.side === side)
@@ -535,7 +486,7 @@ export default function EditorCanvas() {
       }))
   }, [layers, side])
 
-  // meta updates
+  // meta
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
     setLayers(p => p.map(l => {
       if (l.id !== id) return l
@@ -564,7 +515,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // REORDER (точное before/after)
+  // reorder (точный before/after)
   const onReorder = (srcId: string, destId: string, place: "before" | "after") => {
     setLayers((prev) => {
       const current = prev.filter(l => l.side === side)
@@ -580,9 +531,7 @@ export default function EditorCanvas() {
 
       const src = orderTopToBottom.splice(srcIdx,1)[0]
       const insertAt = place==="before" ? dstIdx : dstIdx+1
-      orderTopToBottom.splice(
-        insertAt > orderTopToBottom.length ? orderTopToBottom.length : insertAt, 0, src
-      )
+      orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
 
       const bottomToTop = [...orderTopToBottom].reverse()
       bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
@@ -596,17 +545,12 @@ export default function EditorCanvas() {
     requestAnimationFrame(attachTransformer)
   }
 
-  // ====== default tool: Brush ======
-  useEffect(() => {
-    // по умолчанию — кисть
-    if (!tool) set({ tool: "brush" })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // дефолт — Brush
+  useEffect(() => { if (!tool) set({ tool: "brush" }) /* eslint-disable-next-line */ }, [])
 
-  // ====== UI ======
   return (
     <div className="relative w-screen h-[calc(100vh-80px)] overflow-hidden touch-none select-none">
-      {/* TOOLBAR */}
+      {/* TOOLBAR (desktop + mobile sheet через сам Toolbar) */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t)=>set({ tool: t })}
@@ -625,7 +569,6 @@ export default function EditorCanvas() {
         toggleLayers={toggleLayers}
         layersOpen={showLayers}
 
-        // моб. шторка слоёв использует эти методы
         mobileLayers={{
           items: layerItems,
           onSelect: onLayerSelect,
@@ -639,7 +582,7 @@ export default function EditorCanvas() {
         }}
       />
 
-      {/* ПАНЕЛЬ СЛОЁВ (desktop) */}
+      {/* Layers (desktop панель как была) */}
       {showLayers && (
         <LayersPanel
           items={layerItems}
@@ -655,14 +598,12 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* СЦЕНА */}
+      {/* SCENE */}
       <div className="absolute inset-0 flex items-center justify-center">
         <Stage
           width={viewW} height={viewH} scale={{ x: scale, y: scale }}
           ref={stageRef}
-          // мышь (десктоп)
           onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-          // touch-жесты
           onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
         >
           <Layer ref={bgLayerRef} listening={false}>
@@ -681,7 +622,6 @@ export default function EditorCanvas() {
               anchorStroke="black"
               anchorFill="white"
             />
-            {/* Crop UI */}
             <Rect ref={cropRectRef} visible={false} stroke="black" dash={[6,4]} strokeWidth={2} draggable />
             <Transformer ref={cropTfRef} rotateEnabled={false} anchorSize={10} borderStroke="black" anchorStroke="black" />
           </Layer>
