@@ -1,6 +1,3 @@
-Вот 4/4 — storefront/src/modules/darkroom/store.ts (целиком, без сокращений).
-Инструмент по умолчанию — brush. Добавил централизованное состояние вьюпорта и жестов (пинч-зуум/пан), чтобы жесты и фиксация в интерфейсе работали предсказуемо как на мобилке, так и на десктопе.
-
 "use client"
 
 import { create } from "zustand"
@@ -28,8 +25,9 @@ export type Blend =
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 4
 
-/** Утилита: клон с ограничением в диапазоне */
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
+/** Утилита: ограничение значения в диапазоне */
+const clamp = (v: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, v))
 
 /** Геометрия вьюпорта/жестов для предсказуемого UX */
 type Viewport = {
@@ -52,79 +50,46 @@ type GestureState = {
 
 /** Состояние редактора (глобальный стор) */
 type State = {
-  /** Текущая сторона макета */
   side: Side
-
-  /** Активный инструмент */
   tool: Tool
 
-  /** Параметры кисти */
   brushColor: string
   brushSize: number
 
-  /** Выбранный шейп для добавления */
   shapeKind: ShapeKind
 
-  /** Выделенный слой (id Konva-ноды) */
   selectedId: string | null
 
-  /** Видимость панели слоёв (десктоп) */
   showLayers: boolean
 
-  /** Вьюпорт для Stage (единый источник правды для зума/панорамирования) */
   viewport: Viewport
-
-  /** Состояние жестов (мобильные пинч/пан) */
   gesture: GestureState
 
-  /** Заблокирован ли скролл страницы (когда открыт мобильный шторок Create) */
   uiScrollLocked: boolean
 
-  // ====== Действия ======
-
-  /** Универсальный сеттер куска состояния */
   set: (p: Partial<State>) => void
-
-  /** Выбор/снятие выбора слоя */
   select: (id: string | null) => void
-
-  /** Переключение видимости панели слоёв */
   toggleLayers: () => void
-
-  /** Смена инструмента (с правилами UX) */
   setTool: (t: Tool) => void
-
-  /** Смена параметров кисти */
   setBrushColor: (hex: string) => void
   setBrushSize: (px: number) => void
-
-  /** Смена активного шейпа */
   setShapeKind: (k: ShapeKind) => void
 
-  /** Обновление вьюпорта (пан/зум) с клампом */
   setViewport: (patch: Partial<Viewport>) => void
-
-  /** Сброс вьюпорта к исходному (центровка задаётся снаружи через EditorCanvas) */
   resetViewport: () => void
 
-  /** Жесты: начало/обновление/окончание пинча (масштаб вокруг центра) */
   pinchStart: (center: { x: number; y: number }, distance: number) => void
   pinchMove: (center: { x: number; y: number }, distance: number) => void
   pinchEnd: () => void
 
-  /** Жесты: начало/обновление/окончание пана */
   panStart: (point: { x: number; y: number }) => void
   panMove: (point: { x: number; y: number }) => void
   panEnd: () => void
 
-  /** Автоматически включать MOVE после импорта изображения/фигуры/текста */
   autoMoveAfterInsert: () => void
-
-  /** Блокировка/разблокировка прокрутки страницы (для мобильной шторки) */
   lockUiScroll: (lock: boolean) => void
 }
 
-/** Начальные значения */
 const initialViewport: Viewport = { scale: 1, x: 0, y: 0 }
 const initialGesture: GestureState = {
   isPinching: false,
@@ -142,7 +107,6 @@ const initialGesture: GestureState = {
  * Сосредотачиваем UX-правила здесь, чтобы EditorCanvas и Toolbar оставались «тонкими».
  */
 export const useDarkroom = create<State>((set, get) => ({
-  // Базовые параметры
   side: "front",
 
   // Инструмент по умолчанию — BRUSH, как и просили
@@ -155,15 +119,12 @@ export const useDarkroom = create<State>((set, get) => ({
 
   selectedId: null,
 
-  // Панель слоёв видима на десктопе
   showLayers: true,
 
   viewport: { ...initialViewport },
   gesture: { ...initialGesture },
 
   uiScrollLocked: false,
-
-  // ==== actions ====
 
   set: (p) => set(p),
 
@@ -172,9 +133,6 @@ export const useDarkroom = create<State>((set, get) => ({
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
 
   setTool: (t) => {
-    // UX-правила:
-    // 1) В режимах brush/erase — отключаем взаимодействие с объектами (делается в Canvas), тут только фиксируем сам инструмент.
-    // 2) При переходе в move/text/shape — взаимодействие с объектами разрешено.
     set({ tool: t })
   },
 
@@ -209,16 +167,14 @@ export const useDarkroom = create<State>((set, get) => ({
   pinchMove: (center, distance) =>
     set((s) => {
       if (!s.gesture.isPinching || !s.gesture.startDistance) return {}
-      // коэффициент масштаба
       const k = clamp(distance / s.gesture.startDistance, 0.1, 10)
       const targetScale = clamp(s.gesture.startScale * k, MIN_ZOOM, MAX_ZOOM)
 
-      // Зум относительно центра жеста: компенсируем смещение, чтобы не "улетало"
       const { scale: prevScale, x: prevX, y: prevY } = s.viewport
       const cx = s.gesture.center?.x ?? center.x
       const cy = s.gesture.center?.y ?? center.y
 
-      // Переводим координаты центра экрана в мировые, затем снова в экранные с новым масштабом
+      // Зум относительно центра жеста
       const worldX = (cx - prevX) / prevScale
       const worldY = (cy - prevY) / prevScale
 
@@ -262,14 +218,11 @@ export const useDarkroom = create<State>((set, get) => ({
     })),
 
   autoMoveAfterInsert: () => {
-    // Когда пользователь добавил картинку/шейп/текст — автоматически включаем MOVE,
-    // чтобы можно было сразу подвинуть/повернуть объект, не оставляя кисть активной.
+    // После добавления изображения/шейпа/текста автоматически включаем MOVE
     set({ tool: "move" })
   },
 
   lockUiScroll: (lock) => {
-    // Флаг для внешнего эффекта: EditorCanvas/Toolbar могут слушать этот стейт
-    // и включать/выключать body scroll locking.
     set({ uiScrollLocked: lock })
     if (typeof document !== "undefined") {
       const cls = "overflow-hidden"
