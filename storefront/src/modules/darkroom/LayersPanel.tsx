@@ -2,9 +2,7 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
-
-const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown } from "lucide-react"
 
 export type LayerItem = {
   id: string
@@ -27,6 +25,8 @@ export default function LayersPanel({
   onReorder,          // (srcId, destId, place)
   onChangeBlend,
   onChangeOpacity,
+  onMoveUp,
+  onMoveDown,
 }: {
   items: LayerItem[]
   selectId: string | null
@@ -38,9 +38,23 @@ export default function LayersPanel({
   onReorder: (srcId: string, destId: string, place: "before" | "after") => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
 }) {
   const [dragId, setDragId] = useState<string | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  // longpress для тача
+  const timers = useRef<Record<string, any>>({})
+
+  const startLong = (id:string) => {
+    timers.current[id] = setTimeout(()=>{ setDragId(id) }, 350)
+  }
+  const cancelLong = (id:string) => {
+    if (timers.current[id]) clearTimeout(timers.current[id])
+  }
+
+  const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
 
   return (
     <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
@@ -64,17 +78,24 @@ export default function LayersPanel({
               onReorder(src, it.id, place)
               setDragId(null)
             }}
+            onTouchStart={()=>startLong(it.id)}
+            onTouchMove={()=>cancelLong(it.id)}
+            onTouchEnd={()=>cancelLong(it.id)}
             className={clx(
               "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
-              selectId === it.id ? "bg-black text-white" : "bg-white"
+              selectId === it.id ? "bg-black text-white" : "bg-white",
+              dragId===it.id && "opacity-60"
             )}
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            {/* drag handle visual */}
-            <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
-              <div className="w-2 h-4 border border-current" />
-            </div>
+            {/* up/down быстрые кнопки */}
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); onMoveUp(it.id) }} title="Up">
+              <ArrowUp className="w-4 h-4"/>
+            </button>
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); onMoveDown(it.id) }} title="Down">
+              <ArrowDown className="w-4 h-4"/>
+            </button>
 
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
