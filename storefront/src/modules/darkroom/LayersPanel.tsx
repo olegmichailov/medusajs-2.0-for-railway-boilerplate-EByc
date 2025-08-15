@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown } from "lucide-react"
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
 
 export type LayerItem = {
   id: string
@@ -12,24 +12,21 @@ export type LayerItem = {
   locked: boolean
   blend: string
   opacity: number
+  selected?: boolean
 }
 
 export default function LayersPanel({
   items,
-  selectId,
   onSelect,
   onToggleVisible,
   onToggleLock,
   onDelete,
   onDuplicate,
-  onReorder,          // (srcId, destId, place)
+  onReorder,
   onChangeBlend,
   onChangeOpacity,
-  onMoveUp,
-  onMoveDown,
 }: {
   items: LayerItem[]
-  selectId: string | null
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -38,29 +35,15 @@ export default function LayersPanel({
   onReorder: (srcId: string, destId: string, place: "before" | "after") => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
-  onMoveUp: (id: string) => void
-  onMoveDown: (id: string) => void
 }) {
   const [dragId, setDragId] = useState<string | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // longpress для тача
-  const timers = useRef<Record<string, any>>({})
-
-  const startLong = (id:string) => {
-    timers.current[id] = setTimeout(()=>{ setDragId(id) }, 350)
-  }
-  const cancelLong = (id:string) => {
-    if (timers.current[id]) clearTimeout(timers.current[id])
-  }
-
-  const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
-
   return (
-    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
+    <div className="fixed right-6 top-24 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
 
-      <div className="max-h-[62vh] overflow-auto p-2 space-y-1">
+      <div className="max-h-[60vh] overflow-auto p-2 space-y-1">
         {items.map((it) => (
           <div
             key={it.id}
@@ -78,41 +61,24 @@ export default function LayersPanel({
               onReorder(src, it.id, place)
               setDragId(null)
             }}
-            onTouchStart={()=>startLong(it.id)}
-            onTouchMove={()=>cancelLong(it.id)}
-            onTouchEnd={()=>cancelLong(it.id)}
             className={clx(
               "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
-              selectId === it.id ? "bg-black text-white" : "bg-white",
-              dragId===it.id && "opacity-60"
+              it.selected ? "bg-black text-white" : "bg-white"
             )}
             onClick={() => onSelect(it.id)}
             title={it.name}
           >
-            {/* up/down быстрые кнопки */}
-            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); onMoveUp(it.id) }} title="Up">
-              <ArrowUp className="w-4 h-4"/>
-            </button>
-            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); onMoveDown(it.id) }} title="Down">
-              <ArrowDown className="w-4 h-4"/>
-            </button>
-
             <div className="text-xs flex-1 truncate">{it.name}</div>
 
-            {/* Blend */}
             <select
-              className={clx(
-                "h-8 px-1 border rounded-none text-xs",
-                selectId === it.id ? "bg-black text-white border-white/40" : "bg-white"
-              )}
+              className={clx("h-8 px-1 border rounded-none text-xs", it.selected ? "bg-black text-white border-white/40" : "bg-white")}
               value={it.blend}
               onChange={(e) => onChangeBlend(it.id, e.target.value)}
               onMouseDown={(e)=>e.stopPropagation()}
             >
-              {blends.map(b => <option key={b} value={b}>{b}</option>)}
+              {["source-over","multiply","screen","overlay","darken","lighten","xor"].map(b => <option key={b} value={b}>{b}</option>)}
             </select>
 
-            {/* Opacity */}
             <input
               type="range" min={10} max={100}
               value={Math.round(it.opacity * 100)}
@@ -123,37 +89,28 @@ export default function LayersPanel({
                 [&::-webkit-slider-thumb]:bg-current [&::-webkit-slider-thumb]:rounded-none"
             />
 
-            {/* controls */}
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
-              title={it.visible ? "Hide" : "Show"}
-            >
+              onClick={(e)=>{e.stopPropagation(); onToggleVisible(it.id)}}
+              title={it.visible ? "Hide" : "Show"}>
               {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
-              title={it.locked ? "Unlock" : "Lock"}
-            >
+              onClick={(e)=>{e.stopPropagation(); onToggleLock(it.id)}}
+              title={it.locked ? "Unlock" : "Lock"}>
               {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
-              title="Duplicate"
-            >
+              onClick={(e)=>{e.stopPropagation(); onDuplicate(it.id)}}
+              title="Duplicate">
               <Copy className="w-4 h-4"/>
             </button>
-            <button
-              className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+            <button className="w-8 h-8 grid place-items-center border border-current bg-transparent"
               onMouseDown={(e)=>e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
-              title="Delete"
-            >
+              onClick={(e)=>{e.stopPropagation(); onDelete(it.id)}}
+              title="Delete">
               <Trash2 className="w-4 h-4"/>
             </button>
           </div>
