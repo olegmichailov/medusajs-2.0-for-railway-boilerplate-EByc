@@ -10,7 +10,7 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// Базовые размеры арт-поля под мокап
+// Базовые размеры арт-поля под мокап (важно: ширина 2400, не 240)
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
@@ -64,12 +64,12 @@ export default function EditorCanvas() {
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const lastToolRef = useRef<Tool | null>(null)
 
-  // ===== Вёрстка/масштаб: фикс на мобилке, мокап выше =====
+  // ===== Вёрстка/масштаб: фикс на мобилке, мокап выше хедера =====
   const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const padTop = 64                          // высота хедера (чтобы не обрезать мокап)
-    const padBottom = isMobile ? 120 : 72      // зазор под Create / safe-area
+    const padTop = 64                       // высота хедера, чтобы мокап не обрезался
+    const padBottom = isMobile ? 120 : 72   // зазор под Create / safe-area
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
@@ -489,27 +489,31 @@ export default function EditorCanvas() {
     startScaleY: number
     startRot: number
     startPos: { x: number, y: number }
-    centerCanvas: { x: number, y: number } // центр жеста в координатах канваса
+    centerCanvas: { x: number, y: number }
     nodeId: string | null
     lastPointer?: { x: number, y: number }
   }
-  const gestureRef = useRef<G>({ active:false, two:false, startDist:0, startAngle:0, startScaleX:1, startScaleY:1, startRot:0, startPos:{x:0,y:0}, centerCanvas:{x:0,y:0}, nodeId:null })
+  const gestureRef = useRef<G>({
+    active:false, two:false, startDist:0, startAngle:0,
+    startScaleX:1, startScaleY:1, startRot:0,
+    startPos:{x:0,y:0}, centerCanvas:{x:0,y:0}, nodeId:null
+  })
 
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
-  // масштаб/поворот вокруг указанной точки stagePoint (устраняет «улёт» и дрожь)
+  // стабильный масштаб/поворот вокруг точки жеста (без «скачков»)
   const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
     const tr = node.getAbsoluteTransform().copy()
     const inv = tr.invert()
-    const local = inv.point(stagePoint) // та же точка в локальных координатах узла ДО трансформации
+    const local = inv.point(stagePoint) // точка в локальных координатах ДО
 
     node.scaleX(newScale)
     node.scaleY(newScale)
     node.rotation(newRotation)
 
     const tr2 = node.getAbsoluteTransform().copy()
-    const p2 = tr2.point(local) // где оказалась эта точка ПОСЛЕ трансформации
+    const p2 = tr2.point(local)        // позиция той же точки ПОСЛЕ
     const dx = stagePoint.x - p2.x
     const dy = stagePoint.y - p2.y
     node.x((node as any).x?.() + dx)
@@ -616,7 +620,7 @@ export default function EditorCanvas() {
       return
     }
 
-    // Move: 2 пальца — масштаб/поворот вокруг центра жеста (устойчиво)
+    // Move: 2 пальца — масштаб/поворот вокруг центра жеста (устойчиво, realtime)
     if (gestureRef.current.active && gestureRef.current.two && touches && touches.length >= 2) {
       const lay = find(gestureRef.current.nodeId); if (!lay) return
       const t1 = touches[0], t2 = touches[1]
@@ -628,13 +632,14 @@ export default function EditorCanvas() {
       let s = dist / gestureRef.current.startDist
       s = Math.min(Math.max(s, 0.1), 10)
 
-      const baseScale = gestureRef.current.startScaleX // одинаково по X/Y
+      const baseScale = gestureRef.current.startScaleX
       const newScale = baseScale * s
       const newRot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180 / Math.PI)
 
-      const stageCenter = gestureRef.current.centerCanvas
-      applyAround(lay.node, stageCenter, newScale, newRot)
-      drawLayerRef.current?.batchDraw()
+      const st = stageRef.current!
+      const centerStage = { x: gestureRef.current.centerCanvas.x * scale, y: gestureRef.current.centerCanvas.y * scale }
+      applyAround(lay.node, centerStage, newScale, newRot)
+      st.batchDraw()
     }
   }
 
