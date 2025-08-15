@@ -70,12 +70,10 @@ type ToolbarProps = {
 
   selectedKind: "image" | "shape" | "text" | "strokes" | null
   selectedProps: {
-    // text
     text?: string
     fontSize?: number
     fontFamily?: string
     fill?: string
-    // shape
     stroke?: string
     strokeWidth?: number
   }
@@ -88,7 +86,6 @@ type ToolbarProps = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
 
-  // мобильная панель слоёв
   mobileLayers: MobileLayersProps
 }
 
@@ -98,9 +95,8 @@ export default function Toolbar(props: ToolbarProps) {
     tool, setTool,
     brushColor, setBrushColor,
     brushSize, setBrushSize,
-    shapeKind, setShapeKind,
     onUploadImage, onAddText, onAddShape,
-    startCrop, applyCrop, cancelCrop, isCropping,
+    startCrop, cancelCrop, isCropping,
     onDownloadFront, onDownloadBack,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
@@ -198,11 +194,10 @@ export default function Toolbar(props: ToolbarProps) {
 
             {selectedKind === "text" && (
               <div className="space-y-2 border-t pt-2">
-                {/* двусторонняя связка */}
                 <input
                   type="text"
                   value={selectedProps?.text ?? ""}
-                  onChange={(e)=> props.setSelectedText(e.target.value)}
+                  onChange={(e)=> setSelectedText(e.target.value)}
                   className="w-full border px-2 py-1 text-sm rounded-none"
                   placeholder="Edit text…"
                 />
@@ -211,14 +206,14 @@ export default function Toolbar(props: ToolbarProps) {
                   <input
                     type="range" min={8} max={240}
                     value={selectedProps?.fontSize ?? 96}
-                    onChange={(e)=> props.setSelectedFontSize(parseInt(e.target.value,10))}
+                    onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
                     className="flex-1 h-[3px] bg-black appearance-none
                       [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                       [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
                   />
                   <select
                     value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
-                    onChange={(e)=> props.setSelectedFontFamily(e.target.value)}
+                    onChange={(e)=> setSelectedFontFamily(e.target.value)}
                     className="border rounded-none text-sm"
                     title="Font"
                   >
@@ -236,7 +231,7 @@ export default function Toolbar(props: ToolbarProps) {
                   <input
                     type="color"
                     value={selectedProps?.fill ?? "#000000"}
-                    onChange={(e)=> props.setSelectedFill(e.target.value)}
+                    onChange={(e)=> setSelectedFill(e.target.value)}
                     className="w-8 h-8 p-0 border rounded-none"
                   />
                 </div>
@@ -250,7 +245,7 @@ export default function Toolbar(props: ToolbarProps) {
                   <input
                     type="color"
                     value={selectedProps?.fill ?? "#000000"}
-                    onChange={(e)=> props.setSelectedFill(e.target.value)}
+                    onChange={(e)=> setSelectedFill(e.target.value)}
                     className="w-8 h-8 p-0 border rounded-none"
                   />
                 </div>
@@ -259,13 +254,13 @@ export default function Toolbar(props: ToolbarProps) {
                   <input
                     type="color"
                     value={selectedProps?.stroke ?? "#000000"}
-                    onChange={(e)=> props.setSelectedStroke(e.target.value)}
+                    onChange={(e)=> setSelectedStroke(e.target.value)}
                     className="w-8 h-8 p-0 border rounded-none"
                   />
                   <input
                     type="number" min={0} max={40}
                     value={selectedProps?.strokeWidth ?? 0}
-                    onChange={(e)=> props.setSelectedStrokeW(parseInt(e.target.value,10))}
+                    onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))}
                     className="w-16 border px-2 py-1 text-sm rounded-none"
                   />
                 </div>
@@ -286,7 +281,7 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // ===== MOBILE (шторка Create) =====
+  // ===== MOBILE (нижняя шторка Create) =====
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
@@ -311,18 +306,14 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       </div>
 
-      {/* Шторка */}
       {open && (
         <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
-          {/* затемнение */}
           <div className="absolute inset-0 bg-black/40" />
-
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[12px]"
             style={{ height: "65vh" }}
             onClick={(e)=>e.stopPropagation()}
           >
-            {/* заголовок */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
                 <button
@@ -341,7 +332,6 @@ export default function Toolbar(props: ToolbarProps) {
               <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
-            {/* контент */}
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
               {tab === "tools" && (
                 <>
@@ -370,16 +360,6 @@ export default function Toolbar(props: ToolbarProps) {
                         onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
                         className="w-9 h-9 border border-black rounded-none"
                       />
-                    </div>
-                  )}
-
-                  {tool==="shape" && (
-                    <div className="grid grid-cols-5 gap-2">
-                      <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
                     </div>
                   )}
 
