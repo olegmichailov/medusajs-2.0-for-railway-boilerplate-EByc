@@ -5,25 +5,27 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown
 } from "lucide-react"
-import type { ShapeKind } from "./store"
+import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
+type MobileLayersItem = {
+  id: string
+  name: string
+  type: "image" | "shape" | "text" | "strokes"
+  visible: boolean
+  locked: boolean
+  blend: string
+  opacity: number
+}
+
 type MobileLayersProps = {
-  items: Array<{
-    id: string
-    name: string
-    type: "image" | "shape" | "text" | "strokes"
-    visible: boolean
-    locked: boolean
-    blend: string
-    opacity: number
-  }>
+  items: MobileLayersItem[]
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -31,31 +33,81 @@ type MobileLayersProps = {
   onDuplicate: (id: string) => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
 }
 
-export default function Toolbar({
-  side, setSide,
-  tool, setTool,
-  brushColor, setBrushColor,
-  brushSize, setBrushSize,
-  shapeKind, setShapeKind,
-  onUploadImage, onAddText, onAddShape,
-  startCrop, applyCrop, cancelCrop, isCropping,
-  onDownloadFront, onDownloadBack,
-  toggleLayers, layersOpen,
+type ToolbarProps = {
+  side: Side
+  setSide: (s: Side) => void
 
-  selectedKind,
-  selectedProps,
-  setSelectedFill,
-  setSelectedStroke,
-  setSelectedStrokeW,
-  setSelectedText,
-  setSelectedFontSize,
-  setSelectedFontFamily,
-  setSelectedColor,
+  tool: Tool
+  setTool: (t: Tool) => void
 
-  mobileLayers,
-}: any & { mobileLayers: MobileLayersProps }) {
+  brushColor: string
+  setBrushColor: (hex: string) => void
+
+  brushSize: number
+  setBrushSize: (n: number) => void
+
+  shapeKind: ShapeKind
+  setShapeKind: (k: ShapeKind) => void
+
+  onUploadImage: (file: File) => void
+  onAddText: () => void
+  onAddShape: (k: ShapeKind) => void
+
+  startCrop: () => void
+  applyCrop: () => void
+  cancelCrop: () => void
+  isCropping: boolean
+
+  onDownloadFront: () => void
+  onDownloadBack: () => void
+
+  toggleLayers: () => void
+  layersOpen: boolean
+
+  selectedKind: "image" | "shape" | "text" | "strokes" | null
+  selectedProps: {
+    // text
+    text?: string
+    fontSize?: number
+    fontFamily?: string
+    fill?: string
+    // shape
+    stroke?: string
+    strokeWidth?: number
+  }
+
+  setSelectedFill: (hex: string) => void
+  setSelectedStroke: (hex: string) => void
+  setSelectedStrokeW: (n: number) => void
+  setSelectedText: (t: string) => void
+  setSelectedFontSize: (n: number) => void
+  setSelectedFontFamily: (f: string) => void
+  setSelectedColor: (hex: string) => void
+
+  // мобильная панель слоёв
+  mobileLayers: MobileLayersProps
+}
+
+export default function Toolbar(props: ToolbarProps) {
+  const {
+    side, setSide,
+    tool, setTool,
+    brushColor, setBrushColor,
+    brushSize, setBrushSize,
+    shapeKind, setShapeKind,
+    onUploadImage, onAddText, onAddShape,
+    startCrop, applyCrop, cancelCrop, isCropping,
+    onDownloadFront, onDownloadBack,
+    toggleLayers, layersOpen,
+    selectedKind, selectedProps,
+    setSelectedFill, setSelectedStroke, setSelectedStrokeW,
+    setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
+    mobileLayers,
+  } = props
 
   // ===== DESKTOP =====
   if (!isMobile) {
@@ -87,7 +139,7 @@ export default function Toolbar({
 
     return (
       <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
-        <div className="flex items-center justify-between mb-3" onMouseDown={onDragStart}>
+        <div className="flex items-center justify-between mb-3 cursor-move" onMouseDown={onDragStart}>
           <div className="text-[11px] uppercase">Tools</div>
           <div className="flex items-center gap-2">
             <button className={btn} onClick={toggleLayers} title="Layers">
@@ -106,9 +158,13 @@ export default function Toolbar({
               <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
               <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
               <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
-              <button className={clx(btn, tool==="crop" && "bg-black text-white")}
+              <button
+                className={clx(btn, tool==="crop" && "bg-black text-white")}
                 onClick={()=> (isCropping ? cancelCrop() : startCrop())}
-                title="Crop"><Crop className={ico}/></button>
+                title="Crop"
+              >
+                <Crop className={ico}/>
+              </button>
             </div>
 
             {(tool==="brush" || tool==="erase") && (
@@ -142,11 +198,11 @@ export default function Toolbar({
 
             {selectedKind === "text" && (
               <div className="space-y-2 border-t pt-2">
-                {/* Двухсторонняя связка текста */}
+                {/* двусторонняя связка */}
                 <input
                   type="text"
                   value={selectedProps?.text ?? ""}
-                  onChange={(e)=> setSelectedText(e.target.value)}
+                  onChange={(e)=> props.setSelectedText(e.target.value)}
                   className="w-full border px-2 py-1 text-sm rounded-none"
                   placeholder="Edit text…"
                 />
@@ -154,18 +210,19 @@ export default function Toolbar({
                   <div className="text-[11px]">Size</div>
                   <input
                     type="range" min={8} max={240}
-                    value={selectedProps?.fontSize ?? 64}
-                    onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
+                    value={selectedProps?.fontSize ?? 96}
+                    onChange={(e)=> props.setSelectedFontSize(parseInt(e.target.value,10))}
                     className="flex-1 h-[3px] bg-black appearance-none
                       [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                       [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
                   />
                   <select
-                    value={selectedProps?.fontFamily ?? "Helvetica, Arial, sans-serif"}
-                    onChange={(e)=> setSelectedFontFamily(e.target.value)}
+                    value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
+                    onChange={(e)=> props.setSelectedFontFamily(e.target.value)}
                     className="border rounded-none text-sm"
                     title="Font"
                   >
+                    <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
                     <option value="Helvetica, Arial, sans-serif">Helvetica</option>
                     <option value="Arial, Helvetica, sans-serif">Arial</option>
                     <option value="'Times New Roman', Times, serif">Times</option>
@@ -176,7 +233,12 @@ export default function Toolbar({
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-[11px]">Color</div>
-                  <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                  <input
+                    type="color"
+                    value={selectedProps?.fill ?? "#000000"}
+                    onChange={(e)=> props.setSelectedFill(e.target.value)}
+                    className="w-8 h-8 p-0 border rounded-none"
+                  />
                 </div>
               </div>
             )}
@@ -185,12 +247,27 @@ export default function Toolbar({
               <div className="space-y-2 border-t pt-2">
                 <div className="flex items-center gap-2">
                   <div className="text-[11px]">Fill</div>
-                  <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                  <input
+                    type="color"
+                    value={selectedProps?.fill ?? "#000000"}
+                    onChange={(e)=> props.setSelectedFill(e.target.value)}
+                    className="w-8 h-8 p-0 border rounded-none"
+                  />
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-[11px]">Stroke</div>
-                  <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                  <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                  <input
+                    type="color"
+                    value={selectedProps?.stroke ?? "#000000"}
+                    onChange={(e)=> props.setSelectedStroke(e.target.value)}
+                    className="w-8 h-8 p-0 border rounded-none"
+                  />
+                  <input
+                    type="number" min={0} max={40}
+                    value={selectedProps?.strokeWidth ?? 0}
+                    onChange={(e)=> props.setSelectedStrokeW(parseInt(e.target.value,10))}
+                    className="w-16 border px-2 py-1 text-sm rounded-none"
+                  />
                 </div>
               </div>
             )}
@@ -213,6 +290,7 @@ export default function Toolbar({
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
+
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) onUploadImage(f)
@@ -233,15 +311,18 @@ export default function Toolbar({
         </div>
       </div>
 
+      {/* Шторка */}
       {open && (
         <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
+          {/* затемнение */}
           <div className="absolute inset-0 bg-black/40" />
 
           <div
-            className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[10px]"
+            className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[12px]"
             style={{ height: "65vh" }}
             onClick={(e)=>e.stopPropagation()}
           >
+            {/* заголовок */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
                 <button
@@ -260,6 +341,7 @@ export default function Toolbar({
               <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
+            {/* контент */}
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
               {tab === "tools" && (
                 <>
@@ -314,18 +396,19 @@ export default function Toolbar({
                         <div className="text-[11px]">Size</div>
                         <input
                           type="range" min={8} max={240}
-                          value={selectedProps?.fontSize ?? 64}
+                          value={selectedProps?.fontSize ?? 96}
                           onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
                           className="flex-1 h-[3px] bg-black appearance-none
                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                            [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                           [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
                         />
                         <select
-                          value={selectedProps?.fontFamily ?? "Helvetica, Arial, sans-serif"}
+                          value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
                           onChange={(e)=> setSelectedFontFamily(e.target.value)}
                           className="border rounded-none text-sm"
                           title="Font"
                         >
+                          <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
                           <option value="Helvetica, Arial, sans-serif">Helvetica</option>
                           <option value="Arial, Helvetica, sans-serif">Arial</option>
                           <option value="'Times New Roman', Times, serif">Times</option>
@@ -336,7 +419,12 @@ export default function Toolbar({
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Color</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input
+                          type="color"
+                          value={selectedProps?.fill ?? "#000000"}
+                          onChange={(e)=> setSelectedFill(e.target.value)}
+                          className="w-8 h-8 p-0 border rounded-none"
+                        />
                       </div>
                     </div>
                   )}
@@ -345,12 +433,27 @@ export default function Toolbar({
                     <div className="space-y-2 border-t pt-2">
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Fill</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input
+                          type="color"
+                          value={selectedProps?.fill ?? "#000000"}
+                          onChange={(e)=> setSelectedFill(e.target.value)}
+                          className="w-8 h-8 p-0 border rounded-none"
+                        />
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Stroke</div>
-                        <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                        <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                        <input
+                          type="color"
+                          value={selectedProps?.stroke ?? "#000000"}
+                          onChange={(e)=> setSelectedStroke(e.target.value)}
+                          className="w-8 h-8 p-0 border rounded-none"
+                        />
+                        <input
+                          type="number" min={0} max={40}
+                          value={selectedProps?.strokeWidth ?? 0}
+                          onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))}
+                          className="w-16 border px-2 py-1 text-sm rounded-none"
+                        />
                       </div>
                     </div>
                   )}
@@ -378,6 +481,23 @@ export default function Toolbar({
                       onClick={()=>mobileLayers.onSelect(it.id)}
                     >
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
+
+                      {/* reorder на мобилке без DnD */}
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }}
+                        title="Move up"
+                      >
+                        <ArrowUp className="w-4 h-4"/>
+                      </button>
+                      <button
+                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
+                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }}
+                        title="Move down"
+                      >
+                        <ArrowDown className="w-4 h-4"/>
+                      </button>
+
                       <button
                         className="w-8 h-8 grid place-items-center border border-current bg-transparent"
                         onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
