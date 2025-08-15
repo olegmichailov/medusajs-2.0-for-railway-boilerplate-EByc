@@ -65,15 +65,15 @@ export default function EditorCanvas() {
   const lastToolRef = useRef<Tool | null>(null)
 
   // ===== Вёрстка/масштаб: фикс на мобилке, мокап выше =====
-  const { viewW, viewH, scale } = useMemo(() => {
+  const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const padTop = isMobile ? 8 : 20
-    const padBottom = isMobile ? 120 : 72 // зазор под Create
+    const padTop = 64                          // высота хедера (чтобы не обрезать мокап)
+    const padBottom = isMobile ? 120 : 72      // зазор под Create / safe-area
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
-    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s }
+    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers])
 
   // фиксируем скролл/позицию документа
@@ -479,7 +479,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // ===== Жесты =====
+  // ===== ЖЕСТЫ =====
   type G = {
     active: boolean
     two: boolean
@@ -497,6 +497,24 @@ export default function EditorCanvas() {
 
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
+
+  // масштаб/поворот вокруг указанной точки stagePoint (устраняет «улёт» и дрожь)
+  const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
+    const tr = node.getAbsoluteTransform().copy()
+    const inv = tr.invert()
+    const local = inv.point(stagePoint) // та же точка в локальных координатах узла ДО трансформации
+
+    node.scaleX(newScale)
+    node.scaleY(newScale)
+    node.rotation(newRotation)
+
+    const tr2 = node.getAbsoluteTransform().copy()
+    const p2 = tr2.point(local) // где оказалась эта точка ПОСЛЕ трансформации
+    const dx = stagePoint.x - p2.x
+    const dy = stagePoint.y - p2.y
+    node.x((node as any).x?.() + dx)
+    node.y((node as any).y?.() + dy)
+  }
 
   const onDown = (e: any) => {
     e.evt?.preventDefault?.()
@@ -530,7 +548,10 @@ export default function EditorCanvas() {
           startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
           lastPointer: toCanvas(getStagePointer()),
           centerCanvas: toCanvas(getStagePointer()),
-          startDist: 0, startAngle: 0, startScaleX: (lay.node as any).scaleX?.() ?? 1, startScaleY: (lay.node as any).scaleY?.() ?? 1, startRot: (lay.node as any).rotation?.() ?? 0
+          startDist: 0, startAngle: 0,
+          startScaleX: (lay.node as any).scaleX?.() ?? 1,
+          startScaleY: (lay.node as any).scaleY?.() ?? 1,
+          startRot: (lay.node as any).rotation?.() ?? 0
         }
       }
       return
@@ -554,7 +575,7 @@ export default function EditorCanvas() {
         active: true,
         two: true,
         nodeId: lay.id,
-        startDist: dist,
+        startDist: Math.max(dist, 0.0001),
         startAngle: ang,
         startScaleX: (lay.node as any).scaleX?.() ?? 1,
         startScaleY: (lay.node as any).scaleY?.() ?? 1,
@@ -563,6 +584,9 @@ export default function EditorCanvas() {
         centerCanvas: toCanvas({ x: cx, y: cy }),
         lastPointer: undefined
       }
+      // скрываем трансформер во время жеста
+      trRef.current?.nodes([])
+      uiLayerRef.current?.batchDraw()
     }
   }
 
@@ -592,43 +616,24 @@ export default function EditorCanvas() {
       return
     }
 
-    // Move: 2 пальца — масштаб/поворот вокруг центра жеста (фиксируем anchor)
+    // Move: 2 пальца — масштаб/поворот вокруг центра жеста (устойчиво)
     if (gestureRef.current.active && gestureRef.current.two && touches && touches.length >= 2) {
       const lay = find(gestureRef.current.nodeId); if (!lay) return
       const t1 = touches[0], t2 = touches[1]
-      const p1 = { x: t1.clientX, y: t1.clientY }
-      const p2 = { x: t2.clientX, y: t2.clientY }
-      const dx = p2.x - p1.x
-      const dy = p2.y - p1.y
+      const dx = t2.clientX - t1.clientX
+      const dy = t2.clientY - t1.clientY
       const dist = Math.hypot(dx, dy)
       const ang  = Math.atan2(dy, dx)
 
-      let s = dist / Math.max(gestureRef.current.startDist, 0.0001)
+      let s = dist / gestureRef.current.startDist
       s = Math.min(Math.max(s, 0.1), 10)
-      const rot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180/Math.PI)
 
-      const n = lay.node as any
-      const cx = gestureRef.current.centerCanvas.x
-      const cy = gestureRef.current.centerCanvas.y
+      const baseScale = gestureRef.current.startScaleX // одинаково по X/Y
+      const newScale = baseScale * s
+      const newRot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180 / Math.PI)
 
-      // центр узла ДО трансформации
-      const r0 = n.getClientRect({ relativeTo: stageRef.current })
-      const c0 = { x: (r0.x + r0.width/2)/scale, y: (r0.y + r0.height/2)/scale }
-
-      n.scaleX(gestureRef.current.startScaleX * s)
-      n.scaleY(gestureRef.current.startScaleY * s)
-      n.rotation(rot)
-
-      // центр ПОСЛЕ трансформации
-      const r1 = n.getClientRect({ relativeTo: stageRef.current })
-      const c1 = { x: (r1.x + r1.width/2)/scale, y: (r1.y + r1.height/2)/scale }
-
-      // смещаем узел так, чтобы центр вернулся к центру жеста
-      const dxCenter = cx - c1.x
-      const dyCenter = cy - c1.y
-      n.x(((n.x?.() ?? 0) + dxCenter))
-      n.y(((n.y?.() ?? 0) + dyCenter))
-
+      const stageCenter = gestureRef.current.centerCanvas
+      applyAround(lay.node, stageCenter, newScale, newRot)
       drawLayerRef.current?.batchDraw()
     }
   }
@@ -637,6 +642,8 @@ export default function EditorCanvas() {
     if (isDrawing) finishStroke()
     gestureRef.current.active = false
     gestureRef.current.two = false
+    // вернуть трансформер если мы в Move и выбран обычный слой
+    requestAnimationFrame(attachTransformer)
   }
 
   // ===== Данные для панелей =====
@@ -654,10 +661,17 @@ export default function EditorCanvas() {
 
   // ===== Render =====
   return (
-    <div className="fixed inset-0 bg-white overflow-hidden">
-      {/* небольшой верхний отступ, чтобы мокап был выше */}
-      <div className="h-[16px]" />
-
+    <div
+      className="fixed inset-0 bg-white"
+      style={{
+        paddingTop: padTop,
+        paddingBottom: padBottom,
+        touchAction: "none",          // отключаем нативные жесты браузера
+        overscrollBehavior: "none",   // без pull-to-refresh/проскролла
+        WebkitUserSelect: "none",
+        userSelect: "none",
+      }}
+    >
       {/* Desktop-панель слоёв — только на десктопе */}
       {!isMobile && showLayers && (
         <LayersPanel
@@ -674,8 +688,8 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Сцена */}
-      <div className="absolute left-1/2 -translate-x-1/2 top-[12px] flex items-start justify-center w-full">
+      {/* Сцена по центру, не уезжает под хедер */}
+      <div className="w-full h-full flex items-start justify-center">
         <Stage
           width={viewW} height={viewH} scale={{ x: scale, y: scale }}
           ref={stageRef}
