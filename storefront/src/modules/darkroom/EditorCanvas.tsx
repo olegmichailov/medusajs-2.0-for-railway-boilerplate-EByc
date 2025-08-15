@@ -10,13 +10,13 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// Базовые размеры арт-поля под мокап (важно: ширина 2400, не 240)
+// --- Базовые размеры арт-поля под мокап ---
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// uid
+// --- простой uid ---
 const uid = () => Math.random().toString(36).slice(2)
 
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
@@ -41,11 +41,11 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
-  // мокапы
+  // --- мокапы ---
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  // ссылки на слои/узлы
+  // --- ссылки на слои/узлы ---
   const stageRef     = useRef<Konva.Stage>(null)
   const bgLayerRef   = useRef<Konva.Layer>(null)
   const drawLayerRef = useRef<Konva.Layer>(null)
@@ -68,26 +68,48 @@ export default function EditorCanvas() {
   const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const padTop = 64                       // высота хедера, чтобы мокап не обрезался
-    const padBottom = isMobile ? 120 : 72   // зазор под Create / safe-area
+    const padTop = 64                     // высота хедера; мокап не уезжает вверх
+    const padBottom = isMobile ? 120 : 72 // зазор под Create / safe-area
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers])
 
-  // фиксируем скролл/позицию документа
+  // фиксируем скролл body
   useEffect(() => {
     const b = document.body
-    const pOverflow = b.style.overflow
-    const pPos = b.style.position
+    const prevOverflow = b.style.overflow
+    const prevPosition = b.style.position
     b.style.overflow = "hidden"
     b.style.position = "fixed"
-    if (isMobile) set({ showLayers: false }) // desktop-панель слоёв не рендерим на мобиле
-    return () => { b.style.overflow = pOverflow; b.style.position = pPos }
+    if (isMobile) set({ showLayers: false }) // desktop-панель слоёв на мобилке не показываем
+    return () => { b.style.overflow = prevOverflow; b.style.position = prevPosition }
   }, [set])
 
-  // helpers
+  // жёсткое отключение нативных жестов браузера на канвасе (iOS Safari чувствительность)
+  useEffect(() => {
+    const st = stageRef.current
+    if (!st) return
+    const el = st.container()
+    const prevent = (e: Event) => e.preventDefault()
+    el.style.touchAction = "none"
+    ;(el.style as any).msTouchAction = "none"
+    el.style.webkitUserSelect = "none"
+    el.style.userSelect = "none"
+    el.addEventListener("touchmove", prevent, { passive: false })
+    el.addEventListener("gesturestart", prevent as any, { passive: false } as any)
+    el.addEventListener("gesturechange", prevent as any, { passive: false } as any)
+    el.addEventListener("gestureend", prevent as any, { passive: false } as any)
+    return () => {
+      el.removeEventListener("touchmove", prevent)
+      el.removeEventListener("gesturestart", prevent as any)
+      el.removeEventListener("gesturechange", prevent as any)
+      el.removeEventListener("gestureend", prevent as any)
+    }
+  }, [])
+
+  // --- helpers ---
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
@@ -230,7 +252,7 @@ export default function EditorCanvas() {
     set({ tool: "move" })
   }
 
-  // ===== Shapes (только через интерфейс; после — Move) =====
+  // ===== Shapes (после — Move) =====
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")       n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
@@ -479,7 +501,7 @@ export default function EditorCanvas() {
     drawLayerRef.current?.batchDraw()
   }
 
-  // ===== ЖЕСТЫ =====
+  // ===== ЖЕСТЫ (повышенная чувствительность, realtime) =====
   type G = {
     active: boolean
     two: boolean
@@ -502,7 +524,7 @@ export default function EditorCanvas() {
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
-  // стабильный масштаб/поворот вокруг точки жеста (без «скачков»)
+  // масштаб/поворот вокруг заданной точки (устойчиво без «скачков»)
   const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
     const tr = node.getAbsoluteTransform().copy()
     const inv = tr.invert()
@@ -513,7 +535,7 @@ export default function EditorCanvas() {
     node.rotation(newRotation)
 
     const tr2 = node.getAbsoluteTransform().copy()
-    const p2 = tr2.point(local)        // позиция той же точки ПОСЛЕ
+    const p2 = tr2.point(local)         // позиция той же точки ПОСЛЕ
     const dx = stagePoint.x - p2.x
     const dy = stagePoint.y - p2.y
     node.x((node as any).x?.() + dx)
@@ -525,16 +547,16 @@ export default function EditorCanvas() {
     if (isCropping) return
 
     const touches: TouchList | undefined = e.evt.touches
-    // Brush/Erase — рисуем
+
+    // Brush/Erase — сразу рисуем
     if (tool === "brush" || tool === "erase") {
       const p = toCanvas(getStagePointer())
       startStroke(p.x, p.y)
       return
     }
 
-    // Move
+    // Move: один палец — перетаскивание выбранного
     if (!touches || touches.length === 1) {
-      // если тапнули по другому узлу — выделяем его
       const st = stageRef.current!
       const tgt = e.target as Konva.Node
       if (tgt && tgt !== st && tgt.getParent()) {
@@ -552,16 +574,17 @@ export default function EditorCanvas() {
           startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
           lastPointer: toCanvas(getStagePointer()),
           centerCanvas: toCanvas(getStagePointer()),
-          startDist: 0, startAngle: 0,
+          startDist: 0,
+          startAngle: 0,
           startScaleX: (lay.node as any).scaleX?.() ?? 1,
           startScaleY: (lay.node as any).scaleY?.() ?? 1,
-          startRot: (lay.node as any).rotation?.() ?? 0
+          startRot: (lay.node as any).rotation?.() ?? 0,
         }
       }
       return
     }
 
-    // Два пальца: масштаб+поворот вокруг центра жеста
+    // Move: два пальца — масштаб + поворот вокруг центра жеста
     if (touches && touches.length >= 2) {
       const lay = find(selectedId)
       if (!lay || isStrokeGroup(lay.node) || lay.meta.locked) return
@@ -586,9 +609,10 @@ export default function EditorCanvas() {
         startRot: (lay.node as any).rotation?.() ?? 0,
         startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
         centerCanvas: toCanvas({ x: cx, y: cy }),
-        lastPointer: undefined
+        lastPointer: undefined,
       }
-      // скрываем трансформер во время жеста
+
+      // во время жеста прячем трансформер
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
     }
@@ -598,7 +622,7 @@ export default function EditorCanvas() {
     if (isCropping) return
     const touches: TouchList | undefined = e.evt.touches
 
-    // Рисуем
+    // Рисование/ластик
     if (tool === "brush" || tool === "erase") {
       if (!isDrawing) return
       const p = toCanvas(getStagePointer())
@@ -606,7 +630,7 @@ export default function EditorCanvas() {
       return
     }
 
-    // Move: перетаскивание 1 пальцем
+    // Move: перетаскивание 1 пальцем (инкрементально)
     if (gestureRef.current.active && !gestureRef.current.two) {
       const lay = find(gestureRef.current.nodeId); if (!lay) return
       const p = toCanvas(getStagePointer())
@@ -620,26 +644,41 @@ export default function EditorCanvas() {
       return
     }
 
-    // Move: 2 пальца — масштаб/поворот вокруг центра жеста (устойчиво, realtime)
+    // Move: 2 пальца — масштаб/поворот вокруг текущего центра жеста
     if (gestureRef.current.active && gestureRef.current.two && touches && touches.length >= 2) {
       const lay = find(gestureRef.current.nodeId); if (!lay) return
       const t1 = touches[0], t2 = touches[1]
-      const dx = t2.clientX - t1.clientX
-      const dy = t2.clientY - t1.clientY
+      const p1 = { x: t1.clientX, y: t1.clientY }
+      const p2 = { x: t2.clientX, y: t2.clientY }
+      const cx = (p1.x + p2.x) / 2
+      const cy = (p1.y + p2.y) / 2
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
       const dist = Math.hypot(dx, dy)
       const ang  = Math.atan2(dy, dx)
 
-      let s = dist / gestureRef.current.startDist
+      // чувствительный инкрементальный масштаб
+      let s = dist / Math.max(gestureRef.current.startDist, 0.0001)
       s = Math.min(Math.max(s, 0.1), 10)
-
       const baseScale = gestureRef.current.startScaleX
       const newScale = baseScale * s
+
+      // инкрементальный поворот
       const newRot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180 / Math.PI)
 
       const st = stageRef.current!
-      const centerStage = { x: gestureRef.current.centerCanvas.x * scale, y: gestureRef.current.centerCanvas.y * scale }
+      const centerStage = { x: cx, y: cy } // уже в координатах stage
+
       applyAround(lay.node, centerStage, newScale, newRot)
       st.batchDraw()
+
+      // ключевая «перебазировка»: повышает чувствительность и убирает ощущение «двух проходов»
+      gestureRef.current.startDist   = dist
+      gestureRef.current.startAngle  = ang
+      gestureRef.current.startScaleX = newScale
+      gestureRef.current.startScaleY = newScale
+      gestureRef.current.startRot    = newRot
+      gestureRef.current.centerCanvas = toCanvas(centerStage)
     }
   }
 
@@ -647,7 +686,7 @@ export default function EditorCanvas() {
     if (isDrawing) finishStroke()
     gestureRef.current.active = false
     gestureRef.current.two = false
-    // вернуть трансформер если мы в Move и выбран обычный слой
+    // вернуть трансформер, если мы в Move и выбран обычный слой
     requestAnimationFrame(attachTransformer)
   }
 
@@ -671,13 +710,13 @@ export default function EditorCanvas() {
       style={{
         paddingTop: padTop,
         paddingBottom: padBottom,
-        touchAction: "none",          // отключаем нативные жесты браузера
-        overscrollBehavior: "none",   // без pull-to-refresh/проскролла
+        touchAction: "none",
+        overscrollBehavior: "none",
         WebkitUserSelect: "none",
         userSelect: "none",
       }}
     >
-      {/* Desktop-панель слоёв — только на десктопе */}
+      {/* Desktop-панель слоёв */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -693,7 +732,7 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Сцена по центру, не уезжает под хедер */}
+      {/* Сцена по центру */}
       <div className="w-full h-full flex items-start justify-center">
         <Stage
           width={viewW} height={viewH} scale={{ x: scale, y: scale }}
@@ -728,7 +767,7 @@ export default function EditorCanvas() {
         </Stage>
       </div>
 
-      {/* Toolbar (десктоп/мобайл — внутри компонента) */}
+      {/* Toolbar */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
