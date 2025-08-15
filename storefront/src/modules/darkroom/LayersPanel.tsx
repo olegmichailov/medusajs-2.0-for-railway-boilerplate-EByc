@@ -37,7 +37,10 @@ type Props = {
   onChangeOpacity: (id: string, opacity: number) => void
 }
 
-/** Desktop-панель слоёв с DnD-перестановкой и настройками. */
+/**
+ * Desktop-панель слоёв с DnD-перестановкой (top↔bottom),
+ * переключателями видимости/блокировки и настройками blend/opacity.
+ */
 export default function LayersPanel({
   items,
   selectId,
