@@ -5,10 +5,11 @@ import { Stage, Layer, Image as KImage, Transformer } from "react-konva"
 import Konva from "konva"
 import useImage from "use-image"
 import Toolbar from "./Toolbar"
+import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ===== Макет / константы
+// ===== Макет
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
@@ -22,7 +23,6 @@ const TEXT_MAX_W  = BASE_W * 0.95
 
 const uid = () => Math.random().toString(36).slice(2)
 
-// ===== Типы
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
 type LayerType = "image" | "shape" | "text" | "strokes"
 type AnyNode =
@@ -35,11 +35,16 @@ const isImageNode   = (n: AnyNode): n is Konva.Image => n instanceof Konva.Image
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 
 export default function EditorCanvas() {
-  const { side, set, tool, brushColor, brushSize, shapeKind,
-          selectedId, select, showLayers, toggleLayers } = useDarkroom()
+  const {
+    side, set, tool, brushColor, brushSize, shapeKind,
+    selectedId, select, showLayers, toggleLayers
+  } = useDarkroom()
 
   // точнее хиты в драге (мобилка)
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
+
+  // по умолчанию — Brush
+  useEffect(() => { if (tool !== "brush") set({ tool: "brush" }) }, []) // один раз
 
   // мокап
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
@@ -78,21 +83,19 @@ export default function EditorCanvas() {
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [headerH])
 
-  // отключаем скролл страницы
+  // отключаем скролл
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
-    if (isMobile) set({ showLayers: true }) // список слоёв доступен и на мобилке (через шторку)
+    if (isMobile) set({ showLayers: false })
     return () => { document.body.style.overflow = prev }
   }, [set])
 
-  // ===== helpers
+  // helpers
   const baseMeta = (name: string): BaseMeta =>
     ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
-
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
-
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     ;(n as any).globalCompositeOperation = meta.blend
@@ -257,7 +260,7 @@ export default function EditorCanvas() {
     lastToolRef.current = tool
   }, [tool, side])
 
-  // ===== Координаты (единственные определения)
+  // Координаты — единые (без дублей!)
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
@@ -300,6 +303,7 @@ export default function EditorCanvas() {
     const meta = baseMeta(`text ${seqs.text}`)
     artRef.current?.add(t)
     t.on("click tap", () => select(id))
+    t.on("dblclick dbltap", () => startTextOverlayEdit(t))
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
     setSeqs(s => ({ ...s, text: s.text + 1 }))
     select(id)
@@ -417,7 +421,61 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Жесты (drag 1-пальцем/мышью)
+  // ===== Overlay-редактор текста (dblclick/tap)
+  const startTextOverlayEdit = (t: Konva.Text) => {
+    const stage = stageRef.current!
+    const stBox = stage.container().getBoundingClientRect()
+    const abs = t.getAbsolutePosition()
+    const x = stBox.left + abs.x * scale
+    const y = stBox.top  + abs.y * scale
+
+    t.visible(false)
+    trRef.current?.nodes([])
+
+    const ta = document.createElement("textarea")
+    ta.value = t.text()
+    ta.style.position = "absolute"
+    ta.style.left = `${x}px`
+    ta.style.top = `${y}px`
+    ta.style.padding = "4px 6px"
+    ta.style.border = "1px solid #000"
+    ta.style.background = "#fff"
+    ta.style.color = t.fill() as string
+    ta.style.fontFamily = t.fontFamily()
+    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
+    ta.style.fontSize = `${t.fontSize() * scale}px`
+    ta.style.lineHeight = String(t.lineHeight())
+    ta.style.zIndex = "9999"
+    ta.style.minWidth = `${Math.max(160, t.width() * scale || 0)}px`
+    ta.style.outline = "none"
+    ta.style.resize = "none"
+    ta.style.boxShadow = "0 2px 8px rgba(0,0,0,.12)"
+    document.body.appendChild(ta)
+    ta.focus(); ta.select()
+
+    const autoGrow = () => {
+      ta.style.height = "auto"
+      ta.style.height = Math.min(ta.scrollHeight, (parseFloat(ta.style.fontSize) || 16) * 3) + "px"
+    }
+    autoGrow()
+
+    const commit = (apply: boolean) => {
+      if (apply) t.text(ta.value)
+      ta.remove()
+      t.visible(true)
+      artRef.current?.batchDraw()
+      attachTransformer()
+    }
+    ta.addEventListener("input", autoGrow)
+    ta.addEventListener("keydown", (ev) => {
+      ev.stopPropagation()
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
+      if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
+    })
+    ta.addEventListener("blur", () => commit(true))
+  }
+
+  // ===== Жесты/мышь
   type G = { active: boolean; nodeId: string | null; last?: {x:number;y:number} }
   const gest = useRef<G>({ active:false, nodeId:null })
 
@@ -495,7 +553,7 @@ export default function EditorCanvas() {
       const insertAt = place==="before" ? dstIdx : dstIdx+1
       orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
       const bottomToTop = [...orderTopToBottom].reverse()
-      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i+2) }) // +2: фоны занимают низ
+      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i+2) }) // +2: фоны — внизу
       artRef.current?.batchDraw()
       return [...others, ...bottomToTop]
     })
@@ -513,13 +571,13 @@ export default function EditorCanvas() {
   }
 
   // ===== Список слоёв (данные)
-  const layerItems = useMemo(() => {
+  const layerItems: LayerItem[] = useMemo(() => {
     return layers
       .filter(l => l.side === side)
       .sort((a,b)=> a.node.zIndex() - b.node.zIndex())
       .reverse()
       .map(l => ({
-        id: l.id, name: l.meta.name, type: l.type as LayerType,
+        id: l.id, name: l.meta.name, type: l.type,
         visible: l.meta.visible, locked: l.meta.locked,
         blend: l.meta.blend, opacity: l.meta.opacity,
       }))
@@ -557,7 +615,7 @@ export default function EditorCanvas() {
     artRef.current?.batchDraw()
   }
 
-  // ===== Скачать (mockup+art и art)
+  // ===== Скачать
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1 / (st.scaleX() || 1)))
@@ -586,68 +644,28 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ====== Desktop LAYERS окно (внутренний компонент)
-  const LayersWindow: React.FC = () => {
-    const [pos, setPos] = useState({ x: 0, y: 0 })
-    useLayoutEffect(() => { setPos({ x: window.innerWidth - 420, y: 140 }) }, [])
-    const drag = useRef<{dx:number;dy:number}|null>(null)
-    const onDownDrag = (e: React.MouseEvent) => {
-      drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y }
-      const mv = (ev: MouseEvent) => setPos({ x: ev.clientX - (drag.current?.dx||0), y: ev.clientY - (drag.current?.dy||0) })
-      const up = () => { drag.current=null; window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up) }
-      window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up)
-    }
-
-    return !isMobile && showLayers ? (
-      <div className="fixed z-40 w-[360px] border border-black/15 bg-white shadow-xl rounded-none"
-           style={{ left: pos.x, top: pos.y }}>
-        <div className="flex items-center justify-between border-b border-black/10">
-          <div className="px-2 py-1 text-[10px] tracking-widest">LAYERS</div>
-          <button className="px-2 py-1 border-l border-black/10" onMouseDown={onDownDrag}>drag</button>
-        </div>
-        <div className="p-2 space-y-2">
-          {layerItems.map((l)=>(
-            <div key={l.id}
-                 className={`flex items-center gap-2 border border-black/10 rounded-none px-2 py-2 ${selectedId===l.id?"bg-black/5":"bg-white"}`}
-                 draggable
-                 onDragStart={(e)=>{ e.dataTransfer.effectAllowed="move" }}
-                 onDragOver={(e)=>e.preventDefault()}
-                 onDrop={(e)=>{ e.preventDefault(); onLayerSelect(l.id) }}>
-              <button className="w-7 h-7 border" onClick={()=>onLayerSelect(l.id)} title="Select">{l.type[0].toUpperCase()}</button>
-              <select
-                value={l.blend}
-                onChange={(e)=>updateMeta(l.id,{ blend: e.target.value as Blend })}
-                className="border rounded-none text-[12px]"
-              >
-                {["source-over","multiply","screen","overlay","darken","lighten","color-dodge","color-burn","hard-light","soft-light","difference","exclusion","hue","saturation","color","luminosity"].map(b=><option key={b} value={b}>{b}</option>)}
-              </select>
-              <input type="range" min={0} max={1} step={0.01} value={l.opacity}
-                onChange={(e)=>updateMeta(l.id,{ opacity: parseFloat(e.target.value) })}
-                className="flex-1 h-[3px] bg-black appearance-none
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                  [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none" />
-              <button className="w-7 h-7 border" onClick={()=>updateMeta(l.id,{ visible: !l.visible })} title={l.visible?"Hide":"Show"}>{l.visible?"👁":"🚫"}</button>
-              <button className="w-7 h-7 border" onClick={()=>updateMeta(l.id,{ locked: !l.locked })}  title={l.locked?"Unlock":"Lock"}>{l.locked?"🔓":"🔒"}</button>
-              <button className="w-7 h-7 border" onClick={()=>duplicateLayer(l.id)} title="Duplicate">⧉</button>
-              <button className="w-7 h-7 border bg-black text-white" onClick={()=>deleteLayer(l.id)} title="Delete">✕</button>
-            </div>
-          ))}
-          {layerItems.length===0 && <div className="text-xs text-black/60">No layers yet.</div>}
-        </div>
-      </div>
-    ) : null
-  }
-
   // ===== Render
   return (
     <div className="fixed inset-0 bg-white"
          style={{ paddingTop: padTop, paddingBottom: padBottom, WebkitUserSelect:"none", userSelect:"none" }}>
-      {/* Десктоп: правое окно слоёв */}
-      <LayersWindow />
+      {/* Десктоп: правое окно слоёв — ИМЕННО оригинальный LayersPanel */}
+      {!isMobile && showLayers && (
+        <LayersPanel
+          items={layerItems}
+          selectId={selectedId}
+          onSelect={onLayerSelect}
+          onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
+          onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
+          onDelete={deleteLayer}
+          onDuplicate={duplicateLayer}
+          onReorder={reorder}
+          onChangeBlend={(id, b)=>updateMeta(id,{ blend: b as Blend })}
+          onChangeOpacity={(id, o)=>updateMeta(id,{ opacity: o })}
+        />
+      )}
 
       {/* Сцена */}
       <div className="w-full h-full flex items-start justify-center">
-        {/* touch-action только над Stage, чтобы UI не блокировался */}
         <div style={{ touchAction: "none" }}>
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
@@ -655,7 +673,7 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            <Layer listening={true}>
+            <Layer listening={false}>
               {frontMock && <KImage ref={frontBgRef} image={frontMock} width={BASE_W} height={BASE_H} visible={side==="front"} />}
               {backMock  && <KImage ref={backBgRef}  image={backMock}  width={BASE_W} height={BASE_H} visible={side==="back"}  />}
             </Layer>
@@ -676,12 +694,12 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* TOOLS: десктоп — плавающее слева; мобилка — 3 полосы + шторка слоёв */}
+      {/* TOOLS */}
       <Toolbar
-        side={side} setSide={(s)=>set({ side: s })}
-        tool={tool} setTool={(t)=>set({ tool: t })}
-        brushColor={brushColor} setBrushColor={(v)=>set({ brushColor: v })}
-        brushSize={brushSize} setBrushSize={(n)=>set({ brushSize: n })}
+        side={side} setSide={(s: Side)=>set({ side: s })}
+        tool={tool} setTool={(t: Tool)=>set({ tool: t })}
+        brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
+        brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
         shapeKind={shapeKind} setShapeKind={()=>{}}
         onUploadImage={onUploadImage}
         onAddText={onAddText}
@@ -703,7 +721,7 @@ export default function EditorCanvas() {
           items: layerItems,
           onSelect: onLayerSelect,
           onToggleVisible: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) },
-          onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() },
+          onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
           onDelete: deleteLayer,
           onDuplicate: duplicateLayer,
           onChangeBlend: (id, b)=>updateMeta(id,{ blend: b as Blend }),
