@@ -9,13 +9,13 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ===== Макет
+// ===== Макет / размеры
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// Текстовые клампы
+// Текстовые клампы (без «пружины» и ухода в минусы)
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MIN_W  = 60
@@ -23,6 +23,7 @@ const TEXT_MAX_W  = BASE_W * 0.95
 
 const uid = () => Math.random().toString(36).slice(2)
 
+// ===== Типы
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
 type LayerType = "image" | "shape" | "text" | "strokes"
 type AnyNode =
@@ -43,8 +44,8 @@ export default function EditorCanvas() {
   // точнее хиты в драге (мобилка)
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
-  // по умолчанию — Brush
-  useEffect(() => { if (tool !== "brush") set({ tool: "brush" }) }, []) // одна инициализация
+  // дефолтный инструмент — Brush
+  useEffect(() => { if (tool !== "brush") set({ tool: "brush" }) }, []) // один раз
 
   // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
@@ -63,10 +64,10 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
-  const lastToolRef     = useRef<Tool | null>(null)
+  const lastToolRef = useRef<Tool | null>(null)
   const isTransformingRef = useRef(false)
 
-  // вёрстка/масштаб
+  // верстка/масштаб
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -76,14 +77,14 @@ export default function EditorCanvas() {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + 8
-    const padBottom = isMobile ? 144 : 72
+    const padBottom = isMobile ? 144 : 72 // 3 нижние полосы на мобилке
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [headerH])
 
-  // отключаем скролл
+  // отключаем скролл страницы внутри редактора
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -91,14 +92,34 @@ export default function EditorCanvas() {
     return () => { document.body.style.overflow = prev }
   }, [set])
 
+  // блокируем нативный зум/жесты БРАУЗЕРА над канвой (но не над UI)
+  useEffect(() => {
+    const cont = stageRef.current?.container()
+    const stopWheel = (e: WheelEvent) => { if ((e as any).ctrlKey) e.preventDefault() }
+    cont?.addEventListener("wheel", stopWheel, { passive: false })
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener("gesturestart", prevent, { passive: false } as any)
+    document.addEventListener("gesturechange", prevent, { passive: false } as any)
+    document.addEventListener("gestureend", prevent, { passive: false } as any)
+    return () => {
+      cont?.removeEventListener("wheel", stopWheel as any)
+      document.removeEventListener("gesturestart", prevent as any)
+      document.removeEventListener("gesturechange", prevent as any)
+      document.removeEventListener("gestureend", prevent as any)
+    }
+  }, [])
+
   // helpers
   const baseMeta = (name: string): BaseMeta =>
     ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
+
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
+
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     ;(n as any).globalCompositeOperation = meta.blend
+    // если слой — группа, и у неё нестандартный blend, кешируем (иначе композит на всю сцену)
     if (n instanceof Konva.Group && meta.blend !== "source-over" && !n.isCached()) n.cache()
   }
 
@@ -111,7 +132,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer
+  // ===== Transformer (без «пружины» у текста)
   const detachCustom = useRef<(() => void) | null>(null)
   const textStartRef = useRef<{w:number; x:number; fs:number} | null>(null)
 
@@ -139,7 +160,7 @@ export default function EditorCanvas() {
     n.on("transformend.guard", onEndT)
 
     if (isTextNode(n)) {
-      // текст: боковые якоря — ширина; углы — масштаб шрифта
+      // текст: боковые — ширина; углы — масштаб шрифта (пропорц.)
       tr.keepRatio(false)
       tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right"])
       const clampW  = (val:number) => Math.max(TEXT_MIN_W,  Math.min(val, TEXT_MAX_W))
@@ -175,7 +196,7 @@ export default function EditorCanvas() {
       n.on("transformend.textfix", onEnd)
       detachCustom.current = () => { n.off(".textfix"); n.off(".guard") }
     } else {
-      // image/shape: углы пропорционально, боковые/верх-низ — не пропорционально
+      // image/shape: углы пропорционально; боковые/верх-низ — не пропорционально
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -201,7 +222,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // во время brush/erase — отключаем драг
+  // пока brush/erase — отключаем перетаскивание
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -212,7 +233,7 @@ export default function EditorCanvas() {
     if (!enable) { trRef.current?.nodes([]); uiRef.current?.batchDraw() }
   }, [tool, layers, side])
 
-  // хоткеи
+  // хоткеи (дублировать, удалить, nudging)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
@@ -260,7 +281,7 @@ export default function EditorCanvas() {
     lastToolRef.current = tool
   }, [tool, side])
 
-  // Координаты — единые (без дублей!)
+  // координаты
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
@@ -330,10 +351,10 @@ export default function EditorCanvas() {
     set({ tool: "move" })
   }
 
-  // ===== ERASE как маска
+  // ===== ERASE как маска внутри группы (cache + destination-out)
   const ensureWrappedForErase = (l: AnyLayer): Konva.Group => {
     const n = l.node
-    if (n.getParent() !== artRef.current) { // уже в группе
+    if (n.getParent() !== artRef.current) { // уже обёрнут
       const g = n.getParent() as Konva.Group
       if (!g.isCached()) g.cache()
       return g
@@ -355,7 +376,6 @@ export default function EditorCanvas() {
     return g
   }
 
-  // верхний подходящий слой под указателем
   const pickTopAt = (sx: number, sy: number): AnyLayer | null => {
     const st = stageRef.current; if (!st) return null
     const hits = st.getAllIntersections({ x: sx, y: sy })
@@ -376,17 +396,22 @@ export default function EditorCanvas() {
 
   const recacheGroup = (g: Konva.Group) => { g.clearCache(); g.cache() }
 
-  // рисование
+  // ===== Рисование
   const startStroke = (x: number, y: number) => {
     if (tool === "brush") {
       let gid = currentStrokeId.current[side]
       if (!gid) gid = createStrokeGroup().id
       const g = find(gid)!.node as Konva.Group
       const line = new Konva.Line({
-        points: [x, y], stroke: brushColor, strokeWidth: brushSize,
-        lineCap: "round", lineJoin: "round", globalCompositeOperation: "source-over",
+        points: [x, y],
+        stroke: brushColor,
+        strokeWidth: brushSize,
+        lineCap: "round",
+        lineJoin: "round",
+        globalCompositeOperation: "source-over",
       })
-      g.add(line); setIsDrawing(true)
+      g.add(line)
+      setIsDrawing(true)
     } else if (tool === "erase") {
       let sel = find(selectedId)
       if (!sel) {
@@ -397,12 +422,19 @@ export default function EditorCanvas() {
       if (!sel) return
       const g = ensureWrappedForErase(sel)
       const line = new Konva.Line({
-        points: [x, y], stroke: "#000", strokeWidth: brushSize,
-        lineCap: "round", lineJoin: "round", globalCompositeOperation: "destination-out",
+        points: [x, y],
+        stroke: "#000",
+        strokeWidth: brushSize,
+        lineCap: "round",
+        lineJoin: "round",
+        globalCompositeOperation: "destination-out",
       })
-      g.add(line); recacheGroup(g); setIsDrawing(true)
+      g.add(line)
+      recacheGroup(g)
+      setIsDrawing(true)
     }
   }
+
   const appendStroke = (x: number, y: number) => {
     if (!isDrawing) return
     if (tool === "brush") {
@@ -422,9 +454,10 @@ export default function EditorCanvas() {
       artRef.current?.batchDraw()
     }
   }
+
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста (dblclick/tap)
+  // ===== Overlay-редактор текста (dblclick/tap по тексту)
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
@@ -478,7 +511,7 @@ export default function EditorCanvas() {
     ta.addEventListener("blur", () => commit(true))
   }
 
-  // ===== Жесты/мышь
+  // ===== Жесты / мышь
   type G = { active: boolean; nodeId: string | null; last?: {x:number;y:number} }
   const gest = useRef<G>({ active:false, nodeId:null })
 
@@ -492,23 +525,25 @@ export default function EditorCanvas() {
       startStroke(p.x, p.y); return
     }
 
-    const st = stageRef.current!, tgt = e.target as Konva.Node
-    if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
-      select(null); trRef.current?.nodes([]); uiRef.current?.batchDraw(); return
-    }
-
+    const tgt = e.target as Konva.Node
+    // если попали не в наш слой — снимаем выделение
+    let hitLayer: AnyLayer | undefined
     let p: Konva.Node | null | undefined = tgt
     while (p && p !== artRef.current) {
-      const l = layers.find(L => L.node === p)
-      if (l && l.side === side) { select(l.id); break }
+      hitLayer = layers.find(L => L.node === p)
+      if (hitLayer && hitLayer.side === side) break
       p = p.getParent?.()
     }
+    if (!hitLayer) {
+      select(null); trRef.current?.nodes([]); uiRef.current?.batchDraw(); return
+    }
+    select(hitLayer.id)
 
-    const lay = find(selectedId)
-    if (lay && !isStrokeGroup(lay.node) && !lay.meta.locked) {
-      gest.current = { active:true, nodeId: lay.id, last: toCanvas(getStagePointer()) }
+    if (!isStrokeGroup(hitLayer.node) && !hitLayer.meta.locked) {
+      gest.current = { active:true, nodeId: hitLayer.id, last: toCanvas(getStagePointer()) }
     }
   }
+
   const onMove = () => {
     if (isTransformingRef.current) return
     if (tool==="brush" || tool==="erase") {
@@ -524,14 +559,16 @@ export default function EditorCanvas() {
       gest.current.last = p; artRef.current?.batchDraw()
     }
   }
+
   const onUp = () => { if (isDrawing) finishStroke(); gest.current.active=false; requestAnimationFrame(attachTransformer) }
 
-  // ===== CRUD / порядок / метаданные
+  // ===== CRUD / порядок / мета
   const deleteLayer = (id: string) => {
     setLayers(p => { const l=p.find(x=>x.id===id); l?.node.destroy(); return p.filter(x=>x.id!==id) })
     if (selectedId === id) select(null)
     artRef.current?.batchDraw()
   }
+
   const duplicateLayer = (id: string) => {
     const src = layers.find(l=>l.id===id); if (!src) return
     const clone = src.node.clone() as AnyNode
@@ -544,6 +581,7 @@ export default function EditorCanvas() {
     clone.zIndex(artRef.current!.children.length - 1)
     artRef.current?.batchDraw()
   }
+
   const reorder = (srcId: string, destId: string, place: "before"|"after") => {
     setLayers((prev) => {
       const current = prev.filter(l => l.side === side)
@@ -556,12 +594,13 @@ export default function EditorCanvas() {
       const insertAt = place==="before" ? dstIdx : dstIdx+1
       orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
       const bottomToTop = [...orderTopToBottom].reverse()
-      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i) })
+      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i+2) }) // +2: фоновые мокапы — внизу
       artRef.current?.batchDraw()
       return [...others, ...bottomToTop]
     })
     select(srcId); requestAnimationFrame(attachTransformer)
   }
+
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
     setLayers(p => p.map(l => {
       if (l.id !== id) return l
@@ -618,7 +657,7 @@ export default function EditorCanvas() {
     artRef.current?.batchDraw()
   }
 
-  // ===== Скачать
+  // ===== Скачать (с мокапом и без)
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1 / (st.scaleX() || 1)))
@@ -651,7 +690,7 @@ export default function EditorCanvas() {
   return (
     <div className="fixed inset-0 bg-white"
          style={{ paddingTop: padTop, paddingBottom: padBottom, WebkitUserSelect:"none", userSelect:"none" }}>
-      {/* Десктоп: правое окно слоёв — ИМЕННО оригинальный LayersPanel */}
+      {/* Десктоп: оригинальный LayersPanel справа */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -669,23 +708,23 @@ export default function EditorCanvas() {
 
       {/* Сцена */}
       <div className="w-full h-full flex items-start justify-center">
-        <div style={{ touchAction: "none" }}>
+        <div style={{ touchAction: "none" /* на UI это НЕ вешаем */ }}>
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
             ref={stageRef}
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* Фоны в отдельном слое, без прослушки */}
+            {/* Фоновые мокапы в отдельном слушателе false, чтобы не перехватывали клики */}
             <Layer listening={false}>
               {frontMock && <KImage ref={frontBgRef} image={frontMock} width={BASE_W} height={BASE_H} visible={side==="front"} />}
               {backMock  && <KImage ref={backBgRef}  image={backMock}  width={BASE_W} height={BASE_H} visible={side==="back"}  />}
             </Layer>
 
-            {/* Арт */}
-            <Layer ref={artRef} />
+            {/* Единый арт-слой */}
+            <Layer ref={artRef} listening />
 
-            {/* UI */}
+            {/* UI-слой для Transformer */}
             <Layer ref={uiRef}>
               <Transformer
                 ref={trRef}
@@ -700,7 +739,7 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* TOOLS */}
+      {/* TOOLBAR (мобилка: 3 полосы снизу; десктоп: плавающее окно) */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
