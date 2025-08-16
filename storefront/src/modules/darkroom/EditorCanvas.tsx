@@ -104,12 +104,8 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
-    ;(n as any).opacity?.(meta.opacity)
-    if (typeof (n as any).globalCompositeOperation === "function") {
-      (n as any).globalCompositeOperation(meta.blend)
-    } else {
-      (n as any).setAttr?.("globalCompositeOperation", meta.blend)
-    }
+    n.opacity(meta.opacity)
+    ;(n as any).globalCompositeOperation = meta.blend
   }
 
   // показываем только активную сторону
@@ -124,7 +120,17 @@ export default function EditorCanvas() {
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
-  const textStartRef  = useRef<{w:number; x:number; fs:number} | null>(null)
+  const detachBBox    = useRef<(() => void) | null>(null)
+  const textStartRef  = useRef<{w:number; x:number} | null>(null)
+
+  // получить текстовый узел даже если слой обёрнут в группу (после Erase)
+  const getInnerText = (l: AnyLayer | null): Konva.Text | null => {
+    if (!l) return null
+    if (isTextNode(l.node)) return l.node
+    if (l.type !== "text" || !(l.node instanceof Konva.Group)) return null
+    const ch = l.node.getChildren().find((c) => c instanceof Konva.Text) as Konva.Text | undefined
+    return ch || null
+  }
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -133,15 +139,16 @@ export default function EditorCanvas() {
 
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
+    if (detachBBox.current)    { detachBBox.current();    detachBBox.current    = null }
 
+    const tr = trRef.current!
     if (disabled) {
-      trRef.current?.nodes([])
+      tr.nodes([])
       uiLayerRef.current?.batchDraw()
       return
     }
 
     ;(n as any).draggable(true)
-    const tr = trRef.current!
     tr.nodes([n])
     tr.rotateEnabled(true)
 
@@ -152,57 +159,53 @@ export default function EditorCanvas() {
     n.on("transformend.guard", onEndT)
     detachGuard.current = () => n.off(".guard")
 
-    if (isTextNode(n)) {
-      // у текста: боковые якоря — width; углы — масштаб шрифта
-      tr.keepRatio(false)
+    // ==== поведение якорей ====
+    if (lay!.type === "text") {
+      // трансформируем ГРУППУ (если она есть), чтобы маска Erase масштабировалась вместе с текстом
+      tr.keepRatio(true)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
         "middle-left","middle-right"
       ])
 
-      const onStartTxt = () => {
-        const t = n as Konva.Text
-        textStartRef.current = { w: t.width() || 0, x: t.x(), fs: t.fontSize() }
-      }
-      const clampW  = (val:number) => Math.max(TEXT_MIN_W,  Math.min(val, TEXT_MAX_W))
-      const clampFS = (val:number) => Math.max(TEXT_MIN_FS, Math.min(val, TEXT_MAX_FS))
-
-      const onTransform = () => {
-        const t = n as Konva.Text
-        const st = textStartRef.current || { w: t.width() || 0, x: t.x(), fs: t.fontSize() }
-        const trInst = trRef.current
-        const activeAnchor = (trInst && (trInst as any).getActiveAnchor?.()) as string | undefined
-
-        if (activeAnchor === "middle-left" || activeAnchor === "middle-right") {
-          // ширина только от стартовых значений → без дрожи
-          const sx = Math.max(0.01, t.scaleX())
-          const newW = clampW(st.w * sx)
-          if (activeAnchor === "middle-left") {
-            const right = st.x + st.w
-            t.width(newW)
-            t.x(right - newW)
-          } else {
-            t.width(newW)
-            t.x(st.x)
-          }
-          t.scaleX(1)
-        } else {
-          // угловые — пропорциональный масштаб шрифта
-          const s = Math.max(t.scaleX(), t.scaleY())
-          const next = clampFS(st.fs * s)
-          t.fontSize(next)
-          t.scaleX(1); t.scaleY(1)
+      const inner = getInnerText(lay!) // сам текст
+      if (inner) {
+        // стартовые значения для боковых якорей (изменяем только width текста)
+        const onStartTxt = () => {
+          textStartRef.current = { w: inner.width() || 0, x: (lay!.node as any).x?.() ?? 0 }
         }
-        t.getLayer()?.batchDraw()
-      }
-      const onEnd = () => { onTransform(); textStartRef.current = null }
+        n.on("transformstart.textfix", onStartTxt)
+        detachTextFix.current = () => { n.off(".textfix") }
 
-      n.on("transformstart.textfix", onStartTxt)
-      n.on("transform.textfix", onTransform)
-      n.on("transformend.textfix", onEnd)
-      detachTextFix.current = () => { n.off(".textfix") }
+        const clampW  = (val:number) => Math.max(TEXT_MIN_W,  Math.min(val, TEXT_MAX_W))
+
+        // boundBoxFunc — «съедаем» масштаб у боковых якорей, меняя только width текста
+        const bbox = (oldB:any, newB:any) => {
+          const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+          if (active === "middle-left" || active === "middle-right") {
+            const st = textStartRef.current || { w: inner.width() || 0, x: (lay!.node as any).x?.() ?? 0 }
+            const sx = newB.width / oldB.width
+            const nextW = clampW(st.w * Math.max(0.01, sx))
+            inner.width(nextW)
+
+            // если тянем левую ручку — двигаем группу так, чтобы «правый край» оставался на месте
+            if (active === "middle-left") {
+              const rightAtStart = st.x + st.w
+              ;(lay!.node as any).x?.(rightAtStart - nextW)
+            } else {
+              ;(lay!.node as any).x?.(st.x)
+            }
+            // возвращаем старый bbox → трансформер не масштабирует группу
+            return oldB
+          }
+          // угловые — масштабируем группу (маска остаётся синхронной)
+          return newB
+        }
+        tr.boundBoxFunc(bbox)
+        detachBBox.current = () => tr.boundBoxFunc(undefined as any)
+      }
     } else {
-      // для изображений/фигур углы тянут пропорционально
+      // изображения/фигуры/стоки — пропорционально
       tr.keepRatio(true)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right"
@@ -384,13 +387,17 @@ export default function EditorCanvas() {
     return g
   }
 
-  // выбрать верхний узел под точкой (если eraser без выбора)
+  // выбрать верхний узел под точкой (если eraser без выбора), игнорируя фон
   const pickTopAt = (sx: number, sy: number): AnyLayer | null => {
     const st = stageRef.current; if (!st) return null
-    const n = st.getIntersection({ x: sx, y: sy }, "Shape")
-    if (!n) return null
-    const hit = layers.find(l => l.node === n || l.node === (n.getParent() as any))
-    return hit ?? null
+    const all = (st as any).getAllIntersections?.({ x: sx, y: sy }) as Konva.Node[] | undefined
+    const list = all && all.length ? all : [st.getIntersection({ x: sx, y: sy }, "Shape")!].filter(Boolean)
+    for (const n of list) {
+      if (n === frontBgRef.current || n === backBgRef.current) continue
+      const hit = layers.find(l => l.node === n || l.node === (n.getParent() as any))
+      if (hit && hit.side === side) return hit
+    }
+    return null
   }
 
   const recacheGroup = (g: Konva.Group) => {
@@ -783,11 +790,11 @@ export default function EditorCanvas() {
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
-    sel && isTextNode(sel.node) ? {
-      text: sel.node.text(),
-      fontSize: sel.node.fontSize(),
-      fontFamily: sel.node.fontFamily(),
-      fill: sel.node.fill() as string,
+    sel && isTextNode(getInnerText(sel) as any) ? {
+      text: (getInnerText(sel) as Konva.Text).text(),
+      fontSize: (getInnerText(sel) as Konva.Text).fontSize(),
+      fontFamily: (getInnerText(sel) as Konva.Text).fontFamily(),
+      fill: (getInnerText(sel) as Konva.Text).fill() as string,
     }
     : sel && (sel.node as any).fill ? {
       fill: (sel.node as any).fill() ?? "#000000",
@@ -796,18 +803,18 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); canvasLayerRef.current?.batchDraw() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); canvasLayerRef.current?.batchDraw() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); canvasLayerRef.current?.batchDraw() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); canvasLayerRef.current?.batchDraw() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); canvasLayerRef.current?.batchDraw() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); canvasLayerRef.current?.batchDraw() }
-  const setSelectedColor      = (hex:string)  => {
+  const setSelectedFill       = (hex:string) => {
     if (!sel) return
-    if (sel.type === "text") { (sel.node as Konva.Text).fill(hex) }
-    else if ((sel.node as any).fill) (sel.node as any).fill(hex)
+    if (sel.type === "text") { const t = getInnerText(sel); if (!t) return; t.fill(hex) }
+    else { const n = sel.node as any; if (!n?.fill) return; n.fill(hex) }
     canvasLayerRef.current?.batchDraw()
   }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); canvasLayerRef.current?.batchDraw() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); canvasLayerRef.current?.batchDraw() }
+  const setSelectedText       = (tstr:string) => { const n = sel ? getInnerText(sel) : null; if (!n) return; n.text(tstr); canvasLayerRef.current?.batchDraw() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel ? getInnerText(sel) : null; if (!n) return; n.fontSize(nsize); canvasLayerRef.current?.batchDraw() }
+  const setSelectedFontFamily = (name:string) => { const n = sel ? getInnerText(sel) : null; if (!n) return; n.fontFamily(name); canvasLayerRef.current?.batchDraw() }
+  const setSelectedColor      = setSelectedFill
 
   // ===== Скачивание (mockup + art) =====
   const downloadBoth = async (s: Side) => {
