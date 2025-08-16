@@ -1,9 +1,10 @@
+// storefront/src/modules/darkroom/Toolbar.tsx
 "use client"
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
-  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon, Crop,
+  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
   Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown
 } from "lucide-react"
@@ -14,6 +15,7 @@ const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
+// ——— Типы слоёв для мобайл-панели ———
 type MobileLayersItem = {
   id: string
   name: string
@@ -38,36 +40,39 @@ type MobileLayersProps = {
 }
 
 type ToolbarProps = {
+  // стороны
   side: Side
   setSide: (s: Side) => void
 
+  // инструменты
   tool: Tool
   setTool: (t: Tool) => void
 
+  // кисть
   brushColor: string
   setBrushColor: (hex: string) => void
 
   brushSize: number
   setBrushSize: (n: number) => void
 
+  // шейпы
   shapeKind: ShapeKind
   setShapeKind: (k: ShapeKind) => void
 
+  // добавление
   onUploadImage: (file: File) => void
   onAddText: () => void
   onAddShape: (k: ShapeKind) => void
 
-  startCrop: () => void
-  applyCrop: () => void
-  cancelCrop: () => void
-  isCropping: boolean
-
+  // скачивание
   onDownloadFront: () => void
   onDownloadBack: () => void
 
+  // слои (десктоп)
   toggleLayers: () => void
   layersOpen: boolean
 
+  // выбранный слой — свойства
   selectedKind: "image" | "shape" | "text" | "strokes" | null
   selectedProps: {
     text?: string
@@ -86,6 +91,7 @@ type ToolbarProps = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
 
+  // мобайл-слои
   mobileLayers: MobileLayersProps
 }
 
@@ -95,8 +101,8 @@ export default function Toolbar(props: ToolbarProps) {
     tool, setTool,
     brushColor, setBrushColor,
     brushSize, setBrushSize,
+    shapeKind, setShapeKind, // на будущее (сейчас выбор идёт кнопками)
     onUploadImage, onAddText, onAddShape,
-    startCrop, applyCrop, cancelCrop, isCropping,
     onDownloadFront, onDownloadBack,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
@@ -105,7 +111,94 @@ export default function Toolbar(props: ToolbarProps) {
     mobileLayers,
   } = props
 
-  // ===== DESKTOP =====
+  // ========== ОБЩЕЕ: верхняя большая панель (Front/Back + Download) ==========
+  const TopBar = () => (
+    <div
+      className="fixed left-1/2 -translate-x-1/2 z-40"
+      style={{ top: 8 }}
+    >
+      <div className="flex items-center gap-4 bg-white/85 backdrop-blur px-4 py-3 rounded-2xl shadow border border-black/10">
+        {/* FRONT */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={clx(
+              "px-6 h-12 text-lg rounded-none font-bold border transition",
+              side==="front" ? "bg-black text-white border-black" : "bg-white text-black hover:bg-black hover:text-white border-black"
+            )}
+            style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+            onClick={()=>setSide("front")}
+            title="Front"
+          >
+            FRONT
+          </button>
+          <button
+            type="button"
+            className="px-4 h-12 rounded-none font-bold border border-black bg-white text-black hover:bg-black hover:text-white transition"
+            style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+            onClick={onDownloadFront}
+            title="Download Front"
+          >
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4"/>
+              <span>Download</span>
+            </div>
+          </button>
+        </div>
+
+        <div className="w-px h-8 bg-neutral-200" />
+
+        {/* BACK */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={clx(
+              "px-6 h-12 text-lg rounded-none font-bold border transition",
+              side==="back" ? "bg黑 text-white border-black".replace("黑","black") : "bg-white text-black hover:bg-black hover:text-white border-black"
+            )}
+            style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+            onClick={()=>setSide("back")}
+            title="Back"
+          >
+            BACK
+          </button>
+          <button
+            type="button"
+            className="px-4 h-12 rounded-none font-bold border border-black bg-white text-black hover:bg-black hover:text-white transition"
+            style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+            onClick={onDownloadBack}
+            title="Download Back"
+          >
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4"/>
+              <span>Download</span>
+            </div>
+          </button>
+        </div>
+
+        {/* Layers toggle — только десктоп */}
+        {!isMobile && (
+          <>
+            <div className="w-px h-8 bg-neutral-200" />
+            <button
+              type="button"
+              className="px-4 h-12 rounded-none font-bold border border-black bg-white text-black hover:bg-black hover:text-white transition"
+              style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+              onClick={toggleLayers}
+              title="Layers"
+            >
+              <div className="flex items-center gap-2">
+                {layersOpen ? <PanelRightClose className="w-4 h-4"/> : <PanelRightOpen className="w-4 h-4"/>}
+                <span>{layersOpen ? "Hide layers" : "Show layers"}</span>
+              </div>
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  // ========== DESKTOP ==========
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -133,159 +226,169 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
+    const stopKeys = (e: React.KeyboardEvent) => e.stopPropagation()
+
     return (
-      <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
-        <div className="flex items-center justify-between mb-3 cursor-move" onMouseDown={onDragStart}>
-          <div className="text-[11px] uppercase">Tools</div>
-          <div className="flex items-center gap-2">
-            <button className={btn} onClick={toggleLayers} title="Layers">
-              {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-            </button>
-            <button className={btn} onClick={() => setOpen(!open)} title="Close / Open">{open ? "×" : "≡"}</button>
-          </div>
-        </div>
+      <>
+        <TopBar />
 
-        {open && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-7 gap-2">
-              <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
-              <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
-              <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-              <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
-              <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
-              <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
-              <button
-                className={clx(btn, tool==="crop" && "bg-black text-white")}
-                onClick={()=> (isCropping ? cancelCrop() : startCrop())}
-                title="Crop"
-              >
-                <Crop className={ico}/>
+        <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
+          <div className="flex items-center justify-between mb-3 cursor-move" onMouseDown={onDragStart}>
+            <div className="text-[11px] uppercase">Tools</div>
+            <div className="flex items-center gap-2">
+              <button className={btn} onClick={toggleLayers} title="Layers">
+                {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
               </button>
+              <button className={btn} onClick={() => setOpen(!open)} title="Close / Open">{open ? "×" : "≡"}</button>
             </div>
-
-            {(tool==="brush" || tool==="erase") && (
-              <div className="space-y-2">
-                <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-                <input
-                  type="range" min={1} max={120} value={brushSize}
-                  onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
-                  className="w-full appearance-none h-[3px] bg-black
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                  [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                />
-                <div className="text-[11px] uppercase">Color</div>
-                <input
-                  type="color" value={brushColor}
-                  onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
-                  className="w-10 h-10 border border-black rounded-none"
-                />
-              </div>
-            )}
-
-            {tool==="shape" && (
-              <>
-                <div className="grid grid-cols-5 gap-2">
-                  <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-                  <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-                  <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-                  <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-                  <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
-                </div>
-
-                {props.selectedKind === "shape" && (
-                  <div className="space-y-2 border-t pt-2">
-                    <div className="flex items-center gap-2">
-                      <div className="text-[11px]">Fill</div>
-                      <input
-                        type="color"
-                        value={selectedProps?.fill ?? "#000000"}
-                        onChange={(e)=> setSelectedFill(e.target.value)}
-                        className="w-8 h-8 p-0 border rounded-none"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-[11px]">Stroke</div>
-                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {selectedKind === "text" && (
-              <div className="space-y-2 border-t pt-2">
-                <input
-                  type="text"
-                  value={selectedProps?.text ?? ""}
-                  onChange={(e)=> setSelectedText(e.target.value)}
-                  className="w-full border px-2 py-1 text-sm rounded-none"
-                  placeholder="Edit text…"
-                />
-                <div className="flex items-center gap-2">
-                  <div className="text-[11px]">Size</div>
-                  <input
-                    type="range" min={8} max={240}
-                    value={selectedProps?.fontSize ?? 96}
-                    onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
-                    className="flex-1 h-[3px] bg-black appearance-none
-                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                      [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                  />
-                  <select
-                    value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
-                    onChange={(e)=> setSelectedFontFamily(e.target.value)}
-                    className="border rounded-none text-sm"
-                    title="Font"
-                  >
-                    <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
-                    <option value="Helvetica, Arial, sans-serif">Helvetica</option>
-                    <option value="Arial, Helvetica, sans-serif">Arial</option>
-                    <option value="'Times New Roman', Times, serif">Times</option>
-                    <option value="'Courier New', Courier, monospace">Courier</option>
-                    <option value="Georgia, serif">Georgia</option>
-                    <option value="Impact, Charcoal, sans-serif">Impact</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-[11px]">Color</div>
-                  <input
-                    type="color"
-                    value={selectedProps?.fill ?? "#000000"}
-                    onChange={(e)=> setSelectedFill(e.target.value)}
-                    className="w-8 h-8 p-0 border rounded-none"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-4 gap-2">
-              <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
-              <button className={clx(btn, side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
-              <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
-              <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
-            </div>
-
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
           </div>
-        )}
-      </div>
+
+          {open && (
+            <div className="space-y-3">
+              {/* Инструменты */}
+              <div className="grid grid-cols-6 gap-2">
+                <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
+                <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
+                <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
+                <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
+                <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
+                <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
+              </div>
+
+              {(tool==="brush" || tool==="erase") && (
+                <div className="space-y-2">
+                  <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
+                  <input
+                    type="range" min={1} max={240} value={brushSize}
+                    onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
+                    className="w-full appearance-none h-[3px] bg-black
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                    [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                  />
+                  <div className="text-[11px] uppercase">Color</div>
+                  <input
+                    type="color" value={brushColor}
+                    onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
+                    className="w-10 h-10 border border-black rounded-none"
+                  />
+                </div>
+              )}
+
+              {tool==="shape" && (
+                <>
+                  <div className="grid grid-cols-5 gap-2">
+                    <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
+                    <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
+                    <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
+                    <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
+                    <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
+                  </div>
+
+                  {selectedKind === "shape" && (
+                    <div className="space-y-2 border-t pt-2">
+                      <div className="flex items-center gap-2">
+                        <div className="text-[11px]">Fill</div>
+                        <input
+                          type="color"
+                          value={selectedProps?.fill ?? "#000000"}
+                          onChange={(e)=> setSelectedFill(e.target.value)}
+                          className="w-8 h-8 p-0 border rounded-none"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-[11px]">Stroke</div>
+                        <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input type="number" min={0} max={128} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {selectedKind === "text" && (
+                <div className="space-y-2 border-t pt-2">
+                  <input
+                    type="text"
+                    value={selectedProps?.text ?? ""}
+                    onChange={(e)=> setSelectedText(e.target.value)}
+                    onKeyDown={(e)=>e.stopPropagation()}
+                    className="w-full border px-2 py-1 text-sm rounded-none"
+                    placeholder="Edit text…"
+                    style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Size</div>
+                    <input
+                      type="range" min={8} max={512}
+                      value={selectedProps?.fontSize ?? 96}
+                      onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
+                      onKeyDown={stopKeys}
+                      className="flex-1 h-[3px] bg-black appearance-none
+                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
+                        [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                    />
+                    <select
+                      value={selectedProps?.fontFamily ?? "Helvetica, Arial, sans-serif"}
+                      onChange={(e)=> setSelectedFontFamily(e.target.value)}
+                      onKeyDown={stopKeys}
+                      className="border rounded-none text-sm"
+                      title="Font"
+                    >
+                      <option value="Helvetica, Arial, sans-serif">Helvetica (Bold)</option>
+                      <option value="Arial, Helvetica, sans-serif">Arial</option>
+                      <option value="'Times New Roman', Times, serif">Times</option>
+                      <option value="'Courier New', Courier, monospace">Courier</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[11px]">Color</div>
+                    <input
+                      type="color"
+                      value={selectedProps?.fill ?? "#000000"}
+                      onChange={(e)=> setSelectedFill(e.target.value)}
+                      className="w-8 h-8 p-0 border rounded-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Переключатели стороны и быстрые загрузки — оставляем и здесь */}
+              <div className="grid grid-cols-4 gap-2">
+                <button className={clx(btn, side==="front" && "bg-black text-white")} onClick={()=>setSide("front")}>Front</button>
+                <button className={clx(btn, side==="back" && "bg-black text-white")}  onClick={()=>setSide("back")}>Back</button>
+                <button className={btn} onClick={onDownloadFront} title="Download front"><Download className={ico}/></button>
+                <button className={btn} onClick={onDownloadBack}  title="Download back"><Download className={ico}/></button>
+              </div>
+
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+            </div>
+          )}
+        </div>
+      </>
     )
   }
 
-  // ===== MOBILE (шторка Create) =====
+  // ========== MOBILE (нижняя шторка Create) ==========
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
+    if (f) {
+      onUploadImage(f)
+      setOpen(false) // автозакрытие после вставки
+    }
     e.currentTarget.value = ""
   }
 
+  const stopKeys = (e: React.KeyboardEvent) => e.stopPropagation()
+
   return (
     <>
+      {/* Верхняя панель и на мобиле — чтобы Front/Back/Download всегда были под рукой */}
+      <TopBar />
+
       {/* Нижняя кнопка (не перекрывает мокап) */}
       <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
@@ -336,7 +439,7 @@ export default function Toolbar(props: ToolbarProps) {
                     <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
                     <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
                     <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-                    <button className={btn} onClick={onAddText} title="Text"><TypeIcon className={ico}/></button>
+                    <button className={btn} onClick={()=>{ onAddText(); setOpen(false) }} title="Text"><TypeIcon className={ico}/></button>
                     <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
                     <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
                   </div>
@@ -345,7 +448,7 @@ export default function Toolbar(props: ToolbarProps) {
                     <div className="space-y-2">
                       <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
                       <input
-                        type="range" min={1} max={120} value={brushSize}
+                        type="range" min={1} max={240} value={brushSize}
                         onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
                         className="w-full appearance-none h-[3px] bg-black
                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
@@ -362,11 +465,11 @@ export default function Toolbar(props: ToolbarProps) {
 
                   {tool==="shape" && (
                     <div className="grid grid-cols-5 gap-2">
-                      <button className={btn} onClick={()=>onAddShape("circle")}   title="Circle"><Circle className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("square")}   title="Square"><Square className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("triangle")} title="Triangle"><Triangle className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("cross")}    title="Cross"><Plus className={ico}/></button>
-                      <button className={btn} onClick={()=>onAddShape("line")}     title="Line"><Slash className={ico}/></button>
+                      <button className={btn} onClick={()=>{ onAddShape("circle"); setOpen(false) }}   title="Circle"><Circle className={ico}/></button>
+                      <button className={btn} onClick={()=>{ onAddShape("square"); setOpen(false) }}   title="Square"><Square className={ico}/></button>
+                      <button className={btn} onClick={()=>{ onAddShape("triangle"); setOpen(false) }} title="Triangle"><Triangle className={ico}/></button>
+                      <button className={btn} onClick={()=>{ onAddShape("cross"); setOpen(false) }}    title="Cross"><Plus className={ico}/></button>
+                      <button className={btn} onClick={()=>{ onAddShape("line"); setOpen(false) }}     title="Line"><Slash className={ico}/></button>
                     </div>
                   )}
 
@@ -376,32 +479,33 @@ export default function Toolbar(props: ToolbarProps) {
                         type="text"
                         value={selectedProps?.text ?? ""}
                         onChange={(e)=> setSelectedText(e.target.value)}
+                        onKeyDown={(e)=>e.stopPropagation()}
                         className="w-full border px-2 py-1 text-sm rounded-none"
                         placeholder="Edit text…"
+                        style={{ fontFamily: "Helvetica, Arial, sans-serif" }}
                       />
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Size</div>
                         <input
-                          type="range" min={8} max={240}
+                          type="range" min={8} max={512}
                           value={selectedProps?.fontSize ?? 96}
                           onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
+                          onKeyDown={stopKeys}
                           className="flex-1 h-[3px] bg-black appearance-none
                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                             [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
                         />
                         <select
-                          value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
+                          value={selectedProps?.fontFamily ?? "Helvetica, Arial, sans-serif"}
                           onChange={(e)=> setSelectedFontFamily(e.target.value)}
+                          onKeyDown={stopKeys}
                           className="border rounded-none text-sm"
                           title="Font"
                         >
-                          <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
-                          <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                          <option value="Helvetica, Arial, sans-serif">Helvetica (Bold)</option>
                           <option value="Arial, Helvetica, sans-serif">Arial</option>
                           <option value="'Times New Roman', Times, serif">Times</option>
                           <option value="'Courier New', Courier, monospace">Courier</option>
-                          <option value="Georgia, serif">Georgia</option>
-                          <option value="Impact, Charcoal, sans-serif">Impact</option>
                         </select>
                       </div>
                       <div className="flex items-center gap-2">
@@ -420,7 +524,7 @@ export default function Toolbar(props: ToolbarProps) {
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Stroke</div>
                         <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                        <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                        <input type="number" min={0} max={128} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
                       </div>
                     </div>
                   )}
