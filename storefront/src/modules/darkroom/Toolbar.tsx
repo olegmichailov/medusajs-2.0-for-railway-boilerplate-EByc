@@ -10,13 +10,9 @@ import {
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-const SYS_FONT =
-  "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
-
 // общий вид
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded-none"
 const ico  = "w-5 h-5"
-// «квадратики» прижаты друг к другу
 const btn  =
   "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none " +
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0"
@@ -106,9 +102,7 @@ export default function Toolbar(props: ToolbarProps) {
     mobileLayers,
   } = props
 
-  // ===================
-  // DESKTOP
-  // ===================
+  // =================== DESKTOP ===================
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -152,24 +146,24 @@ export default function Toolbar(props: ToolbarProps) {
     return (
       <div
         className={wrap + " fixed z-40 w-[420px] p-3"}
-        style={{ left: pos.x, top: pos.y, fontFamily: SYS_FONT }}
+        style={{ left: pos.x, top: pos.y, fontFamily: "inherit" }}
       >
         {/* header */}
-        <div className="flex items-center justify-between mb-3 cursor-move select-none" onMouseDown={onDragStart}>
+        <div className="flex items-center justify-between mb-3 cursor-move select-none">
           <div className="text-[11px] uppercase">Tools</div>
           <div className="flex items-center">
-            <button className={btn} onClick={toggleLayers} title="Layers">
+            <button className={btn} onClick={toggleLayers} title="Layers" style={{ fontFamily: "inherit" }}>
               {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
             </button>
-            <button className={btn} onClick={() => setOpen(!open)} title={open ? "Collapse" : "Expand"}>
+            <button className={btn} onClick={() => setOpen(!open)} title={open ? "Collapse" : "Expand"} style={{ fontFamily: "inherit" }}>
               {open ? "×" : "≡"}
             </button>
           </div>
         </div>
 
         {!open ? null : (
-          <div className="space-y-4">
-            {/* tools row — кнопки прижаты */}
+          <div className="space-y-4" style={{ fontFamily: "inherit" }}>
+            {/* tools row */}
             <div className="flex">
               <button className={clx(btn, tool==="move"  && "bg-black text-white")} onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
               <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
@@ -188,12 +182,14 @@ export default function Toolbar(props: ToolbarProps) {
                   className="w-full appearance-none h-[3px] bg-black
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                   [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                  style={{ fontFamily: "inherit" }}
                 />
                 <div className="text-[11px] uppercase">Color</div>
                 <input
                   type="color" value={brushColor}
                   onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
                   className="w-10 h-10 border border-black rounded-none"
+                  style={{ fontFamily: "inherit" }}
                 />
               </div>
             )}
@@ -212,19 +208,18 @@ export default function Toolbar(props: ToolbarProps) {
                   <div className="space-y-2 border-t pt-2">
                     <div className="flex items-center gap-2">
                       <div className="text-[11px]">Fill</div>
-                      <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                      <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-[11px]">Stroke</div>
-                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
+                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none" style={{ fontFamily: "inherit" }}/>
                     </div>
                   </div>
                 )}
               </>
             )}
 
-            {/* текст: только системный шрифт */}
             {selectedKind === "text" && (
               <div className="space-y-3 border-t pt-3">
                 <label className="text-[11px] uppercase block">Text</label>
@@ -236,7 +231,7 @@ export default function Toolbar(props: ToolbarProps) {
                   onKeyDown={(e)=>{ e.stopPropagation() }}
                   className="w-full border px-2 py-2 text-sm rounded-none leading-[1.3] resize-none"
                   placeholder="Type here… (Shift+Enter for new line)"
-                  style={{ fontFamily: SYS_FONT }}
+                  style={{ fontFamily: "inherit" }}
                 />
                 <div className="flex items-center gap-3">
                   <div className="text-[11px] uppercase">Size</div>
@@ -247,28 +242,29 @@ export default function Toolbar(props: ToolbarProps) {
                     className="flex-1 h-[3px] bg-black appearance-none
                     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                     [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                    style={{ fontFamily: "inherit" }}
                   />
                   <div className="flex items-center gap-2">
                     <div className="text-[11px] uppercase">Color</div>
-                    <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                    <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* FRONT/BACK + DOWNLOAD — один шрифт, bold */}
+            {/* FRONT/BACK + DOWNLOAD */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <button
                   onClick={()=>setSide("front")}
                   className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                  style={{ fontFamily: SYS_FONT, fontWeight: 700, background: side==="front" ? "black" : "white", color: side==="front" ? "white" : "black" }}
+                  style={{ fontFamily: "inherit", fontWeight: 700, background: side==="front" ? "black" : "white", color: side==="front" ? "white" : "black" }}
                 >FRONT</button>
                 <button
                   className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white"
                   onClick={onDownloadFront}
                   title="Download Front"
-                  style={{ fontFamily: SYS_FONT, fontWeight: 700 }}
+                  style={{ fontFamily: "inherit", fontWeight: 700 }}
                 >
                   <Download className="w-4 h-4" />
                   <span className="text-[12px]">Download</span>
@@ -278,13 +274,13 @@ export default function Toolbar(props: ToolbarProps) {
                 <button
                   onClick={()=>setSide("back")}
                   className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                  style={{ fontFamily: SYS_FONT, fontWeight: 700, background: side==="back" ? "black" : "white", color: side==="back" ? "white" : "black" }}
+                  style={{ fontFamily: "inherit", fontWeight: 700, background: side==="back" ? "black" : "white", color: side==="back" ? "white" : "black" }}
                 >BACK</button>
                 <button
                   className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white"
                   onClick={onDownloadBack}
                   title="Download Back"
-                  style={{ fontFamily: SYS_FONT, fontWeight: 700 }}
+                  style={{ fontFamily: "inherit", fontWeight: 700 }}
                 >
                   <Download className="w-4 h-4" />
                   <span className="text-[12px]">Download</span>
@@ -299,9 +295,7 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // ===================
-  // MOBILE (нижняя шторка)
-  // ===================
+  // =================== MOBILE ===================
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"tools" | "layers">("tools")
   const fileRef = useRef<HTMLInputElement>(null)
@@ -326,18 +320,18 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none" style={{ fontFamily: SYS_FONT }}>
+      <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none" style={{ fontFamily: "inherit" }}>
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
             className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
             onClick={()=> setOpen(true)}
-            style={{ fontWeight: 700 }}
+            style={{ fontWeight: 700, fontFamily: "inherit" }}
           >Create</button>
         </div>
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)} style={{ fontFamily: SYS_FONT }}>
+        <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)} style={{ fontFamily: "inherit" }}>
           <div className="absolute inset-0 bg-black/40" />
           <div
             className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[12px]"
@@ -346,10 +340,10 @@ export default function Toolbar(props: ToolbarProps) {
           >
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
-                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("tools")} style={{ fontWeight: 700 }}>Tools</button>
-                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("layers")} style={{ fontWeight: 700 }}>Layers</button>
+                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("tools")} style={{ fontWeight: 700, fontFamily: "inherit" }}>Tools</button>
+                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("layers")} style={{ fontWeight: 700, fontFamily: "inherit" }}>Layers</button>
               </div>
-              <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)} style={{ fontWeight: 700 }}>Close</button>
+              <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)} style={{ fontWeight: 700, fontFamily: "inherit" }}>Close</button>
             </div>
 
             <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
@@ -373,9 +367,10 @@ export default function Toolbar(props: ToolbarProps) {
                         className="w-full appearance-none h-[3px] bg-black
                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                         [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                        style={{ fontFamily: "inherit" }}
                       />
                       <div className="text-[11px] uppercase">Color</div>
-                      <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-9 h-9 border border-black rounded-none"/>
+                      <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-9 h-9 border border-black rounded-none" style={{ fontFamily: "inherit" }}/>
                     </div>
                   )}
 
@@ -400,7 +395,7 @@ export default function Toolbar(props: ToolbarProps) {
                         onKeyDown={(e)=>{ e.stopPropagation() }}
                         className="w-full border px-2 py-2 text-sm rounded-none leading-[1.3] resize-none"
                         placeholder="Type here… (Shift+Enter for new line)"
-                        style={{ fontFamily: SYS_FONT }}
+                        style={{ fontFamily: "inherit" }}
                       />
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Size</div>
@@ -411,15 +406,16 @@ export default function Toolbar(props: ToolbarProps) {
                           className="flex-1 h-[3px] bg-black appearance-none
                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                           [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                          style={{ fontFamily: "inherit" }}
                         />
                         <div className="text-[11px]">Color</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
                       </div>
                     </div>
                   )}
 
                   {/* Front/Back + Download */}
-                  <div className="space-y-2" style={{ fontFamily: SYS_FONT }}>
+                  <div className="space-y-2" style={{ fontFamily: "inherit" }}>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={()=>setSide("front")}
