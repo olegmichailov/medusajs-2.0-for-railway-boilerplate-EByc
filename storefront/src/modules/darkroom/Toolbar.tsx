@@ -19,7 +19,6 @@ type MobileLayersItem = {
   blend: string
   opacity: number
 }
-
 type MobileLayersProps = {
   items: MobileLayersItem[]
   onSelect: (id: string) => void
@@ -82,11 +81,9 @@ type ToolbarProps = {
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
-const btn  =
-  "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none " +
-  "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
-
+const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
+
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -109,6 +106,8 @@ const PALETTE = [
   "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
+
+// ===================================================================
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -155,16 +154,12 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // Текст: локальный state для input
+    // text input control
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
     return (
-      <div
-        className={clx("fixed", wrap)}
-        style={{ left: pos.x, top: pos.y, width: 260 }}
-        onMouseDown={(e)=>e.stopPropagation()}
-      >
+      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} onMouseDown={(e)=>e.stopPropagation()}>
         {/* header */}
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
@@ -201,31 +196,31 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
             </div>
 
-            {/* row 2 — цвет + size */}
+            {/* row 2 — цвет + brush size */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
-              <div className="w-6 h-6 border border-black cursor-pointer" style={{ background: brushColor }} />
-              <div className="flex-1">
-                <input
-                  type="range" min={1} max={200} step={1} value={brushSize}
-                  onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                  className="w-full"
-                  style={{
-                    accentColor: "#000",
-                  }}
-                  {...inputStop}
-                />
-              </div>
+              <input
+                type="color" value={brushColor}
+                onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
+                className="w-7 h-7 border border-black rounded-none"
+                {...inputStop}
+              />
+              <input
+                type="range" min={1} max={200} step={1} value={brushSize}
+                onChange={(e)=>setBrushSize(parseInt(e.target.value))}
+                className="flex-1"
+                style={{ accentColor: "#000" }}
+                {...inputStop}
+              />
             </div>
 
             {/* палитра */}
             <div className="grid grid-cols-12 gap-1" {...inputStop}>
               {PALETTE.map((c)=>(
-                <button
-                  key={c}
-                  className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
-                  style={{ background: c }}
-                  onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) props.setSelectedColor(c) }}
+                <button key={c}
+                        className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
+                        style={{ background: c }}
+                        onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c) }}
                 />
               ))}
             </div>
@@ -242,12 +237,12 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* text props */}
+            {/* text */}
             <div className="pt-1 space-y-2">
               <div className="text-[10px]">Text</div>
               <textarea
                 value={textValue}
-                onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+                onChange={(e)=>{ setTextValue(e.target.value); props.setSelectedText(e.target.value) }}
                 className="w-full h-16 border border-black p-1 text-sm"
                 placeholder="Enter text"
                 {...inputStop}
@@ -257,7 +252,7 @@ export default function Toolbar(props: ToolbarProps) {
                 <input
                   type="range" min={8} max={800} step={1}
                   value={selectedProps.fontSize ?? 96}
-                  onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
+                  onChange={(e)=>props.setSelectedFontSize(parseInt(e.target.value))}
                   className="flex-1"
                   style={{ accentColor: "#000" }}
                   {...inputStop}
@@ -266,15 +261,15 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* FRONT/BACK + downloads */}
+            {/* FRONT/BACK + download */}
             <div className="grid grid-cols-2 gap-2">
               <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
-              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
+              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")}  onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
               <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadFront()}}>
-                <Download className={ico}/> <span className="text-xs">Download</span>
+                <Download className={ico}/>Download
               </button>
               <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadBack()}}>
-                <Download className={ico}/> <span className="text-xs">Download</span>
+                <Download className={ico}/>Download
               </button>
             </div>
           </div>
@@ -284,7 +279,15 @@ export default function Toolbar(props: ToolbarProps) {
   }
 
   // =================== MOBILE ===================
+
   const [layersOpenM, setLayersOpenM] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation()
+    const f = e.target.files?.[0]
+    if (f) onUploadImage(f)
+    e.currentTarget.value = ""
+  }
 
   const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
     <button
@@ -294,14 +297,6 @@ export default function Toolbar(props: ToolbarProps) {
       {icon}
     </button>
   )
-
-  const fileRef = useRef<HTMLInputElement>(null)
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation()
-    const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
-    e.currentTarget.value = ""
-  }
 
   return (
     <>
@@ -331,7 +326,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* Нижняя панель — 3 строки */}
+      {/* Нижняя панель — три строки */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         {/* row 1 — инструменты + layers */}
         <div className="px-2 py-1 flex items-center gap-1">
@@ -347,34 +342,30 @@ export default function Toolbar(props: ToolbarProps) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — настройки */}
+        {/* row 2 — настройки и палитра */}
         <div className="px-2 py-1 flex items-center gap-2">
           <div className="flex items-center gap-2">
             <div className="text-[10px]">Color</div>
-            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} />
+            <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }} className="w-8 h-8 border border-black" {...inputStop}/>
           </div>
           <div className="flex-1">
-            <input
-              type="range" min={1} max={200} step={1} value={brushSize}
+            <input type="range" min={1} max={200} step={1} value={brushSize}
               onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-              className="w-full"
-              style={{ accentColor: "#000" }}
-              {...inputStop}
-            />
+              className="w-full" style={{ accentColor:"#000" }} {...inputStop}/>
           </div>
-          {/* мини-палитра */}
           <div className="grid grid-cols-10 gap-1" {...inputStop}>
             {PALETTE.slice(0,20).map((c)=>(
-              <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}} onClick={(e)=>{e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c)}}/>
+              <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}}
+                      onClick={(e)=>{e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c)}}/>
             ))}
           </div>
         </div>
 
-        {/* row 3 — FRONT/BACK + downloads */}
+        {/* row 3 — FRONT/BACK + две Download */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
+            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")}  onClick={()=>setSide("back")}>BACK</button>
           </div>
           <div className="flex gap-2">
             <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
