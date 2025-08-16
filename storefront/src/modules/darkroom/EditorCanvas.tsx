@@ -44,9 +44,9 @@ export default function EditorCanvas() {
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
   // по умолчанию — Brush
-  useEffect(() => { if (tool !== "brush") set({ tool: "brush" }) }, []) // один раз
+  useEffect(() => { if (tool !== "brush") set({ tool: "brush" }) }, []) // одна инициализация
 
-  // мокап
+  // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
@@ -63,10 +63,10 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
-  const lastToolRef = useRef<Tool | null>(null)
+  const lastToolRef     = useRef<Tool | null>(null)
   const isTransformingRef = useRef(false)
 
-  // верстка/масштаб
+  // вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -354,6 +354,8 @@ export default function EditorCanvas() {
     select(l.id)
     return g
   }
+
+  // верхний подходящий слой под указателем
   const pickTopAt = (sx: number, sy: number): AnyLayer | null => {
     const st = stageRef.current; if (!st) return null
     const hits = st.getAllIntersections({ x: sx, y: sy })
@@ -371,6 +373,7 @@ export default function EditorCanvas() {
     }
     return null
   }
+
   const recacheGroup = (g: Konva.Group) => { g.clearCache(); g.cache() }
 
   // рисование
@@ -553,7 +556,7 @@ export default function EditorCanvas() {
       const insertAt = place==="before" ? dstIdx : dstIdx+1
       orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
       const bottomToTop = [...orderTopToBottom].reverse()
-      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i+2) }) // +2: фоны — внизу
+      bottomToTop.forEach((l,i)=>{ (l.node as any).zIndex(i) })
       artRef.current?.batchDraw()
       return [...others, ...bottomToTop]
     })
@@ -673,13 +676,16 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
+            {/* Фоны в отдельном слое, без прослушки */}
             <Layer listening={false}>
               {frontMock && <KImage ref={frontBgRef} image={frontMock} width={BASE_W} height={BASE_H} visible={side==="front"} />}
               {backMock  && <KImage ref={backBgRef}  image={backMock}  width={BASE_W} height={BASE_H} visible={side==="back"}  />}
             </Layer>
 
+            {/* Арт */}
             <Layer ref={artRef} />
 
+            {/* UI */}
             <Layer ref={uiRef}>
               <Transformer
                 ref={trRef}
