@@ -139,325 +139,181 @@ export default function Toolbar(props: ToolbarProps) {
       const ta = taRef.current
       if (!ta) return
       ta.style.height = "auto"
-      const line = parseFloat(getComputedStyle(ta).fontSize || "16") * 1.3
+      const line = parseFloat(getComputedStyle(ta).fontSize || "16")
       ta.style.height = Math.min(ta.scrollHeight, line * 3) + "px"
     }, [textValue])
 
     return (
       <div
-        className={wrap + " fixed z-40 w-[420px] p-3"}
-        style={{ left: pos.x, top: pos.y, fontFamily: "inherit" }}
+        className={clx("fixed", open ? "" : "pointer-events-none")}
+        style={{ left: pos.x, top: pos.y, zIndex: 40 }}
       >
-        {/* header */}
-        <div className="flex items-center justify-between mb-3 cursor-move select-none">
-          <div className="text-[11px] uppercase">Tools</div>
-          <div className="flex items-center">
-            <button className={btn} onClick={toggleLayers} title="Layers" style={{ fontFamily: "inherit" }}>
-              {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-            </button>
-            <button className={btn} onClick={() => setOpen(!open)} title={open ? "Collapse" : "Expand"} style={{ fontFamily: "inherit" }}>
-              {open ? "×" : "≡"}
-            </button>
+        <div className={clx("min-w-[280px] p-2", wrap)}>
+          {/* header */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-medium select-none cursor-move" onMouseDown={onDragStart}>TOOLS</div>
+            <div className="flex items-center gap-1">
+              <button
+                className={btn}
+                title={layersOpen ? "Hide Layers" : "Show Layers"}
+                onClick={toggleLayers}
+              >
+                {layersOpen ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
+              </button>
+              <button className={btn} onClick={()=>setOpen(o=>!o)}>−</button>
+            </div>
+          </div>
+
+          {/* tools row */}
+          <div className="flex items-center mb-2">
+            <button className={clx(btn, tool==="move" && "bg-black text-white")} onClick={()=>setTool("move")} title="Move (V)"><Move className={ico}/></button>
+            <button className={clx(btn, tool==="brush"&& "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush (B)"><Brush className={ico}/></button>
+            <button className={clx(btn, tool==="erase"&& "bg-black text-white")} onClick={()=>setTool("erase")} title="Erase (E)"><Eraser className={ico}/></button>
+            <button className={btn} onClick={onAddText} title="Add text"><TypeIcon className={ico}/></button>
+            <button className={btn} onClick={()=>onAddShape("square" as ShapeKind)} title="Add shape"><Shapes className={ico}/></button>
+            <label className={btn} title="Add image">
+              <ImageIcon className={ico}/>
+              <input ref={fileRef} onChange={onFile} type="file" accept="image/*" className="hidden"/>
+            </label>
+          </div>
+
+          {/* paint controls */}
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <label className="flex items-center gap-2">
+              <span className="text-xs">Color</span>
+              <input type="color" value={brushColor} onChange={e=>setBrushColor(e.target.value)} className="w-10 h-8 border border-black/20"/>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-xs">Size</span>
+              <input type="range" min={1} max={200} value={brushSize} onChange={e=>setBrushSize(parseInt(e.target.value))} className="w-full"/>
+            </label>
+          </div>
+
+          {/* shape quick */}
+          <div className="flex items-center gap-1 mb-2">
+            <button className={btn} title="Circle" onClick={()=>onAddShape("circle" as ShapeKind)}><Circle className={ico}/></button>
+            <button className={btn} title="Square" onClick={()=>onAddShape("square" as ShapeKind)}><Square className={ico}/></button>
+            <button className={btn} title="Triangle" onClick={()=>onAddShape("triangle" as ShapeKind)}><Triangle className={ico}/></button>
+            <button className={btn} title="Cross" onClick={()=>onAddShape("cross" as ShapeKind)}><Plus className={ico}/></button>
+            <button className={btn} title="Line" onClick={()=>onAddShape("line" as ShapeKind)}><Slash className={ico}/></button>
+          </div>
+
+          {/* selection controls */}
+          {selectedKind === "text" && (
+            <div className="border-t border-black/10 pt-2 mt-2">
+              <div className="text-[11px] mb-1 opacity-60">Text</div>
+              <textarea
+                ref={taRef}
+                className="w-full border border-black/30 p-1 outline-none"
+                style={{ fontFamily: selectedProps.fontFamily || "inherit" }}
+                value={textValue}
+                onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+              />
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <label className="col-span-2 flex items-center gap-2">
+                  <span className="text-xs">Font size</span>
+                  <input type="range" min={8} max={800}
+                         value={selectedProps.fontSize ?? 96}
+                         onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))} className="w-full"/>
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-xs">Color</span>
+                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={e=>setSelectedColor(e.target.value)} className="w-10 h-8 border border-black/20"/>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {(selectedKind === "shape" || selectedKind === "image") && (
+            <div className="border-t border-black/10 pt-2 mt-2">
+              <div className="text-[11px] mb-1 opacity-60">Appearance</div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="flex items-center gap-2">
+                  <span className="text-xs">Fill</span>
+                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={e=>setSelectedFill(e.target.value)} className="w-10 h-8 border border-black/20"/>
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-xs">Stroke</span>
+                  <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={e=>setSelectedStroke(e.target.value)} className="w-10 h-8 border border-black/20"/>
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-xs">Width</span>
+                  <input type="range" min={0} max={100} value={selectedProps.strokeWidth ?? 0} onChange={e=>setSelectedStrokeW(parseInt(e.target.value))}/>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* sides + download */}
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <button className={clx("h-10 border border-black text-white bg-black", side==="front" && "opacity-100")} onClick={()=>setSide("front")}>FRONT</button>
+            <button className={clx("h-10 border border-black", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>BACK</button>
+            <button className="h-10 border border-black flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/> Download</button>
+            <button className="h-10 border border-black flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/> Download</button>
           </div>
         </div>
-
-        {!open ? null : (
-          <div className="space-y-4" style={{ fontFamily: "inherit" }}>
-            {/* tools row */}
-            <div className="flex">
-              <button className={clx(btn, tool==="move"  && "bg-black text-white")} onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
-              <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
-              <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-              <button className={btn} onClick={()=>{ onAddText(); }} title="Text"><TypeIcon className={ico}/></button>
-              <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
-              <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
-            </div>
-
-            {(tool==="brush" || tool==="erase") && (
-              <div className="space-y-2">
-                <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-                <input
-                  type="range" min={1} max={240} value={brushSize}
-                  onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
-                  className="w-full appearance-none h-[3px] bg-black
-                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                  [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                  style={{ fontFamily: "inherit" }}
-                />
-                <div className="text-[11px] uppercase">Color</div>
-                <input
-                  type="color" value={brushColor}
-                  onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
-                  className="w-10 h-10 border border-black rounded-none"
-                  style={{ fontFamily: "inherit" }}
-                />
-              </div>
-            )}
-
-            {tool==="shape" && (
-              <>
-                <div className="flex">
-                  <button className={btn} onClick={()=>{ onAddShape("circle"); setTool("move") }}   title="Circle"><Circle className={ico}/></button>
-                  <button className={btn} onClick={()=>{ onAddShape("square"); setTool("move") }}   title="Square"><Square className={ico}/></button>
-                  <button className={btn} onClick={()=>{ onAddShape("triangle"); setTool("move") }} title="Triangle"><Triangle className={ico}/></button>
-                  <button className={btn} onClick={()=>{ onAddShape("cross"); setTool("move") }}    title="Cross"><Plus className={ico}/></button>
-                  <button className={btn} onClick={()=>{ onAddShape("line"); setTool("move") }}     title="Line"><Slash className={ico}/></button>
-                </div>
-
-                {props.selectedKind === "shape" && (
-                  <div className="space-y-2 border-t pt-2">
-                    <div className="flex items-center gap-2">
-                      <div className="text-[11px]">Fill</div>
-                      <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-[11px]">Stroke</div>
-                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
-                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none" style={{ fontFamily: "inherit" }}/>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {selectedKind === "text" && (
-              <div className="space-y-3 border-t pt-3">
-                <label className="text-[11px] uppercase block">Text</label>
-                <textarea
-                  ref={taRef}
-                  rows={2}
-                  value={textValue}
-                  onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-                  onKeyDown={(e)=>{ e.stopPropagation() }}
-                  className="w-full border px-2 py-2 text-sm rounded-none leading-[1.3] resize-none"
-                  placeholder="Type here… (Shift+Enter for new line)"
-                  style={{ fontFamily: "inherit" }}
-                />
-                <div className="flex items-center gap-3">
-                  <div className="text-[11px] uppercase">Size</div>
-                  <input
-                    type="range" min={8} max={320}
-                    value={selectedProps?.fontSize ?? 96}
-                    onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
-                    className="flex-1 h-[3px] bg-black appearance-none
-                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                    [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                    style={{ fontFamily: "inherit" }}
-                  />
-                  <div className="flex items-center gap-2">
-                    <div className="text-[11px] uppercase">Color</div>
-                    <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* FRONT/BACK + DOWNLOAD */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={()=>setSide("front")}
-                  className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                  style={{ fontFamily: "inherit", fontWeight: 700, background: side==="front" ? "black" : "white", color: side==="front" ? "white" : "black" }}
-                >FRONT</button>
-                <button
-                  className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white"
-                  onClick={onDownloadFront}
-                  title="Download Front"
-                  style={{ fontFamily: "inherit", fontWeight: 700 }}
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="text-[12px]">Download</span>
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={()=>setSide("back")}
-                  className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                  style={{ fontFamily: "inherit", fontWeight: 700, background: side==="back" ? "black" : "white", color: side==="back" ? "white" : "black" }}
-                >BACK</button>
-                <button
-                  className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white"
-                  onClick={onDownloadBack}
-                  title="Download Back"
-                  style={{ fontFamily: "inherit", fontWeight: 700 }}
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="text-[12px]">Download</span>
-                </button>
-              </div>
-            </div>
-
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-          </div>
-        )}
       </div>
     )
   }
 
   // =================== MOBILE ===================
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<"tools" | "layers">("tools")
+  // простой компактный бар + лист слоёв по кнопке
+  const [showLayersSheet, setShowLayersSheet] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
-    if (f) { onUploadImage(f); setOpen(false) }
+    if (f) onUploadImage(f)
     e.currentTarget.value = ""
   }
 
-  // textarea mobile
-  const [textValueM, setTextValueM] = useState<string>(selectedProps?.text ?? "")
-  useEffect(() => setTextValueM(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
-  const taRefM = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    const ta = taRefM.current
-    if (!ta) return
-    ta.style.height = "auto"
-    const line = parseFloat(getComputedStyle(ta).fontSize || "16") * 1.3
-    ta.style.height = Math.min(ta.scrollHeight, line * 3) + "px"
-  }, [textValueM])
-
   return (
     <>
-      <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none" style={{ fontFamily: "inherit" }}>
-        <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
-          <button
-            className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
-            onClick={()=> setOpen(true)}
-            style={{ fontWeight: 700, fontFamily: "inherit" }}
-          >Create</button>
+      {/* bottom bar */}
+      <div className="fixed left-0 right-0 bottom-0 p-2 bg-white border-t border-black/10 flex items-center justify-between z-40">
+        <div className="flex items-center gap-1">
+          <button className={clx(btn, tool==="move"&&"bg-black text-white")} onClick={()=>setTool("move")}><Move className={ico}/></button>
+          <button className={clx(btn, tool==="brush"&&"bg-black text-white")} onClick={()=>setTool("brush")}><Brush className={ico}/></button>
+          <button className={clx(btn, tool==="erase"&&"bg-black text-white")} onClick={()=>setTool("erase")}><Eraser className={ico}/></button>
+          <button className={btn} onClick={onAddText}><TypeIcon className={ico}/></button>
+          <label className={btn}>
+            <ImageIcon className={ico}/>
+            <input ref={fileRef} onChange={onFile} type="file" accept="image/*" className="hidden"/>
+          </label>
+          <button className={btn} onClick={()=>onAddShape("square" as ShapeKind)}><Shapes className={ico}/></button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="color" value={brushColor} onChange={e=>setBrushColor(e.target.value)} className="w-10 h-8 border border-black/20"/>
+          <input type="range" min={1} max={200} value={brushSize} onChange={e=>setBrushSize(parseInt(e.target.value))}/>
+          <button className={btn} onClick={()=>setShowLayersSheet(s=>!s)}>{showLayersSheet ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}</button>
         </div>
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)} style={{ fontFamily: "inherit" }}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="absolute left-0 right-0 bottom-0 bg-white border-t border-black/10 shadow-2xl rounded-t-[12px]"
-            style={{ height: "65vh" }}
-            onClick={(e)=>e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-3 pt-2 pb-1">
-              <div className="flex gap-1">
-                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("tools")} style={{ fontWeight: 700, fontFamily: "inherit" }}>Tools</button>
-                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("layers")} style={{ fontWeight: 700, fontFamily: "inherit" }}>Layers</button>
-              </div>
-              <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)} style={{ fontWeight: 700, fontFamily: "inherit" }}>Close</button>
+      {/* layers sheet */}
+      {showLayersSheet && (
+        <div className="fixed left-0 right-0 bottom-16 p-2 z-40">
+          <div className={clx("max-h-[40vh] overflow-auto p-2", wrap)}>
+            <div className="text-xs mb-2">Layers</div>
+            <div className="space-y-1">
+              {mobileLayers.items.map((it)=>(
+                <div key={it.id} className="flex items-center justify-between border border-black/10 px-2 py-1">
+                  <button className="text-left flex-1" onClick={()=>mobileLayers.onSelect(it.id)}>{it.name}</button>
+                  <div className="flex items-center gap-1">
+                    <button className={btn} onClick={()=>mobileLayers.onMoveUp(it.id)}><ArrowUp className={ico}/></button>
+                    <button className={btn} onClick={()=>mobileLayers.onMoveDown(it.id)}><ArrowDown className={ico}/></button>
+                    <button className={btn} onClick={()=>mobileLayers.onDuplicate(it.id)}><Copy className={ico}/></button>
+                    <button className={btn} onClick={()=>mobileLayers.onToggleLock(it.id)}>{it.locked ? <Lock className={ico}/> : <Unlock className={ico}/>}</button>
+                    <button className={btn} onClick={()=>mobileLayers.onToggleVisible(it.id)}>{it.visible ? <Eye className={ico}/> : <EyeOff className={ico}/>}</button>
+                    <button className={btn} onClick={()=>mobileLayers.onDelete(it.id)}><Trash2 className={ico}/></button>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
-              {tab === "tools" && (
-                <>
-                  <div className="flex">
-                    <button className={clx(btn, tool==="move" && "bg-black text-white")}  onClick={()=>setTool("move")}  title="Move"><Move className={ico}/></button>
-                    <button className={clx(btn, tool==="brush" && "bg-black text-white")} onClick={()=>setTool("brush")} title="Brush"><Brush className={ico}/></button>
-                    <button className={clx(btn, tool==="erase" && "bg-black text-white")} onClick={()=>setTool("erase")} title="Eraser"><Eraser className={ico}/></button>
-                    <button className={btn} onClick={()=>{ onAddText(); setOpen(false) }} title="Text"><TypeIcon className={ico}/></button>
-                    <button className={clx(btn, tool==="shape" && "bg-black text-white")} onClick={()=>setTool("shape")} title="Shapes"><Shapes className={ico}/></button>
-                    <button className={btn} onClick={()=>fileRef.current?.click()} title="Image"><ImageIcon className={ico}/></button>
-                  </div>
-
-                  {(tool==="brush" || tool==="erase") && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] uppercase">Brush size: {brushSize}px</div>
-                      <input
-                        type="range" min={1} max={240} value={brushSize}
-                        onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
-                        className="w-full appearance-none h-[3px] bg-black
-                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                        [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                        style={{ fontFamily: "inherit" }}
-                      />
-                      <div className="text-[11px] uppercase">Color</div>
-                      <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-9 h-9 border border-black rounded-none" style={{ fontFamily: "inherit" }}/>
-                    </div>
-                  )}
-
-                  {tool==="shape" && (
-                    <div className="flex">
-                      <button className={btn} onClick={()=>{ onAddShape("circle");   setTool("move"); setOpen(false) }} title="Circle"><Circle className={ico}/></button>
-                      <button className={btn} onClick={()=>{ onAddShape("square");   setTool("move"); setOpen(false) }} title="Square"><Square className={ico}/></button>
-                      <button className={btn} onClick={()=>{ onAddShape("triangle"); setTool("move"); setOpen(false) }} title="Triangle"><Triangle className={ico}/></button>
-                      <button className={btn} onClick={()=>{ onAddShape("cross");    setTool("move"); setOpen(false) }} title="Cross"><Plus className={ico}/></button>
-                      <button className={btn} onClick={()=>{ onAddShape("line");     setTool("move"); setOpen(false) }} title="Line"><Slash className={ico}/></button>
-                    </div>
-                  )}
-
-                  {selectedKind === "text" && (
-                    <div className="space-y-2 border-t pt-2">
-                      <label className="text-[11px] uppercase block">Text</label>
-                      <textarea
-                        ref={taRefM}
-                        rows={2}
-                        value={textValueM}
-                        onChange={(e)=>{ setTextValueM(e.target.value); setSelectedText(e.target.value) }}
-                        onKeyDown={(e)=>{ e.stopPropagation() }}
-                        className="w-full border px-2 py-2 text-sm rounded-none leading-[1.3] resize-none"
-                        placeholder="Type here… (Shift+Enter for new line)"
-                        style={{ fontFamily: "inherit" }}
-                      />
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px]">Size</div>
-                        <input
-                          type="range" min={8} max={320}
-                          value={selectedProps?.fontSize ?? 96}
-                          onChange={(e)=> setSelectedFontSize(parseInt(e.target.value,10))}
-                          className="flex-1 h-[3px] bg-black appearance-none
-                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
-                          [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
-                          style={{ fontFamily: "inherit" }}
-                        />
-                        <div className="text-[11px]">Color</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" style={{ fontFamily: "inherit" }}/>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Front/Back + Download */}
-                  <div className="space-y-2" style={{ fontFamily: "inherit" }}>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={()=>setSide("front")}
-                        className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                        style={{ fontWeight: 700, background: side==="front" ? "black" : "white", color: side==="front" ? "white" : "black" }}
-                      >FRONT</button>
-                      <button className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white" onClick={onDownloadFront} title="Download Front" style={{ fontWeight: 700 }}>
-                        <Download className="w-4 h-4" /><span className="text-[12px]">Download</span>
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={()=>setSide("back")}
-                        className="flex-1 h-11 border border-black text-[13px] rounded-none transition"
-                        style={{ fontWeight: 700, background: side==="back" ? "black" : "white", color: side==="back" ? "white" : "black" }}
-                      >BACK</button>
-                      <button className="h-11 px-4 border border-black rounded-none flex items-center gap-2 hover:bg-black hover:text-white" onClick={onDownloadBack} title="Download Back" style={{ fontWeight: 700 }}>
-                        <Download className="w-4 h-4" /><span className="text-[12px]">Download</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-                </>
-              )}
-
-              {tab === "layers" && (
-                <div className="space-y-2">
-                  {mobileLayers.items.length === 0 && <div className="text-xs text-black/60">No layers yet.</div>}
-                  {mobileLayers.items.map((it) => (
-                    <div key={it.id} className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white" onClick={()=>mobileLayers.onSelect(it.id)}>
-                      <div className="text-[11px] flex-1 truncate">{it.name}</div>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }} title="Move up"><ArrowUp className="w-4 h-4"/></button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }} title="Move down"><ArrowDown className="w-4 h-4"/></button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }} title={it.visible ? "Hide" : "Show"}>{it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}</button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }} title={it.locked ? "Unlock" : "Lock"}>{it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}</button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }} title="Duplicate"><Copy className="w-4 h-4"/></button>
-                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }} title="Delete"><Trash2 className="w-4 h-4"/></button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <button className={clx("h-10 border border-black text-white bg-black", side==="front" && "opacity-100")} onClick={()=>setSide("front")}>FRONT</button>
+              <button className={clx("h-10 border border-black", side==="back" && "bg-black text-white")} onClick={()=>setSide("back")}>BACK</button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/> Download</button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/> Download</button>
             </div>
           </div>
         </div>
