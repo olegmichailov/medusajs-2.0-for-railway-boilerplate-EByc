@@ -14,6 +14,13 @@ const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl rounded
 const btn  = "w-10 h-10 grid place-items-center border border-black/80 text-[11px] rounded-none hover:bg-black hover:text-white transition"
 const ico  = "w-5 h-5"
 
+// чтобы слайдеры не конфликтовали с drag/gestures на Stage
+const stopAll = {
+  onPointerDown: (e: any) => e.stopPropagation(),
+  onTouchStart:  (e: any) => e.stopPropagation(),
+  onMouseDown:   (e: any) => e.stopPropagation(),
+}
+
 type MobileLayersItem = {
   id: string
   name: string
@@ -134,7 +141,7 @@ export default function Toolbar(props: ToolbarProps) {
     }
 
     return (
-      <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }}>
+      <div className={wrap + " fixed z-40 w-[380px] p-3"} style={{ left: pos.x, top: pos.y }} {...stopAll}>
         <div className="flex items-center justify-between mb-3 cursor-move" onMouseDown={onDragStart}>
           <div className="text-[11px] uppercase">Tools</div>
           <div className="flex items-center gap-2">
@@ -172,12 +179,14 @@ export default function Toolbar(props: ToolbarProps) {
                   className="w-full appearance-none h-[3px] bg-black
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                   [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                  {...stopAll}
                 />
                 <div className="text-[11px] uppercase">Color</div>
                 <input
                   type="color" value={brushColor}
                   onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
                   className="w-10 h-10 border border-black rounded-none"
+                  {...stopAll}
                 />
               </div>
             )}
@@ -196,17 +205,12 @@ export default function Toolbar(props: ToolbarProps) {
                   <div className="space-y-2 border-t pt-2">
                     <div className="flex items-center gap-2">
                       <div className="text-[11px]">Fill</div>
-                      <input
-                        type="color"
-                        value={selectedProps?.fill ?? "#000000"}
-                        onChange={(e)=> setSelectedFill(e.target.value)}
-                        className="w-8 h-8 p-0 border rounded-none"
-                      />
+                      <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-[11px]">Stroke</div>
-                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                      <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
+                      <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none" {...stopAll}/>
                     </div>
                   </div>
                 )}
@@ -221,6 +225,7 @@ export default function Toolbar(props: ToolbarProps) {
                   onChange={(e)=> setSelectedText(e.target.value)}
                   className="w-full border px-2 py-1 text-sm rounded-none"
                   placeholder="Edit text…"
+                  {...stopAll}
                 />
                 <div className="flex items-center gap-2">
                   <div className="text-[11px]">Size</div>
@@ -231,12 +236,14 @@ export default function Toolbar(props: ToolbarProps) {
                     className="flex-1 h-[3px] bg-black appearance-none
                       [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                       [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                    {...stopAll}
                   />
                   <select
                     value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
                     onChange={(e)=> setSelectedFontFamily(e.target.value)}
                     className="border rounded-none text-sm"
                     title="Font"
+                    {...stopAll}
                   >
                     <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
                     <option value="Helvetica, Arial, sans-serif">Helvetica</option>
@@ -249,12 +256,7 @@ export default function Toolbar(props: ToolbarProps) {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-[11px]">Color</div>
-                  <input
-                    type="color"
-                    value={selectedProps?.fill ?? "#000000"}
-                    onChange={(e)=> setSelectedFill(e.target.value)}
-                    className="w-8 h-8 p-0 border rounded-none"
-                  />
+                  <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
                 </div>
               </div>
             )}
@@ -286,8 +288,8 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* Нижняя кнопка (не перекрывает мокап) */}
-      <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none">
+      {/* Нижняя кнопка */}
+      <div className="fixed left-0 right-0 bottom-0 z-40 grid place-items-center pointer-events-none" {...stopAll}>
         <div className="pointer-events-auto mb-[env(safe-area-inset-bottom,12px)]">
           <button
             className="px-6 h-12 min-w-[160px] bg-black text-white text-sm tracking-wide uppercase rounded-none shadow-lg active:scale-[.98] transition"
@@ -301,7 +303,6 @@ export default function Toolbar(props: ToolbarProps) {
       {/* Шторка */}
       {open && (
         <div className="fixed inset-0 z-50" onClick={()=>setOpen(false)}>
-          {/* dim */}
           <div className="absolute inset-0 bg-black/40" />
 
           <div
@@ -312,24 +313,14 @@ export default function Toolbar(props: ToolbarProps) {
             {/* header */}
             <div className="flex items-center justify-between px-3 pt-2 pb-1">
               <div className="flex gap-1">
-                <button
-                  className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")}
-                  onClick={()=>setTab("tools")}
-                >
-                  Tools
-                </button>
-                <button
-                  className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")}
-                  onClick={()=>setTab("layers")}
-                >
-                  Layers
-                </button>
+                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="tools" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("tools")}>Tools</button>
+                <button className={clx("px-3 h-9 border text-xs rounded-none", tab==="layers" ? "bg-black text-white" : "bg-white")} onClick={()=>setTab("layers")}>Layers</button>
               </div>
               <button className="px-3 h-9 border text-xs rounded-none" onClick={()=>setOpen(false)}>Close</button>
             </div>
 
             {/* content */}
-            <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3">
+            <div className="h-[calc(65vh-44px)] overflow-auto px-3 py-2 space-y-3" {...stopAll}>
               {tab === "tools" && (
                 <>
                   <div className="grid grid-cols-6 gap-2">
@@ -350,13 +341,10 @@ export default function Toolbar(props: ToolbarProps) {
                         className="w-full appearance-none h-[3px] bg-black
                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                         [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                        {...stopAll}
                       />
                       <div className="text-[11px] uppercase">Color</div>
-                      <input
-                        type="color" value={brushColor}
-                        onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }}
-                        className="w-9 h-9 border border-black rounded-none"
-                      />
+                      <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); setSelectedColor(e.target.value) }} className="w-9 h-9 border border-black rounded-none" {...stopAll}/>
                     </div>
                   )}
 
@@ -372,13 +360,7 @@ export default function Toolbar(props: ToolbarProps) {
 
                   {selectedKind === "text" && (
                     <div className="space-y-2 border-t pt-2">
-                      <input
-                        type="text"
-                        value={selectedProps?.text ?? ""}
-                        onChange={(e)=> setSelectedText(e.target.value)}
-                        className="w-full border px-2 py-1 text-sm rounded-none"
-                        placeholder="Edit text…"
-                      />
+                      <input type="text" value={selectedProps?.text ?? ""} onChange={(e)=> setSelectedText(e.target.value)} className="w-full border px-2 py-1 text-sm rounded-none" placeholder="Edit text…" {...stopAll}/>
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Size</div>
                         <input
@@ -388,12 +370,14 @@ export default function Toolbar(props: ToolbarProps) {
                           className="flex-1 h-[3px] bg-black appearance-none
                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2
                             [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none"
+                          {...stopAll}
                         />
                         <select
                           value={selectedProps?.fontFamily ?? "Grebetika, Helvetica, Arial, sans-serif"}
                           onChange={(e)=> setSelectedFontFamily(e.target.value)}
                           className="border rounded-none text-sm"
                           title="Font"
+                          {...stopAll}
                         >
                           <option value="Grebetika, Helvetica, Arial, sans-serif">Grebetika</option>
                           <option value="Helvetica, Arial, sans-serif">Helvetica</option>
@@ -406,7 +390,7 @@ export default function Toolbar(props: ToolbarProps) {
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Color</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
                       </div>
                     </div>
                   )}
@@ -415,12 +399,12 @@ export default function Toolbar(props: ToolbarProps) {
                     <div className="space-y-2 border-t pt-2">
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Fill</div>
-                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
+                        <input type="color" value={selectedProps?.fill ?? "#000000"} onChange={(e)=> setSelectedFill(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-[11px]">Stroke</div>
-                        <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none"/>
-                        <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none"/>
+                        <input type="color" value={selectedProps?.stroke ?? "#000000"} onChange={(e)=> setSelectedStroke(e.target.value)} className="w-8 h-8 p-0 border rounded-none" {...stopAll}/>
+                        <input type="number" min={0} max={40} value={selectedProps?.strokeWidth ?? 0} onChange={(e)=> setSelectedStrokeW(parseInt(e.target.value,10))} className="w-16 border px-2 py-1 text-sm rounded-none" {...stopAll}/>
                       </div>
                     </div>
                   )}
@@ -438,61 +422,16 @@ export default function Toolbar(props: ToolbarProps) {
 
               {tab === "layers" && (
                 <div className="space-y-2">
-                  {mobileLayers.items.length === 0 && (
-                    <div className="text-xs text-black/60">No layers yet.</div>
-                  )}
+                  {mobileLayers.items.length === 0 && <div className="text-xs text-black/60">No layers yet.</div>}
                   {mobileLayers.items.map((it) => (
-                    <div
-                      key={it.id}
-                      className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white"
-                      onClick={()=>mobileLayers.onSelect(it.id)}
-                    >
+                    <div key={it.id} className="flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none active:bg-black active:text-white" onClick={()=>mobileLayers.onSelect(it.id)}>
                       <div className="text-[11px] flex-1 truncate">{it.name}</div>
-
-                      {/* reorder без DnD */}
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }}
-                        title="Move up"
-                      >
-                        <ArrowUp className="w-4 h-4"/>
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }}
-                        title="Move down"
-                      >
-                        <ArrowDown className="w-4 h-4"/>
-                      </button>
-
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }}
-                        title={it.visible ? "Hide" : "Show"}
-                      >
-                        {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }}
-                        title={it.locked ? "Unlock" : "Lock"}
-                      >
-                        {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }}
-                        title="Duplicate"
-                      >
-                        <Copy className="w-4 h-4"/>
-                      </button>
-                      <button
-                        className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                        onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }}
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4"/>
-                      </button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveUp(it.id) }} title="Move up"><ArrowUp className="w-4 h-4"/></button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onMoveDown(it.id) }} title="Move down"><ArrowDown className="w-4 h-4"/></button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleVisible(it.id) }} title={it.visible ? "Hide" : "Show"}>{it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}</button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onToggleLock(it.id) }} title={it.locked ? "Unlock" : "Lock"}>{it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}</button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDuplicate(it.id) }} title="Duplicate"><Copy className="w-4 h-4"/></button>
+                      <button className="w-8 h-8 grid place-items-center border border-current bg-transparent" onClick={(e)=>{ e.stopPropagation(); mobileLayers.onDelete(it.id) }} title="Delete"><Trash2 className="w-4 h-4"/></button>
                     </div>
                   ))}
                 </div>
