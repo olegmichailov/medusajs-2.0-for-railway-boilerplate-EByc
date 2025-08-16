@@ -527,8 +527,7 @@ export default function EditorCanvas() {
   }
   const gestureRef = useRef<G>({ active:false, two:false, startDist:0, startAngle:0, startScaleX:1, startScaleY:1, startRot:0, startPos:{x:0,y:0}, centerCanvas:{x:0,y:0}, nodeId:null })
 
-  const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
-  const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
+  // ⚠️ ВАЖНО: здесь НЕ дублируем getStagePointer/toCanvas
 
   const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
     const tr = node.getAbsoluteTransform().copy()
@@ -797,7 +796,7 @@ export default function EditorCanvas() {
     const pr = Math.max(2, Math.round(1/scale))
     const hidden: AnyNode[] = []
     layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
-    uiRef.current?.visible(false)
+    uiLayerRef.current?.visible(false)
 
     // 1) с мокапом
     bgLayerRef.current?.visible(true); st.draw()
@@ -809,7 +808,7 @@ export default function EditorCanvas() {
     // вернуть
     bgLayerRef.current?.visible(true)
     hidden.forEach(n => n.visible(true))
-    uiRef.current?.visible(true)
+    uiLayerRef.current?.visible(true)
     st.draw()
 
     const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
