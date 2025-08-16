@@ -19,6 +19,12 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 // системный шрифт
 const SYS_FONT = "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
 
+// клампы текста
+const TEXT_MIN_FS = 8
+const TEXT_MAX_FS = 800
+const TEXT_MIN_W  = 60
+const TEXT_MAX_W  = BASE_W * 0.95
+
 // uid
 const uid = () => Math.random().toString(36).slice(2)
 
@@ -158,20 +164,26 @@ export default function EditorCanvas() {
         const activeAnchor = (trInst && (trInst as any).getActiveAnchor?.()) as string | undefined
 
         if (activeAnchor === "middle-left" || activeAnchor === "middle-right") {
-          // меняем ширину блока (перенос строк)
+          const oldW = t.width() || 0
           const sx = t.scaleX()
-          const newW = Math.max(60, (t.width() || 0) * sx)
-          t.width(newW)
-          // при растяжении слева надо компенсировать позицию
+          // новая ширина по скейлу + клампы
+          const newW = Math.max(TEXT_MIN_W, Math.min(oldW * sx, TEXT_MAX_W))
           if (activeAnchor === "middle-left") {
-            const dx = (t.width() - newW)
-            t.x(t.x() + dx) // «сдвигать» левую грань
+            // сохранить правую грань, двигаем x так, чтобы right остался прежним
+            const right = t.x() + oldW
+            t.width(newW)
+            t.x(right - newW)
+          } else {
+            // от правой ручки просто задаём новую ширину
+            const left = t.x()
+            t.width(newW)
+            t.x(left)
           }
           t.scaleX(1)
         } else {
-          // угловые — апскейл/даунскейл шрифта
+          // угловые — масштабируем шрифт
           const s = Math.max(t.scaleX(), t.scaleY())
-          const next = Math.max(6, t.fontSize() * s)
+          const next = Math.max(TEXT_MIN_FS, Math.min(t.fontSize() * s, TEXT_MAX_FS))
           t.fontSize(next)
           t.scaleX(1); t.scaleY(1)
         }
@@ -518,6 +530,15 @@ export default function EditorCanvas() {
     if (!touches || touches.length === 1) {
       const st = stageRef.current!
       const tgt = e.target as Konva.Node
+
+      // клик по пустому месту или по фоновому мокапу — снять выделение
+      if (tgt === st || tgt.getLayer?.() === bgLayerRef.current) {
+        select(null)
+        trRef.current?.nodes([])
+        uiLayerRef.current?.batchDraw()
+        return
+      }
+
       if (tgt && tgt !== st && tgt.getParent()) {
         const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
         if (found && found.side === side) select(found.id)
@@ -625,6 +646,7 @@ export default function EditorCanvas() {
     if (isDrawing) finishStroke()
     gestureRef.current.active = false
     gestureRef.current.two = false
+    isTransformingRef.current = false
     requestAnimationFrame(attachTransformer)
   }
 
@@ -795,7 +817,7 @@ export default function EditorCanvas() {
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
           onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
         >
-          <Layer ref={bgLayerRef} listening={false}>
+          <Layer ref={bgLayerRef} listening={true}>
             {side==="front" && frontMock && <KImage image={frontMock} width={BASE_W} height={BASE_H} />}
             {side==="back"  && backMock  && <KImage image={backMock}  width={BASE_W} height={BASE_H} />}
           </Layer>
