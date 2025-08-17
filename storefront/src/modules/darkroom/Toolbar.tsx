@@ -1,7 +1,7 @@
 // storefront/src/modules/darkroom/Toolbar.tsx
 "use client"
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Image as ImageIcon,
   Download, Layers as LayersIcon, Square, Circle, Triangle, Plus, Slash,
@@ -62,7 +62,7 @@ type Props = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
 
-  // мобильные мини-контролы слоев
+  // мобильные мини-контролы слоев (иконка «Layers» только открывает твою панель)
   layerItems: LayerItem[]
   onLayerSelect: (id: string) => void
   onToggleLayerVisible: (id: string) => void
@@ -79,7 +79,7 @@ type Props = {
 }
 
 const btnBase =
-  "w-12 h-12 md:h-9 md:w-9 grid place-items-center border border-black rounded-none bg-white text-black select-none"
+  "w-12 h-12 grid place-items-center border border-black rounded-none bg-white text-black select-none"
 const btnActive = "bg-black text-white"
 const icon = "w-4 h-4"
 const block = "border border-black bg-white"
@@ -96,10 +96,10 @@ export default function Toolbar(props: Props) {
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedColor,
-    layerItems, onMobileHeight
+    onMobileHeight,
   } = props
 
-  // файл аплоадер
+  // скрытые инпуты
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
@@ -107,16 +107,13 @@ export default function Toolbar(props: Props) {
     if (f) onUploadImage(f)
     e.currentTarget.value = ""
   }
-
-  // системный color-picker по тапу
   const colorRef = useRef<HTMLInputElement>(null)
-  const openColor = (e: React.MouseEvent) => { e.stopPropagation(); colorRef.current?.click() }
   const onColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const hex = e.target.value
     if (selectedKind) props.setSelectedColor(hex); else setBrushColor(hex)
   }
 
-  // локальный текст-state (для settings Text)
+  // локальный текст-state
   const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
   useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
@@ -130,13 +127,12 @@ export default function Toolbar(props: Props) {
     `}</style>
   )
 
-  // ===== Desktop (ничего не меняем визуально, просто не показываем моб. блоки) =====
+  // ===== Desktop: не меняем твой вид (мобильный ниже) =====
   if (!isMobile) {
     return (
       <div className="fixed left-5 top-28 z-30 select-none" style={{ width: 220 }}>
         <RangeCSS/>
-        {/* Можешь оставить свой уже рабочий Desktop Toolbar тут — в проекте он отдельный. 
-            Чтобы не ломать твой вид, мобильный код ниже. */}
+        {/* Desktop UI — оставь существующий в проекте; мобильный ниже */}
       </div>
     )
   }
@@ -154,7 +150,6 @@ export default function Toolbar(props: Props) {
     return () => ro.disconnect()
   }, [onMobileHeight])
 
-  // одна строка инструментов
   const ToolButton = (t: Tool | "image" | "text", Child: React.ReactNode, onPress?: ()=>void) => (
     <button
       className={`${btnBase} ${tool===t ? btnActive : ""}`}
@@ -164,14 +159,13 @@ export default function Toolbar(props: Props) {
     </button>
   )
 
-  // контекстные сеттинги под строкой инструментов
   const Settings = () => {
     if (tool === "brush") {
       return (
         <div className={`p-2 ${block}`}>
           <div className="text-[10px] mb-1">BRUSH</div>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} onClick={openColor} />
+            <div className="w-8 h-8 border border-black" style={{ background: brushColor || "#000" }} onClick={()=>colorRef.current?.click()} />
             <input className="sq-range" type="range" min={1} max={200} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))}/>
           </div>
         </div>
@@ -182,13 +176,6 @@ export default function Toolbar(props: Props) {
         <div className={`p-2 ${block}`}>
           <div className="text-[10px] mb-1">ERASE</div>
           <input className="sq-range" type="range" min={1} max={200} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))}/>
-        </div>
-      )
-    }
-    if (tool === "move") {
-      return (
-        <div className={`p-2 ${block}`}>
-          <div className="text-[10px]">Select an object to edit.</div>
         </div>
       )
     }
@@ -205,7 +192,7 @@ export default function Toolbar(props: Props) {
           </div>
           <div className="flex items-center gap-2">
             <div className="text-[10px]">Color</div>
-            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} onClick={openColor}/>
+            <div className="w-8 h-8 border border-black" style={{ background: brushColor || "#000" }} onClick={()=>colorRef.current?.click()} />
           </div>
         </div>
       )
@@ -221,14 +208,18 @@ export default function Toolbar(props: Props) {
             placeholder="Enter text"
           />
           <div className="mt-2 flex items-center gap-2">
-            <div className="w-8 h-8 border border-black" style={{ background: (selectedProps.fill ?? brushColor) }} onClick={openColor}/>
+            <div className="w-8 h-8 border border-black" style={{ background: (selectedProps.fill ?? brushColor ?? "#000") }} onClick={()=>colorRef.current?.click()}/>
             <input className="sq-range" type="range" min={8} max={800} step={1} value={selectedProps.fontSize ?? 112} onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}/>
             <div className="text-[10px] w-10 text-right">{selectedProps.fontSize ?? 112}</div>
           </div>
         </div>
       )
     }
-    return null
+    return (
+      <div className={`p-2 ${block}`}>
+        <div className="text-[10px]">Select an object to edit.</div>
+      </div>
+    )
   }
 
   return (
@@ -242,7 +233,7 @@ export default function Toolbar(props: Props) {
         {ToolButton("erase", <Eraser className={icon}/>)}
         {ToolButton("text",  <TypeIcon className={icon}/>, onAddText)}
         {ToolButton("image", <ImageIcon className={icon}/>)}
-        {ToolButton("shape", <Triangle className={icon}/>)} {/* иконка «Shape» */}
+        {ToolButton("shape", <Triangle className={icon}/>)} {/* «Shape» в иконке */}
         <button className={`${btnBase} ${layersOpen?btnActive:""}`} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
           <LayersIcon className={icon}/>
         </button>
@@ -252,7 +243,7 @@ export default function Toolbar(props: Props) {
 
         {/* скрытые инпуты */}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-        <input ref={colorRef} type="color" value={selectedKind ? (props.selectedProps.fill ?? brushColor) : brushColor} onChange={onColorChange} className="hidden"/>
+        <input ref={colorRef} type="color" value={(selectedKind ? (props.selectedProps.fill ?? brushColor) : brushColor) || "#000000"} onChange={onColorChange} className="hidden"/>
       </div>
 
       {/* контекстные сеттинги */}
