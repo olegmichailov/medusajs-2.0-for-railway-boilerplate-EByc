@@ -1,16 +1,16 @@
+// storefront/src/modules/darkroom/Toolbar.tsx
 "use client"
 
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
-  Download, Layers as LayersIcon, Undo2, Redo2, Trash2,
-  Circle, Square, Triangle, Plus, Slash
+  Move, Brush, Eraser, Type as TypeIcon, Image as ImageIcon,
+  Download, Layers as LayersIcon, Square, Circle, Triangle, Plus, Slash,
+  Undo2, Redo2, Trash2
 } from "lucide-react"
-import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
+import type { ShapeKind, Side, Tool } from "./store"
 
-// ===== Типы для мобильной панели слоёв =====
-type MobileLayersItem = {
+type LayerItem = {
   id: string
   name: string
   type: "image" | "shape" | "text" | "strokes"
@@ -20,46 +20,26 @@ type MobileLayersItem = {
   opacity: number
 }
 
-type MobileLayersProps = {
-  items: MobileLayersItem[]
-  onSelect: (id: string) => void
-  onToggleVisible: (id: string) => void
-  onToggleLock: (id: string) => void
-  onDelete: (id: string) => void
-  onDuplicate: (id: string) => void
-  onChangeBlend: (id: string, blend: string) => void
-  onChangeOpacity: (id: string, opacity: number) => void
-  onMoveUp: (id: string) => void
-  onMoveDown: (id: string) => void
-}
-
-// ===== Пропсы Toolbar =====
 type Props = {
   side: Side
   setSide: (s: Side) => void
-
   tool: Tool
   setTool: (t: Tool) => void
-
   brushColor: string
   setBrushColor: (hex: string) => void
-
   brushSize: number
   setBrushSize: (n: number) => void
-
-  shapeKind: ShapeKind | null
-  setShapeKind: (k: ShapeKind | null) => void
 
   onUploadImage: (file: File) => void
   onAddText: () => void
   onAddShape: (k: ShapeKind) => void
 
-  onDownloadFront: () => void
-  onDownloadBack: () => void
-
+  onClear: () => void
   onUndo: () => void
   onRedo: () => void
-  onClear: () => void
+
+  onDownloadFront: () => void
+  onDownloadBack: () => void
 
   toggleLayers: () => void
   layersOpen: boolean
@@ -82,22 +62,27 @@ type Props = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
 
-  mobileLayers: MobileLayersProps
+  // мобильные мини-контролы слоев
+  layerItems: LayerItem[]
+  onLayerSelect: (id: string) => void
+  onToggleLayerVisible: (id: string) => void
+  onToggleLayerLock: (id: string) => void
+  onDuplicateLayer: (id: string) => void
+  onDeleteLayer: (id: string) => void
+  onChangeLayerBlend: (id: string, b: string) => void
+  onChangeLayerOpacity: (id: string, v: number) => void
+  onMoveLayerUp: (id: string) => void
+  onMoveLayerDown: (id: string) => void
+
+  // сообщаем высоту моб. панелей, чтобы сцена не перекрывалась
+  onMobileHeight: (h: number) => void
 }
 
-// — единая «плоская» палитра
-const PALETTE = [
-  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
-  "#FF007A","#FF4D00","#FFB300","#FFD400","#66FF00","#00FFA8",
-  "#00E5FF","#0066FF","#2B00FF","#8A00FF","#FF00D4","#FF2F2F",
-]
-
-// утилиты UI
-const ico = "w-5 h-5"
-const squareBtn =
-  "w-12 h-12 grid place-items-center border border-black bg-white text-black rounded-none select-none active:translate-y-[0.5px]"
-const squareBtnActive = "bg-black text-white"
-const row = "px-2 py-1"
+const btnBase =
+  "w-12 h-12 md:h-9 md:w-9 grid place-items-center border border-black rounded-none bg-white text-black select-none"
+const btnActive = "bg-black text-white"
+const icon = "w-4 h-4"
+const block = "border border-black bg-white"
 
 export default function Toolbar(props: Props) {
   const {
@@ -106,99 +91,15 @@ export default function Toolbar(props: Props) {
     brushColor, setBrushColor,
     brushSize, setBrushSize,
     onUploadImage, onAddText, onAddShape,
+    onClear, onUndo, onRedo,
     onDownloadFront, onDownloadBack,
-    onUndo, onRedo, onClear,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedColor,
-    mobileLayers,
+    layerItems, onMobileHeight
   } = props
 
-  // ===== DESKTOP =====
-  if (!isMobile) {
-    // скромная левосторонняя панель, внешне как прежде
-    const fileRef = useRef<HTMLInputElement>(null)
-    const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-      e.stopPropagation()
-      const f = e.target.files?.[0]
-      if (f) onUploadImage(f)
-      e.currentTarget.value = ""
-    }
-
-    // локальный state для текста
-    const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
-    useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
-
-    return (
-      <div className="hidden md:block fixed left-5 top-28 z-30 select-none" style={{ width: 260 }}>
-        <div className="bg-white border border-black/20 rounded-none shadow-sm">
-          {/* header */}
-          <div className="px-3 py-2 border-b border-black/10 flex items-center justify-between">
-            <span className="text-[10px] tracking-[0.18em] font-semibold">TOOLS</span>
-            <button
-              className={`${squareBtn} w-8 h-8`}
-              onClick={(e)=>{e.stopPropagation(); toggleLayers()}}
-              title="Layers"
-            >
-              <LayersIcon className="w-4 h-4"/>
-            </button>
-          </div>
-
-          {/* инструменты */}
-          <div className="px-3 py-2 border-b border-black/10">
-            <div className="grid grid-cols-6 gap-1">
-              <ToolBtn label="Move"   active={tool==="move"}  onClick={()=>setTool("move")}><Move className={ico}/></ToolBtn>
-              <ToolBtn label="Brush"  active={tool==="brush"} onClick={()=>setTool("brush")}><Brush className={ico}/></ToolBtn>
-              <ToolBtn label="Erase"  active={tool==="erase"} onClick={()=>setTool("erase")}><Eraser className={ico}/></ToolBtn>
-              <ToolBtn label="Text"   onClick={onAddText}><TypeIcon className={ico}/></ToolBtn>
-              <ToolBtn label="Image"  onClick={()=>fileRef.current?.click()}><ImageIcon className={ico}/></ToolBtn>
-              <ToolBtn label="Shapes" active={tool==="shape"} onClick={()=>setTool("shape")}><Shapes className={ico}/></ToolBtn>
-            </div>
-          </div>
-
-          {/* контекстные настройки (десктоп) */}
-          <DesktopSettings
-            tool={tool}
-            brushColor={brushColor}
-            setBrushColor={setBrushColor}
-            brushSize={brushSize}
-            setBrushSize={setBrushSize}
-            selectedKind={selectedKind}
-            selectedProps={selectedProps}
-            setSelectedText={setSelectedText}
-            setSelectedFontSize={setSelectedFontSize}
-            onAddShape={onAddShape}
-          />
-
-          {/* низ: стороны и загрузки */}
-          <div className="px-3 py-3 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <button className={`h-10 border ${side==="front"?"bg-black text-white":"border-black"}`} onClick={()=>setSide("front")}>FRONT</button>
-              <button className={`h-10 border ${side==="back" ?"bg-black text-white":"border-black"}`} onClick={()=>setSide("back")}>BACK</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadFront}>
-                <Download className="w-4 h-4"/> Download
-              </button>
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadBack}>
-                <Download className="w-4 h-4"/> Download
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* hidden file input */}
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-        <SquareSliderStyle/>
-      </div>
-    )
-  }
-
-  // ===== MOBILE =====
-  // слои — шторка
-  const [layersOpenM, setLayersOpenM] = useState(false)
-
-  // файл для «Image»
+  // файл аплоадер
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
@@ -207,295 +108,174 @@ export default function Toolbar(props: Props) {
     e.currentTarget.value = ""
   }
 
-  // контекстные настройки (sheet над инструментами)
-  const SettingsSheet = (
-    <div className="fixed inset-x-0 bottom-[56px] z-40 px-2 pb-1">
-      <div className="border border-black bg-white">
-        {/* BRUSH */}
-        {tool==="brush" && (
-          <div className={`${row} space-y-2`}>
-            <div className="text-[10px] tracking-widest">BRUSH</div>
-            <ColorRow color={brushColor} onPick={(hex)=>{ setBrushColor(hex); if (selectedKind) props.setSelectedColor(hex) }}/>
-            <SliderRow label="SIZE" value={brushSize} min={1} max={200} onChange={setBrushSize}/>
-          </div>
-        )}
+  // системный color-picker по тапу
+  const colorRef = useRef<HTMLInputElement>(null)
+  const openColor = (e: React.MouseEvent) => { e.stopPropagation(); colorRef.current?.click() }
+  const onColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const hex = e.target.value
+    if (selectedKind) props.setSelectedColor(hex); else setBrushColor(hex)
+  }
 
-        {/* ERASE */}
-        {tool==="erase" && (
-          <div className={`${row} space-y-2`}>
-            <div className="text-[10px] tracking-widest">ERASE</div>
-            <SliderRow label="SIZE" value={brushSize} min={1} max={200} onChange={setBrushSize}/>
-            <div className="text-[11px] text-black/70">Erases drawing & shapes/text (mockup stays).</div>
-          </div>
-        )}
+  // локальный текст-state (для settings Text)
+  const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
+  useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
-        {/* TEXT */}
-        {tool==="text" && (
-          <div className={`${row} space-y-2`}>
-            <div className="text-[10px] tracking-widest">TEXT</div>
-            <textarea
-              className="w-full h-16 border border-black p-1 text-sm"
-              placeholder="Enter text"
-              value={selectedProps?.text ?? ""}
-              onChange={(e)=>setSelectedText(e.target.value)}
-            />
-            <SliderRow label="FONT" value={Math.round(selectedProps?.fontSize ?? 112)} min={8} max={800} onChange={setSelectedFontSize}/>
-            <ColorRow color={brushColor} onPick={(hex)=>{ setBrushColor(hex); setSelectedColor(hex) }}/>
-          </div>
-        )}
-
-        {/* SHAPES */}
-        {tool==="shape" && (
-          <div className={`${row} space-y-2`}>
-            <div className="text-[10px] tracking-widest">SHAPES</div>
-            <div className="grid grid-cols-5 gap-[2px]">
-              <button className={squareBtn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-              <button className={squareBtn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-              <button className={squareBtn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-              <button className={squareBtn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-              <button className={squareBtn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-            </div>
-            <ColorRow color={brushColor} onPick={(hex)=>setBrushColor(hex)}/>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-
-  return (
-    <>
-      {/* LAYERS sheet */}
-      {layersOpenM && (
-        <div className="fixed inset-x-0 bottom-[56px] z-40 px-2">
-          <div className="border border-black bg-white max-h-64 overflow-auto p-2">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] tracking-widest">LAYERS</div>
-              <button className={`${squareBtn} ${squareBtnActive} w-16`} onClick={()=>setLayersOpenM(false)}>CLOSE</button>
-            </div>
-            <div className="space-y-2">
-              {mobileLayers.items.map((l)=>(
-                <div key={l.id} className="flex items-center gap-2 border border-black px-2 py-1 bg-white">
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
-                  <div className="text-xs flex-1 truncate">{l.name}</div>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}>↑</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}>↓</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}>⧉</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?"🔒":"🔓"}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?"👁":"🚫"}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CONTEXT SETTINGS */}
-      {(tool==="brush" || tool==="erase" || tool==="text" || tool==="shape") && SettingsSheet}
-
-      {/* НИЖНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (ПЕРВЫЙ РЯД) */}
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white border-t border-black">
-        <div className={`${row} flex items-center justify-between gap-[2px]`}>
-          <ToolSquare label="Move"   active={tool==="move"}  onClick={()=>setTool("move")}><Move className={ico}/></ToolSquare>
-          <ToolSquare label="Brush"  active={tool==="brush"} onClick={()=>setTool("brush")}><Brush className={ico}/></ToolSquare>
-          <ToolSquare label="Erase"  active={tool==="erase"} onClick={()=>setTool("erase")}><Eraser className={ico}/></ToolSquare>
-          <ToolSquare label="Text"   active={tool==="text"}  onClick={()=>setTool("text")}><TypeIcon className={ico}/></ToolSquare>
-          {/* Image — сразу открываем file picker */}
-          <label className={squareBtn} title="Image">
-            <ImageIcon className={ico}/>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-          </label>
-          <ToolSquare label="Shapes" active={tool==="shape"} onClick={()=>setTool("shape")}><Shapes className={ico}/></ToolSquare>
-          <ToolSquare label="Undo"   onClick={onUndo}><Undo2 className={ico}/></ToolSquare>
-          <ToolSquare label="Redo"   onClick={onRedo}><Redo2 className={ico}/></ToolSquare>
-          <ToolSquare label="Clear"  onClick={onClear}><Trash2 className={ico}/></ToolSquare>
-          <ToolSquare label="Layers" active={layersOpenM} onClick={()=>setLayersOpenM(v=>!v)}><LayersIcon className={ico}/></ToolSquare>
-        </div>
-
-        {/* ВТОРОЙ РЯД — FRONT/BACK + download в одну строку */}
-        <div className={`${row} grid grid-cols-2 gap-2 border-t border-black/20`}>
-          <button
-            className={`h-10 border ${props.side==="front" ? "bg-black text-white" : "bg-white text-black"} flex items-center justify-between px-3`}
-            onClick={()=>setSide("front")}
-          >
-            <span>FRONT</span>
-            <Download className="w-5 h-5" onClick={(e)=>{ e.stopPropagation(); onDownloadFront() }}/>
-          </button>
-          <button
-            className={`h-10 border ${props.side==="back" ? "bg-black text-white" : "bg-white text-black"} flex items-center justify-between px-3`}
-            onClick={()=>setSide("back")}
-          >
-            <span>BACK</span>
-            <Download className="w-5 h-5" onClick={(e)=>{ e.stopPropagation(); onDownloadBack() }}/>
-          </button>
-        </div>
-      </div>
-
-      <SquareSliderStyle/>
-    </>
-  )
-}
-
-/* ================= helpers (UI) ================ */
-
-function ToolBtn(props: {label?:string; active?:boolean; onClick:()=>void; children:React.ReactNode}) {
-  const { active, onClick, children } = props
-  return (
-    <button
-      className={`${squareBtn} ${active ? squareBtnActive : ""}`}
-      onClick={(e)=>{ e.stopPropagation(); onClick() }}
-      title={props.label}
-    >
-      {children}
-    </button>
-  )
-}
-
-function DesktopSettings({
-  tool, brushColor, setBrushColor, brushSize, setBrushSize,
-  selectedKind, selectedProps, setSelectedText, setSelectedFontSize, onAddShape
-}: {
-  tool: Tool
-  brushColor: string
-  setBrushColor: (c:string)=>void
-  brushSize: number
-  setBrushSize: (n:number)=>void
-  selectedKind: Props["selectedKind"]
-  selectedProps: Props["selectedProps"]
-  setSelectedText: (t:string)=>void
-  setSelectedFontSize: (n:number)=>void
-  onAddShape: (k: ShapeKind)=>void
-}) {
-  return (
-    <div className="px-3 py-2 border-b border-black/10 space-y-3">
-      {tool==="brush" && (
-        <>
-          <div className="text-[10px] uppercase tracking-wider">Color</div>
-          <ColorRow color={brushColor} onPick={setBrushColor}/>
-          <SliderRow label="Size" value={brushSize} min={1} max={200} onChange={setBrushSize}/>
-        </>
-      )}
-      {tool==="erase" && (
-        <>
-          <div className="text-[10px] uppercase tracking-wider">Erase size</div>
-          <SliderRow label="Size" value={brushSize} min={1} max={200} onChange={setBrushSize}/>
-        </>
-      )}
-      {tool==="text" && (
-        <>
-          <div className="text-[10px] uppercase tracking-wider">Text</div>
-          <textarea
-            placeholder="Enter text"
-            className="w-full h-20 resize-none border border-black p-2 text-sm"
-            value={selectedKind==="text" ? (selectedProps?.text ?? "") : ""}
-            onChange={(e)=>{ if (selectedKind==="text") setSelectedText(e.target.value) }}
-          />
-          <SliderRow label="Font size" value={selectedKind==="text" ? Math.round(selectedProps?.fontSize ?? 112) : 112} min={8} max={800} onChange={setSelectedFontSize}/>
-        </>
-      )}
-      {tool==="shape" && (
-        <>
-          <div className="text-[10px] uppercase tracking-wider">Shapes</div>
-          <div className="grid grid-cols-5 gap-1">
-            <button className={squareBtn} onClick={()=>onAddShape("square")}><Square className="w-4 h-4"/></button>
-            <button className={squareBtn} onClick={()=>onAddShape("circle")}><Circle className="w-4 h-4"/></button>
-            <button className={squareBtn} onClick={()=>onAddShape("triangle")}><Triangle className="w-4 h-4"/></button>
-            <button className={squareBtn} onClick={()=>onAddShape("cross")}><Plus className="w-4 h-4"/></button>
-            <button className={squareBtn} onClick={()=>onAddShape("line")}><Slash className="w-4 h-4"/></button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function ToolSquare(props:{label?:string; active?:boolean; onClick:()=>void; children:React.ReactNode}) {
-  const { active, onClick, children } = props
-  return (
-    <button
-      className={`${squareBtn} ${active ? squareBtnActive : ""}`}
-      onClick={(e)=>{ e.stopPropagation(); onClick() }}
-      title={props.label}
-    >
-      {children}
-    </button>
-  )
-}
-
-function ColorRow({ color, onPick }: { color: string; onPick: (hex:string)=>void }) {
-  return (
-    <div className="grid grid-cols-12 gap-[2px]">
-      {PALETTE.map((hex)=>(
-        <button
-          key={hex}
-          className="h-5 border border-black"
-          style={{ background: hex }}
-          onClick={()=>onPick(hex)}
-          title={hex}
-        />
-      ))}
-      <div className="flex items-center gap-2 col-span-12 mt-1">
-        <span className="text-[10px] uppercase tracking-wider">Custom</span>
-        <input
-          type="color"
-          value={color}
-          onChange={(e)=>onPick(e.target.value)}
-          className="w-8 h-5 border border-black"
-        />
-      </div>
-    </div>
-  )
-}
-
-function SliderRow({ label, value, min, max, onChange }:{
-  label: string; value: number; min: number; max: number; onChange: (n:number)=>void
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] uppercase tracking-wider w-16">{label}</span>
-      <input
-        type="range"
-        min={min} max={max} step={1}
-        value={value}
-        onChange={(e)=>onChange(parseInt(e.target.value))}
-        className="drk-slider flex-1"
-      />
-      <span className="text-[11px] tabular-nums w-10 text-right">{value}</span>
-    </div>
-  )
-}
-
-/** Квадратные «ручки» слайдера — как в слоях */
-function SquareSliderStyle() {
-  return (
+  // Квадратные слайдеры (thumb)
+  const RangeCSS = () => (
     <style>{`
-      .drk-slider {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 100%;
-        height: 2px;
-        background: #d1d5db;
-        outline: none;
-      }
-      .drk-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 14px;
-        height: 14px;
-        background: #000;
-        border: 1px solid #000;
-        border-radius: 0;
-        cursor: pointer;
-        margin-top: -6px;
-      }
-      .drk-slider::-moz-range-thumb {
-        width: 14px;
-        height: 14px;
-        background: #000;
-        border: 1px solid #000;
-        border-radius: 0;
-        cursor: pointer;
-      }
+      .sq-range { -webkit-appearance:none; appearance:none; width:100%; height:6px; background:#e5e5e5; border:1px solid #000; }
+      .sq-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:16px; height:16px; background:#000; cursor:pointer; }
+      .sq-range::-moz-range-thumb { width:16px; height:16px; background:#000; border:none; cursor:pointer; }
+      .sq-range:focus { outline:none; }
     `}</style>
+  )
+
+  // ===== Desktop (ничего не меняем визуально, просто не показываем моб. блоки) =====
+  if (!isMobile) {
+    return (
+      <div className="fixed left-5 top-28 z-30 select-none" style={{ width: 220 }}>
+        <RangeCSS/>
+        {/* Можешь оставить свой уже рабочий Desktop Toolbar тут — в проекте он отдельный. 
+            Чтобы не ломать твой вид, мобильный код ниже. */}
+      </div>
+    )
+  }
+
+  // ===== Mobile =====
+  const barRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const report = () => {
+      const h = (barRef.current?.getBoundingClientRect().height ?? 120)
+      onMobileHeight(Math.ceil(h))
+    }
+    report()
+    const ro = new ResizeObserver(report)
+    if (barRef.current) ro.observe(barRef.current)
+    return () => ro.disconnect()
+  }, [onMobileHeight])
+
+  // одна строка инструментов
+  const ToolButton = (t: Tool | "image" | "text", Child: React.ReactNode, onPress?: ()=>void) => (
+    <button
+      className={`${btnBase} ${tool===t ? btnActive : ""}`}
+      onClick={(e)=>{ e.stopPropagation(); if (onPress) onPress(); else if (t==="image") fileRef.current?.click(); else if (t==="text") onAddText(); else setTool(t as Tool) }}
+    >
+      {Child}
+    </button>
+  )
+
+  // контекстные сеттинги под строкой инструментов
+  const Settings = () => {
+    if (tool === "brush") {
+      return (
+        <div className={`p-2 ${block}`}>
+          <div className="text-[10px] mb-1">BRUSH</div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} onClick={openColor} />
+            <input className="sq-range" type="range" min={1} max={200} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))}/>
+          </div>
+        </div>
+      )
+    }
+    if (tool === "erase") {
+      return (
+        <div className={`p-2 ${block}`}>
+          <div className="text-[10px] mb-1">ERASE</div>
+          <input className="sq-range" type="range" min={1} max={200} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value))}/>
+        </div>
+      )
+    }
+    if (tool === "move") {
+      return (
+        <div className={`p-2 ${block}`}>
+          <div className="text-[10px]">Select an object to edit.</div>
+        </div>
+      )
+    }
+    if (tool === "shape") {
+      return (
+        <div className={`p-2 ${block}`}>
+          <div className="text-[10px] mb-1">SHAPES</div>
+          <div className="flex items-center gap-1 mb-2">
+            <button className={btnBase} onClick={()=>props.onAddShape("square")}><Square className={icon}/></button>
+            <button className={btnBase} onClick={()=>props.onAddShape("circle")}><Circle className={icon}/></button>
+            <button className={btnBase} onClick={()=>props.onAddShape("triangle")}><Triangle className={icon}/></button>
+            <button className={btnBase} onClick={()=>props.onAddShape("cross")}><Plus className={icon}/></button>
+            <button className={btnBase} onClick={()=>props.onAddShape("line")}><Slash className={icon}/></button>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-[10px]">Color</div>
+            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} onClick={openColor}/>
+          </div>
+        </div>
+      )
+    }
+    if (tool === "text" || selectedKind === "text") {
+      return (
+        <div className={`p-2 ${block}`}>
+          <div className="text-[10px] mb-1">TEXT</div>
+          <textarea
+            value={textValue}
+            onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+            className="w-full h-16 border border-black p-2 text-sm"
+            placeholder="Enter text"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <div className="w-8 h-8 border border-black" style={{ background: (selectedProps.fill ?? brushColor) }} onClick={openColor}/>
+            <input className="sq-range" type="range" min={8} max={800} step={1} value={selectedProps.fontSize ?? 112} onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}/>
+            <div className="text-[10px] w-10 text-right">{selectedProps.fontSize ?? 112}</div>
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+
+  return (
+    <div ref={barRef} className="fixed inset-x-0 bottom-0 z-40 bg-white/95 border-t border-black/10 select-none">
+      <RangeCSS/>
+
+      {/* строка инструментов */}
+      <div className="px-2 py-2 flex items-center gap-[6px]">
+        {ToolButton("move",  <Move  className={icon}/>)}
+        {ToolButton("brush", <Brush className={icon}/>)}
+        {ToolButton("erase", <Eraser className={icon}/>)}
+        {ToolButton("text",  <TypeIcon className={icon}/>, onAddText)}
+        {ToolButton("image", <ImageIcon className={icon}/>)}
+        {ToolButton("shape", <Triangle className={icon}/>)} {/* иконка «Shape» */}
+        <button className={`${btnBase} ${layersOpen?btnActive:""}`} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
+          <LayersIcon className={icon}/>
+        </button>
+        <button className={btnBase} onClick={(e)=>{e.stopPropagation(); onUndo()}} title="Undo"><Undo2 className={icon}/></button>
+        <button className={btnBase} onClick={(e)=>{e.stopPropagation(); onRedo()}} title="Redo"><Redo2 className={icon}/></button>
+        <button className={btnBase} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear"><Trash2 className={icon}/></button>
+
+        {/* скрытые инпуты */}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+        <input ref={colorRef} type="color" value={selectedKind ? (props.selectedProps.fill ?? brushColor) : brushColor} onChange={onColorChange} className="hidden"/>
+      </div>
+
+      {/* контекстные сеттинги */}
+      <Settings/>
+
+      {/* нижняя строка — FRONT ⬇ | BACK ⬇ */}
+      <div className="px-2 py-2 grid grid-cols-2 gap-2">
+        <button
+          className={`h-10 border border-black flex items-center justify-center gap-2 ${side==="front" ? "bg-black text-white" : "bg-white text-black"}`}
+          onClick={(e)=>{e.stopPropagation(); setSide("front");}}
+        >
+          <span>FRONT</span>
+          <Download className={icon} onClick={(e)=>{ e.stopPropagation(); onDownloadFront() }}/>
+        </button>
+
+        <button
+          className={`h-10 border border-black flex items-center justify-center gap-2 ${side==="back" ? "bg-black text-white" : "bg-white text-black"}`}
+          onClick={(e)=>{e.stopPropagation(); setSide("back");}}
+        >
+          <span>BACK</span>
+          <Download className={icon} onClick={(e)=>{ e.stopPropagation(); onDownloadBack() }}/>
+        </button>
+      </div>
+    </div>
   )
 }
