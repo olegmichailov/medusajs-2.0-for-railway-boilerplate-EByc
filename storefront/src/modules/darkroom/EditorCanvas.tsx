@@ -2,7 +2,7 @@
 "use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Stage, Layer, Image as KImage, Transformer } from "react-konva"
+import { Stage, Layer, Group as KGroup, Image as KImage, Transformer } from "react-konva"
 import Konva from "konva"
 import useImage from "use-image"
 import Toolbar from "./Toolbar"
@@ -95,7 +95,7 @@ export default function EditorCanvas() {
     }
   }, [])
 
-  const [tick, setTick] = useState(0) // чтобы пересчитать размеры при повороте
+  const [tick, setTick] = useState(0)
 
   const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
@@ -252,7 +252,8 @@ export default function EditorCanvas() {
   }, [selectedId, tool])
 
   // stroke-группа (одна на сторону)
-  const ensureStrokeGroup = (): Konva.Group => {
+  const ensureStrokeGroup = (): Konva.Group | null => {
+    if (!artGroupRef.current) return null
     const gId = strokeGroupId.current[side]
     if (gId) {
       const lay = layers.find(l => l.id === gId)
@@ -263,7 +264,7 @@ export default function EditorCanvas() {
     ;(g as any).id(uid())
     const id = (g as any)._id
     const meta = baseMeta(`strokes ${seqs.strokes}`)
-    artGroupRef.current?.add(g)
+    artGroupRef.current.add(g)
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
@@ -284,13 +285,14 @@ export default function EditorCanvas() {
       const img = new window.Image()
       img.crossOrigin = "anonymous"
       img.onload = () => {
+        if (!artGroupRef.current) return
         const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
         const w = img.width * ratio, h = img.height * ratio
         const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
         ;(kimg as any).id(uid())
         const id = (kimg as any)._id
         const meta = baseMeta(`image ${seqs.image}`)
-        artGroupRef.current?.add(kimg)
+        artGroupRef.current.add(kimg)
         kimg.on("click tap", () => select(id))
         const lay: AnyLayer = { id, side, node: kimg, meta, type: "image" }
         setLayers(p => [...p, lay])
@@ -309,19 +311,21 @@ export default function EditorCanvas() {
   }
 
   const onAddText = () => {
+    if (!artGroupRef.current) return
     const t = new Konva.Text({
       text: "GMORKL",
       x: BASE_W/2-300, y: BASE_H/2-60,
       fontSize: 112,
       fontFamily: siteFont(),
       fontStyle: "bold",
-      fill: brushColor, width: 600, align: "center",
+      fill: brushColor || "#000000",
+      width: 600, align: "center",
       draggable: false,
     })
     ;(t as any).id(uid())
     const id = (t as any)._id
     const meta = baseMeta(`text ${seqs.text}`)
-    artGroupRef.current?.add(t)
+    artGroupRef.current.add(t)
     t.on("click tap", () => select(id))
     t.on("dblclick dbltap", () => startTextOverlayEdit(t))
     const lay: AnyLayer = { id, side, node: t, meta, type: "text" }
@@ -337,16 +341,17 @@ export default function EditorCanvas() {
   }
 
   const onAddShape = (kind: ShapeKind) => {
+    if (!artGroupRef.current) return
     let n: AnyNode
-    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
-    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
-    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
-    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g }
-    else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
+    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor || "#000000" })
+    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor || "#000000" })
+    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor || "#000000" })
+    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor||"#000000"})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor||"#000000"})); n=g }
+    else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor || "#000000", strokeWidth: 16, lineCap: "round" })
     ;(n as any).id(uid())
     const id = (n as any)._id
     const meta = baseMeta(`shape ${seqs.shape}`)
-    artGroupRef.current?.add(n as any)
+    artGroupRef.current.add(n as any)
     ;(n as any).on("click tap", () => select(id))
     const lay: AnyLayer = { id, side, node: n, meta, type: "shape" }
     setLayers(p => [...p, lay])
@@ -364,11 +369,13 @@ export default function EditorCanvas() {
   let activeLine: Konva.Line | null = null
 
   const startStroke = (x: number, y: number) => {
+    if (!artGroupRef.current) return
     if (tool === "brush") {
       const g = ensureStrokeGroup()
+      if (!g) return
       const line = new Konva.Line({
         points: [x, y],
-        stroke: brushColor,
+        stroke: brushColor || "#000000",
         strokeWidth: brushSize,
         lineCap: "round",
         lineJoin: "round",
@@ -387,7 +394,7 @@ export default function EditorCanvas() {
         lineJoin: "round",
         globalCompositeOperation: "destination-out",
       })
-      artGroupRef.current?.add(line)
+      artGroupRef.current.add(line)
       activeLine = line
       setIsDrawing(true)
     }
@@ -406,7 +413,7 @@ export default function EditorCanvas() {
     setIsDrawing(false)
     pushAction({
       undo: () => { line.remove(); canvasLayerRef.current?.batchDraw() },
-      redo: () => { (tool==="erase" ? artGroupRef.current : ensureStrokeGroup()).add(line); canvasLayerRef.current?.batchDraw() },
+      redo: () => { (tool==="erase" ? artGroupRef.current : ensureStrokeGroup())?.add(line); canvasLayerRef.current?.batchDraw() },
     })
   }
 
@@ -444,7 +451,7 @@ export default function EditorCanvas() {
     ta.style.padding = "6px 8px"
     ta.style.border = "1px solid #000"
     ta.style.background = "#fff"
-    ta.style.color = t.fill() as string
+    ta.style.color = (t.fill() as string) || "#000"
     ta.style.fontFamily = t.fontFamily()
     ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
     ta.style.fontSize = `${t.fontSize() * scale}px`
@@ -745,7 +752,7 @@ export default function EditorCanvas() {
       text: sel.node.text(),
       fontSize: sel.node.fontSize(),
       fontFamily: sel.node.fontFamily(),
-      fill: sel.node.fill() as string,
+      fill: (sel.node.fill() as string) || "#000000",
     }
     : sel && (sel.node as any).fill ? {
       fill: (sel.node as any).fill() ?? "#000000",
@@ -848,7 +855,7 @@ export default function EditorCanvas() {
                 <KImage ref={backBgRef} image={backMock} visible={side==="back"} width={BASE_W} height={BASE_H} listening={true}/>
               )}
               {/* Контейнер арта */}
-              <Konva.Group ref={(g:any)=>{ if (g && !artGroupRef.current) { artGroupRef.current = g } }} />
+              <KGroup ref={artGroupRef as any} />
             </Layer>
 
             {/* UI-слой для рамки трансформера */}
