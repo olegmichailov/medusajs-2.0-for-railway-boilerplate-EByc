@@ -1,508 +1,1041 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
-import { clx } from "@medusajs/ui"
-import {
-  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
-  Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, Layers, X as ClearIcon
-} from "lucide-react"
-import type { ShapeKind, Side, Tool } from "./store"
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Stage, Layer, Image as KImage, Transformer, Group as KGroup } from "react-konva"
+import Konva from "konva"
+import useImage from "use-image"
+import Toolbar from "./Toolbar"
+import LayersPanel, { LayerItem } from "./LayersPanel"
+import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-type MobileLayersItem = {
-  id: string
-  name: string
-  type: "image" | "shape" | "text" | "strokes"
-  visible: boolean
-  locked: boolean
-  blend: string
-  opacity: number
-}
+// ==== БАЗА МАКЕТА ====
+const BASE_W = 2400
+const BASE_H = 3200
+const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
+const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-type MobileLayersProps = {
-  items: MobileLayersItem[]
-  selectedId?: string
-  onSelect: (id: string) => void
-  onToggleVisible: (id: string) => void
-  onToggleLock: (id: string) => void
-  onDelete: (id: string) => void
-  onDuplicate: (id: string) => void
-  onChangeBlend: (id: string, blend: string) => void
-  onChangeOpacity: (id: string, opacity: number) => void
-  onMoveUp: (id: string) => void
-  onMoveDown: (id: string) => void
-}
+// клампы текста
+const TEXT_MIN_FS = 8
+const TEXT_MAX_FS = 800
+const TEXT_MIN_W  = 60
+const TEXT_MAX_W  = BASE_W * 0.95
 
-type ToolbarProps = {
-  side: Side
-  setSide: (s: Side) => void
+const uid = () => "n_" + Math.random().toString(36).slice(2)
 
-  tool: Tool
-  setTool: (t: Tool) => void
+// ==== ТИПЫ ====
+type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
+type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
+type AnyNode =
+  | Konva.Image
+  | Konva.Line
+  | Konva.Text
+  | Konva.Group
+  | Konva.Rect
+  | Konva.Circle
+  | Konva.RegularPolygon
+type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
-  brushColor: string
-  setBrushColor: (hex: string) => void
+const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
+const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase === true
+const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
+const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
-  brushSize: number
-  setBrushSize: (n: number) => void
+export default function EditorCanvas() {
+  const { side, set, tool, brushColor, brushSize, shapeKind,
+    selectedId, select, showLayers, toggleLayers } = useDarkroom()
 
-  shapeKind: ShapeKind
-  setShapeKind: (k: ShapeKind) => void
+  // brush по умолчанию на мобилке
+  useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
 
-  onUploadImage: (file: File) => void
-  onAddText: () => void
-  onAddShape: (k: ShapeKind) => void
+  // точнее хит-тесты
+  useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
-  onDownloadFront: () => void
-  onDownloadBack: () => void
-  onClear: () => void
+  // мокапы
+  const [frontMock] = useImage(FRONT_SRC, "anonymous")
+  const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  toggleLayers: () => void
-  layersOpen: boolean
+  // refs
+  const stageRef       = useRef<Konva.Stage>(null)
+  const canvasLayerRef = useRef<Konva.Layer>(null)   // фон + ART-группы
+  const uiLayerRef     = useRef<Konva.Layer>(null)
+  const trRef          = useRef<Konva.Transformer>(null)
+  const frontBgRef     = useRef<Konva.Image>(null)
+  const backBgRef      = useRef<Konva.Image>(null)
+  const frontArtRef    = useRef<Konva.Group>(null)   // контент (front)
+  const backArtRef     = useRef<Konva.Group>(null)   // контент (back)
 
-  selectedKind: "image" | "shape" | "text" | "strokes" | null
-  selectedProps: {
-    text?: string
-    fontSize?: number
-    fontFamily?: string
-    fill?: string
-    stroke?: string
-    strokeWidth?: number
+  // state
+  const [layers, setLayers] = useState<AnyLayer[]>([])
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
+
+  // сессии
+  const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
+  const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
+  const lastToolRef     = useRef<Tool | null>(null)
+
+  // маркер «идёт трансформирование»
+  const isTransformingRef = useRef(false)
+
+  // --- история (оставляю: Undo/Redo внутри) ---
+  type Snapshot = { side: Side; json: string }
+  const undoStack = useRef<Snapshot[]>([])
+  const redoStack = useRef<Snapshot[]>([])
+  const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
+  const currentArt = () => artGroup(side)
+
+  const takeSnapshot = () => {
+    const g = currentArt(); if (!g) return
+    undoStack.current.push({ side, json: g.toJSON() })
+    redoStack.current = []
+  }
+  const restoreSnapshot = (snap?: Snapshot) => {
+    if (!snap) return
+    const g = artGroup(snap.side); if (!g) return
+    g.destroyChildren()
+    const tmp = Konva.Node.create(snap.json) as Konva.Group
+    tmp.getChildren().each((ch) => {
+      if (ch instanceof Konva.Image) {
+        const src = (ch as any).getAttr("src")
+        if (src) {
+          const im = new window.Image()
+          im.crossOrigin = "anonymous"
+          im.onload = () => { (ch as Konva.Image).image(im); canvasLayerRef.current?.batchDraw() }
+          im.src = src
+        }
+      }
+      g.add(ch)
+    })
+    canvasLayerRef.current?.batchDraw()
+    rebuildLayersFromArt(snap.side)
+  }
+  const undo = () => {
+    if (!undoStack.current.length) return
+    const prev = undoStack.current.pop()!
+    redoStack.current.push({ side, json: currentArt().toJSON() })
+    restoreSnapshot(prev)
+  }
+  const redo = () => {
+    if (!redoStack.current.length) return
+    const next = redoStack.current.pop()!
+    undoStack.current.push({ side, json: currentArt().toJSON() })
+    restoreSnapshot(next)
+  }
+  const clearArt = () => {
+    if (!currentArt()) return
+    takeSnapshot()
+    currentArt().removeChildren()
+    currentStrokeId.current[side] = null
+    currentEraseId.current[side]  = null
+    currentArt().clearCache()
+    canvasLayerRef.current?.batchDraw()
+    rebuildLayersFromArt(side)
   }
 
-  setSelectedFill: (hex: string) => void
-  setSelectedStroke: (hex: string) => void
-  setSelectedStrokeW: (n: number) => void
-  setSelectedText: (t: string) => void
-  setSelectedFontSize: (n: number) => void
-  setSelectedFontFamily: (f: string) => void
-  setSelectedColor: (hex: string) => void
+  // лэйаут/масштаб
+  const [headerH, setHeaderH] = useState(64)
+  useLayoutEffect(() => {
+    const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
+    setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 64))
+  }, [])
+  const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1200
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800
+    const padTop = headerH + 8
+    const padBottom = isMobile ? 120 : 72
+    const maxW = vw - 24
+    const maxH = vh - (padTop + padBottom)
+    const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
+    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
+  }, [showLayers, headerH])
 
-  mobileTopOffset: number
-  mobileLayers: MobileLayersProps
-}
+  // фикс скролла
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    if (isMobile) set({ showLayers: false })
+    return () => { document.body.style.overflow = prev }
+  }, [set])
 
-const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
-const ico  = "w-4 h-4"
-const btn  =
-  "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none " +
-  "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
-
-const activeBtn = "bg-black text-white"
-const inputStop = {
-  onPointerDown: (e: any) => e.stopPropagation(),
-  onPointerMove: (e: any) => e.stopPropagation(),
-  onPointerUp:   (e: any) => e.stopPropagation(),
-  onTouchStart:  (e: any) => e.stopPropagation(),
-  onTouchMove:   (e: any) => e.stopPropagation(),
-  onTouchEnd:    (e: any) => e.stopPropagation(),
-  onMouseDown:   (e: any) => e.stopPropagation(),
-  onMouseMove:   (e: any) => e.stopPropagation(),
-  onMouseUp:     (e: any) => e.stopPropagation(),
-}
-
-const PALETTE = [
-  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
-  "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
-  "#66FF00","#00FFA8","#00E5FF","#00A3FF","#0066FF","#2B00FF",
-  "#8A00FF","#FF00D4","#FF006A","#FF2F2F","#FF7A00","#FFAC00",
-  "#FFDF00","#B5E300","#61D836","#22C55E","#10B981","#06B6D4",
-  "#0EA5E9","#2563EB","#7C3AED","#C026D3","#E11D48","#8B5CF6",
-  "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
-  "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
-]
-
-// чёрный «квадратный» ползунок
-const sliderStyle: React.CSSProperties = {
-  accentColor: "#000",
-  WebkitAppearance: "none",
-  appearance: "none",
-}
-const sliderCss = `
-input[type="range"].square::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: #000; }
-input[type="range"].square::-moz-range-thumb { width: 14px; height: 14px; background: #000; border: none; }
-`
-
-export default function Toolbar(props: ToolbarProps) {
-  const {
-    side, setSide,
-    tool, setTool,
-    brushColor, setBrushColor,
-    brushSize, setBrushSize,
-    onUploadImage, onAddText, onAddShape,
-    onDownloadFront, onDownloadBack, onClear,
-    toggleLayers, layersOpen,
-    selectedKind, selectedProps,
-    setSelectedFill, setSelectedStroke, setSelectedStrokeW,
-    setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
-    mobileTopOffset, mobileLayers,
-  } = props
-
-  // =================== DESKTOP ===================
-  if (!isMobile) {
-    const [open, setOpen] = useState(true)
-    const [pos, setPos] = useState({ x: 24, y: 120 })
-    const drag = useRef<{ dx: number; dy: number } | null>(null)
-
-    const onDragStart = (e: React.MouseEvent) => {
-      drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y }
-      window.addEventListener("mousemove", onDragMove)
-      window.addEventListener("mouseup", onDragEnd)
-    }
-    const onDragMove = (e: MouseEvent) => {
-      if (!drag.current) return
-      setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy })
-    }
-    const onDragEnd = () => {
-      drag.current = null
-      window.removeEventListener("mousemove", onDragMove)
-      window.removeEventListener("mouseup", onDragEnd)
-    }
-
-    // upload
-    const fileRef = useRef<HTMLInputElement>(null)
-    const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-      e.stopPropagation()
-      const f = e.target.files?.[0]
-      if (f) onUploadImage(f)
-      e.currentTarget.value = ""
-    }
-
-    // Текст: локальный state для input
-    const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
-    useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
-
-    const showBrush = tool === "brush"
-    const showErase = tool === "erase"
-    const showText  = tool === "text" || selectedKind === "text"
-    const showShapes= tool === "shape"
-
-    return (
-      <div
-        className={clx("fixed", wrap)}
-        style={{ left: pos.x, top: pos.y, width: 260 }}
-        onMouseDown={(e)=>e.stopPropagation()}
-      >
-        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-        {/* header */}
-        <div className="flex items-center justify-between border-b border-black/10">
-          <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
-          <div className="flex">
-            <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
-            <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
-              {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-            </button>
-            <button className={btn} onMouseDown={onDragStart}><Move className={ico}/></button>
-          </div>
-        </div>
-
-        {open && (
-          <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers */}
-            <div className="flex">
-              {[
-                {t:"move",   icon:<Move className={ico}/>},
-                {t:"brush",  icon:<Brush className={ico}/>},
-                {t:"erase",  icon:<Eraser className={ico}/>},
-                {t:"text",   icon:<TypeIcon className={ico}/>},
-                {t:"image",  icon:<ImageIcon className={ico}/>},
-                {t:"shape",  icon:<Shapes className={ico}/>},
-              ].map((b)=>(
-                <button
-                  key={b.t}
-                  className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
-                  onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") setTool("shape" as Tool); else setTool(b.t as Tool) }}
-                  title={b.t}
-                >{b.icon}</button>
-              ))}
-              <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
-                <Layers className={ico}/>
-              </button>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
-            </div>
-
-            {/* Brush — Color + Size + Palette */}
-            {showBrush && (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="text-[10px] w-8">Color</div>
-                  <input
-                    type="color"
-                    value={brushColor}
-                    onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-                    className="w-6 h-6 border border-black p-0"
-                    {...inputStop}
-                  />
-                  <div className="flex-1">
-                    <input
-                      type="range"
-                      min={1}
-                      max={200}
-                      step={1}
-                      value={brushSize}
-                      onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                      className="w-full square"
-                      style={sliderStyle}
-                      {...inputStop}
-                    />
-                  </div>
-                  <div className="text-xs w-10 text-right">{brushSize}</div>
-                </div>
-                <div className="grid grid-cols-12 gap-1" {...inputStop}>
-                  {PALETTE.map((c)=>(
-                    <button
-                      key={c}
-                      className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
-                      style={{ background: c }}
-                      onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c) }}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Erase — только размер */}
-            {showErase && (
-              <div className="flex items-center gap-3">
-                <div className="text-[10px] w-8">Size</div>
-                <div className="flex-1">
-                  <input
-                    type="range" min={1} max={200} step={1}
-                    value={brushSize}
-                    onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                    className="w-full square"
-                    style={sliderStyle}
-                    {...inputStop}
-                  />
-                </div>
-                <div className="text-xs w-10 text-right">{brushSize}</div>
-              </div>
-            )}
-
-            {/* Shapes — кнопки */}
-            {showShapes && (
-              <div className="pt-1">
-                <div className="text-[10px] mb-1">Shapes</div>
-                <div className="flex">
-                  <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
-                  <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
-                  <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
-                  <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
-                  <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
-                </div>
-              </div>
-            )}
-
-            {/* Text — поле + кегль */}
-            {showText && (
-              <div className="pt-1 space-y-2">
-                <div className="text-[10px]">Text</div>
-                <textarea
-                  value={textValue}
-                  onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-                  className="w-full h-16 border border-black p-1 text-sm"
-                  placeholder="Enter text"
-                  {...inputStop}
-                />
-                <div className="flex items-center gap-2">
-                  <div className="text-[10px] w-12">Font size</div>
-                  <input
-                    type="range" min={8} max={800} step={1}
-                    value={selectedProps.fontSize ?? 96}
-                    onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-                    className="flex-1 square"
-                    style={sliderStyle}
-                    {...inputStop}
-                  />
-                  <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
-                </div>
-              </div>
-            )}
-
-            {/* FRONT/BACK + downloads */}
-            <div className="grid grid-cols-2 gap-2">
-              <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
-              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadFront()}}>
-                <Download className={ico}/> <span className="text-xs">Download</span>
-              </button>
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadBack()}}>
-                <Download className={ico}/> <span className="text-xs">Download</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
+  // helpers
+  const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
+  const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
+  const node = (id: string | null) => find(id)?.node || null
+  const applyMeta = (n: AnyNode, meta: BaseMeta) => {
+    n.opacity(meta.opacity)
+    ;(n as any).globalCompositeOperation = meta.blend
   }
 
-  // =================== MOBILE ===================
-  const [layersOpenM, setLayersOpenM] = useState(false)
+  // показываем только активную сторону
+  useEffect(() => {
+    layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
+    frontBgRef.current?.visible(side === "front")
+    backBgRef.current?.visible(side === "back")
+    frontArtRef.current?.visible(side === "front")
+    backArtRef.current?.visible(side === "back")
+    canvasLayerRef.current?.batchDraw()
+    attachTransformer()
+  }, [side, layers])
 
-  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) =>
-    <button
-      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
-    >
-      {icon}
-    </button>
+  // ===== Transformer =====
+  const detachTextFix = useRef<(() => void) | null>(null)
+  const detachGuard   = useRef<(() => void) | null>(null)
 
-  const fileRef = useRef<HTMLInputElement>(null)
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation()
-    const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
-    e.currentTarget.value = ""
-  }
+  const attachTransformer = () => {
+    const lay = find(selectedId)
+    const n = lay?.node
+    const disabled = !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
 
-  const showBrush = tool === "brush"
-  const showErase = tool === "erase"
-  const showText  = tool === "text"
-  const showShapes= tool === "shape"
+    if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
+    if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
 
-  const SecondRow = () => {
-    if (showText) {
-      return (
-        <div className="px-2 py-1 flex items-center gap-2">
-          <input
-            value={selectedProps.text ?? ""}
-            onChange={(e)=>setSelectedText(e.target.value)}
-            placeholder="Text"
-            className="flex-1 h-10 border border-black px-2 text-sm"
-            {...inputStop}
-          />
-          <div className="w-32 flex items-center gap-2">
-            <input
-              type="range" min={8} max={800} step={1}
-              value={selectedProps.fontSize ?? 96}
-              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-              className="w-full square"
-              style={sliderStyle}
-              {...inputStop}
-            />
-          </div>
-        </div>
-      )
+    if (disabled) {
+      trRef.current?.nodes([])
+      uiLayerRef.current?.batchDraw()
+      return
     }
 
-    if (showShapes) {
-      return (
-        <div className="px-2 py-1 flex items-center gap-1">
-          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-        </div>
-      )
+    const tr = trRef.current!
+    tr.nodes([n])
+    tr.rotateEnabled(true)
+
+    // track transform state
+    const onStart = () => { isTransformingRef.current = true }
+    const onEndT  = () => { isTransformingRef.current = false }
+    n.on("transformstart.guard", onStart)
+    n.on("transformend.guard", onEndT)
+    detachGuard.current = () => n.off(".guard")
+
+    if (isTextNode(n)) {
+      // текст: боковины — ШИРИНА; углы — КЕГЛЬ (плавно)
+      tr.keepRatio(false)
+      tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right"])
+
+      const onTransform = () => {
+        const t = n as Konva.Text
+        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+
+        if (active === "middle-left" || active === "middle-right") {
+          // ШИРИНА без «пружины» и прыжков
+          const sx = Math.max(0.01, Math.abs(t.scaleX()))
+          const w0 = t.width() || 0
+          const newW = Math.max(TEXT_MIN_W, Math.min(w0 * sx, TEXT_MAX_W))
+          if (active === "middle-left") {
+            const right = t.x() + w0
+            t.width(newW)
+            t.x(right - newW) // правый край стабилен
+          } else {
+            t.width(newW)
+          }
+          t.scaleX(1)
+        } else {
+          // КЕГЛЬ мягко
+          const s = Math.max(Math.abs(t.scaleX()), Math.abs(t.scaleY()))
+          const next = Math.max(TEXT_MIN_FS, Math.min(t.fontSize() * s, TEXT_MAX_FS))
+          t.fontSize(next)
+          t.scaleX(1); t.scaleY(1)
+        }
+        t.getLayer()?.batchDraw()
+      }
+      const onEnd = () => onTransform()
+      n.on("transform.textfix", onTransform)
+      n.on("transformend.textfix", onEnd)
+      detachTextFix.current = () => { n.off(".textfix") }
+    } else {
+      // картинки/фигуры: углы — пропорц., боковые — свободно
+      tr.keepRatio(false)
+      tr.enabledAnchors([
+        "top-left","top-right","bottom-left","bottom-right",
+        "middle-left","middle-right","top-center","bottom-center"
+      ])
+
+      const onTransform = () => {
+        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+        let sx = (n as any).scaleX?.() ?? 1
+        let sy = (n as any).scaleY?.() ?? 1
+
+        const isCorner = active && (
+          active === "top-left" || active === "top-right" ||
+          active === "bottom-left" || active === "bottom-right"
+        )
+        if (isCorner) {
+          const s = Math.max(Math.abs(sx), Math.abs(sy))
+          sx = s; sy = s
+        }
+
+        if (isImgOrRect(n)) {
+          const w = (n as any).width?.() ?? 0
+          const h = (n as any).height?.() ?? 0
+          ;(n as any).width(Math.max(1, w * sx))
+          ;(n as any).height(Math.max(1, h * sy))
+          ;(n as any).scaleX(1); (n as any).scaleY(1)
+        } else if (n instanceof Konva.Circle) {
+          const r = n.radius()
+          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
+          n.scaleX(1); n.scaleY(1)
+        } else if (n instanceof Konva.RegularPolygon) {
+          const r = n.radius()
+          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
+          n.scaleX(1); n.scaleY(1)
+        }
+        n.getLayer()?.batchDraw()
+      }
+      const onEnd = () => onTransform()
+      n.on("transform.fix", onTransform)
+      n.on("transformend.fix", onEnd)
+      detachTextFix.current = () => { n.off(".fix") }
     }
 
-    // Brush / Erase
-    return (
-      <div className="px-2 py-1 flex items-center gap-2">
-        {showBrush && (
-          <div className="flex items-center gap-2">
-            <div className="text-[10px]">Color</div>
-            <input
-              type="color"
-              value={brushColor}
-              onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-              className="w-8 h-8 border border-black p-0"
-              {...inputStop}
-            />
-          </div>
-        )}
-        <div className="flex-1">
-          <input
-            type="range"
-            min={1}
-            max={200}
-            step={1}
-            value={brushSize}
-            onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-            className="w-full square"
-            style={sliderStyle}
-            {...inputStop}
-          />
-        </div>
-        <div className="text-xs w-10 text-right">{brushSize}</div>
-      </div>
-    )
+    tr.getLayer()?.batchDraw()
+  }
+  useEffect(() => { attachTransformer() }, [selectedId, side])
+  useEffect(() => { attachTransformer() }, [tool])
+
+  // во время brush/erase — отключаем драг
+  useEffect(() => {
+    const enable = tool === "move"
+    layers.forEach((l) => {
+      if (l.side !== side) return
+      if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
+      ;(l.node as any).draggable(enable && !l.meta.locked)
+    })
+    if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
+    if (tool !== "brush") currentStrokeId.current[side] = null
+    if (tool !== "erase") currentEraseId.current[side]  = null
+  }, [tool, layers, side])
+
+  // ===== хоткеи =====
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ae = document.activeElement as HTMLElement | null
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
+
+      const n = node(selectedId)
+      if ((e.metaKey||e.ctrlKey) && !e.shiftKey && e.key.toLowerCase()==="z") { e.preventDefault(); undo(); return }
+      if ((e.metaKey||e.ctrlKey) &&  e.shiftKey && e.key.toLowerCase()==="z")  { e.preventDefault(); redo(); return }
+
+      if (!n || tool !== "move") return
+
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(selectedId!) ; return }
+      if (e.key==="Backspace"||e.key==="Delete") { e.preventDefault(); deleteLayer(selectedId!); return }
+
+      if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) e.preventDefault()
+      const step = e.shiftKey ? 20 : 3
+
+      if (e.key === "ArrowLeft")  { (n as any).x((n as any).x()-step) }
+      if (e.key === "ArrowRight") { (n as any).x((n as any).x()+step) }
+      if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
+      if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
+      n.getLayer()?.batchDraw()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [selectedId, tool])
+
+  // ===== strokes-группа (Brush) =====
+  const nextTopZ = () => (currentArt().children?.length ?? 0)
+
+  const createStrokeGroup = (): AnyLayer => {
+    const g = new Konva.Group({ x: 0, y: 0 })
+    ;(g as any)._isStrokes = true
+    g.id(uid())
+    const id = g.id()
+    const meta = baseMeta(`strokes ${seqs.strokes}`)
+    currentArt().add(g)
+    g.zIndex(nextTopZ())
+    const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
+    setLayers(p => [...p, newLay])
+    setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
+    currentStrokeId.current[side] = id
+    return newLay
   }
 
+  // ===== erase-группа (как Brush, но режет всё ниже в artGroup) =====
+  const ensureArtCached = (s: Side) => {
+    const g = artGroup(s)
+    if (!g.isCached()) g.cache()  // cache ограничит «вырезание» рамками арт-группы
+  }
+  const createEraseGroup = (): AnyLayer => {
+    ensureArtCached(side)
+    const g = new Konva.Group({ x: 0, y: 0, globalCompositeOperation: "destination-out" })
+    ;(g as any)._isErase = true
+    g.id(uid())
+    const id = g.id()
+    const meta = baseMeta(`erase ${seqs.erase}`)
+    currentArt().add(g)
+    g.zIndex(nextTopZ())
+    const newLay: AnyLayer = { id, side, node: g, meta, type: "erase" }
+    setLayers(p => [...p, newLay])
+    setSeqs(s => ({ ...s, erase: s.erase + 1 }))
+    currentEraseId.current[side] = id
+    return newLay
+  }
+
+  useEffect(() => {
+    if (tool === "brush" && lastToolRef.current !== "brush") {
+      createStrokeGroup()
+      trRef.current?.nodes([]); uiLayerRef.current?.batchDraw()
+    }
+    if (tool === "erase" && lastToolRef.current !== "erase") {
+      createEraseGroup()
+      trRef.current?.nodes([]); uiLayerRef.current?.batchDraw()
+    }
+    lastToolRef.current = tool
+  }, [tool, side])
+
+  // утилита: шрифт сайта
+  const siteFont = () =>
+    (typeof window !== "undefined"
+      ? window.getComputedStyle(document.body).fontFamily
+      : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
+
+  // ===== Добавление: Image/Text/Shape =====
+  const attachCommonHandlers = (k: AnyNode, id: string) => {
+    ;(k as any).on("click tap", () => select(id))
+    if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
+  }
+
+  const onUploadImage = (file: File) => {
+    takeSnapshot()
+    const r = new FileReader()
+    r.onload = () => {
+      const img = new window.Image()
+      img.crossOrigin = "anonymous"
+      img.onload = () => {
+        const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
+        const w = img.width * ratio, h = img.height * ratio
+        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
+        ;(kimg as any).setAttr("src", r.result as string)
+        kimg.id(uid())
+        const id = kimg.id()
+        const meta = baseMeta(`image ${seqs.image}`)
+        currentArt().add(kimg)
+        attachCommonHandlers(kimg, id)
+        setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
+        setSeqs(s => ({ ...s, image: s.image + 1 }))
+        select(id)
+        canvasLayerRef.current?.batchDraw()
+        set({ tool: "move" })
+      }
+      img.src = r.result as string
+    }
+    r.readAsDataURL(file)
+  }
+
+  const onAddText = () => {
+    takeSnapshot()
+    const t = new Konva.Text({
+      text: "GMORKL",
+      x: BASE_W/2-300, y: BASE_H/2-60,
+      fontSize: 96,
+      fontFamily: siteFont(),
+      fontStyle: "bold",
+      fill: brushColor, width: 600, align: "center",
+      draggable: false,
+    })
+    t.id(uid())
+    const id = t.id()
+    const meta = baseMeta(`text ${seqs.text}`)
+    currentArt().add(t)
+    attachCommonHandlers(t, id)
+    setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
+    setSeqs(s => ({ ...s, text: s.text + 1 }))
+    select(id)
+    canvasLayerRef.current?.batchDraw()
+    set({ tool: "move" })
+  }
+
+  const onAddShape = (kind: ShapeKind) => {
+    takeSnapshot()
+    let n: AnyNode
+    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
+    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
+    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
+    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g }
+    else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
+    ;(n as any).id(uid())
+    const id = (n as any).id?.() ?? uid()
+    const meta = baseMeta(`shape ${seqs.shape}`)
+    currentArt().add(n as any)
+    attachCommonHandlers(n, id)
+    setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
+    setSeqs(s => ({ ...s, shape: s.shape + 1 }))
+    select(id)
+    canvasLayerRef.current?.batchDraw()
+    set({ tool: "move" })
+  }
+
+  // ===== Рисование: Brush / Erase =====
+  const startStroke = (x: number, y: number) => {
+    if (tool === "brush") {
+      takeSnapshot()
+      let gid = currentStrokeId.current[side]
+      if (!gid) gid = createStrokeGroup().id
+      const g = find(gid)!.node as Konva.Group
+      const line = new Konva.Line({
+        points: [x, y],
+        stroke: brushColor,
+        strokeWidth: brushSize,
+        lineCap: "round",
+        lineJoin: "round",
+        globalCompositeOperation: "source-over",
+      })
+      g.add(line)
+      setIsDrawing(true)
+    } else if (tool === "erase") {
+      takeSnapshot()
+      ensureArtCached(side)
+      let gid = currentEraseId.current[side]
+      if (!gid) gid = createEraseGroup().id
+      const g = find(gid)!.node as Konva.Group
+      const line = new Konva.Line({
+        points: [x, y],
+        stroke: "#000", // цвет не важен, используется destination-out группы
+        strokeWidth: brushSize,
+        lineCap: "round",
+        lineJoin: "round",
+      })
+      g.add(line)
+      setIsDrawing(true)
+    }
+  }
+
+  const appendStroke = (x: number, y: number) => {
+    if (!isDrawing) return
+    if (tool === "brush") {
+      const gid = currentStrokeId.current[side]
+      const g = gid ? (find(gid)?.node as Konva.Group) : null
+      const last = g?.getChildren().at(-1) as Konva.Line | undefined
+      if (!last) return
+      last.points(last.points().concat([x, y]))
+      canvasLayerRef.current?.batchDraw()
+    } else if (tool === "erase") {
+      const gid = currentEraseId.current[side]
+      const g = gid ? (find(gid)?.node as Konva.Group) : null
+      const last = g?.getChildren().at(-1) as Konva.Line | undefined
+      if (!last) return
+      last.points(last.points().concat([x, y]))
+      artGroup(side).clearCache(); artGroup(side).cache() // обновляем маску в рамках арт-группы
+      canvasLayerRef.current?.batchDraw()
+    }
+  }
+
+  const finishStroke = () => setIsDrawing(false)
+
+  // ===== Overlay-редактор текста =====
+  const startTextOverlayEdit = (t: Konva.Text) => {
+    const stage = stageRef.current!
+    const stBox = stage.container().getBoundingClientRect()
+    const abs = t.getAbsolutePosition()
+    const x = stBox.left + abs.x * scale
+    const y = stBox.top  + abs.y * scale
+
+    t.visible(false)
+    trRef.current?.nodes([])
+
+    const ta = document.createElement("textarea")
+    ta.value = t.text()
+    ta.style.position = "absolute"
+    ta.style.left = `${x}px`
+    ta.style.top = `${y}px`
+    ta.style.padding = "4px 6px"
+    ta.style.border = "1px solid #000"
+    ta.style.background = "#fff"
+    ta.style.color = String(t.fill())
+    ta.style.fontFamily = t.fontFamily()
+    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
+    ta.style.fontSize = `${t.fontSize() * scale}px`
+    ta.style.lineHeight = String(t.lineHeight())
+    ta.style.transformOrigin = "left top"
+    ta.style.zIndex = "9999"
+    ta.style.minWidth = `${Math.max(160, t.width() * scale || 0)}px`
+    ta.style.outline = "none"
+    ta.style.resize = "none"
+    ta.style.boxShadow = "0 2px 8px rgba(0,0,0,.12)"
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+
+    const autoGrow = () => {
+      ta.style.height = "auto"
+      ta.style.height = Math.min(ta.scrollHeight, (parseFloat(ta.style.fontSize) || 16) * 3) + "px"
+    }
+    autoGrow()
+
+    const commit = (apply: boolean) => {
+      if (apply) t.text(ta.value)
+      ta.remove()
+      t.visible(true)
+      canvasLayerRef.current?.batchDraw()
+      attachTransformer()
+    }
+
+    ta.addEventListener("input", autoGrow)
+    ta.addEventListener("keydown", (ev) => {
+      ev.stopPropagation()
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
+      if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
+    })
+    ta.addEventListener("blur", () => commit(true))
+  }
+
+  // ===== Жесты =====
+  type G = {
+    active: boolean
+    two: boolean
+    startDist: number
+    startAngle: number
+    startScaleX: number
+    startScaleY: number
+    startRot: number
+    startPos: { x: number, y: number }
+    centerCanvas: { x: number, y: number }
+    nodeId: string | null
+    lastPointer?: { x: number, y: number }
+  }
+  const gestureRef = useRef<G>({ active:false, two:false, startDist:0, startAngle:0, startScaleX:1, startScaleY:1, startRot:0, startPos:{x:0,y:0}, centerCanvas:{x:0,y:0}, nodeId:null })
+
+  const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+  const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
+
+  const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
+    const tr = node.getAbsoluteTransform().copy()
+    const inv = tr.invert()
+    const local = inv.point(stagePoint)
+
+    node.scaleX(newScale)
+    node.scaleY(newScale)
+    node.rotation(newRotation)
+
+    const tr2 = node.getAbsoluteTransform().copy()
+    const p2 = tr2.point(local)
+    const dx = stagePoint.x - p2.x
+    const dy = stagePoint.y - p2.y
+    node.x((node as any).x?.() + dx)
+    node.y((node as any).y?.() + dy)
+  }
+
+  const isBgTarget = (t: Konva.Node | null) =>
+    !!t && (t === frontBgRef.current || t === backBgRef.current)
+
+  const isTransformerChild = (t: Konva.Node | null) => {
+    let p: Konva.Node | null | undefined = t
+    const tr = trRef.current as unknown as Konva.Node | null
+    while (p) {
+      if (tr && p === tr) return true
+      p = p.getParent?.()
+    }
+    return false
+  }
+
+  const onDown = (e: any) => {
+    e.evt?.preventDefault?.()
+    const touches: TouchList | undefined = e.evt.touches
+
+    if (isTransformerChild(e.target)) return
+
+    // рисование
+    if (tool === "brush" || tool === "erase") {
+      const sp = getStagePointer()
+      const p = toCanvas(sp)
+      if (tool === "brush" && !currentStrokeId.current[side]) createStrokeGroup()
+      if (tool === "erase" && !currentEraseId.current[side])  createEraseGroup()
+      startStroke(p.x, p.y)
+      return
+    }
+
+    // выбор/перетаскивание
+    if (!touches || touches.length === 1) {
+      const st = stageRef.current!
+      const tgt = e.target as Konva.Node
+
+      if (tgt === st || isBgTarget(tgt)) {
+        select(null)
+        trRef.current?.nodes([])
+        uiLayerRef.current?.batchDraw()
+        return
+      }
+
+      if (tgt && tgt !== st && tgt.getParent()) {
+        const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
+        if (found && found.side === side) select(found.id)
+      }
+      const lay = find(selectedId)
+      if (lay && !isStrokeGroup(lay.node) && !isEraseGroup(lay.node) && !lay.meta.locked) {
+        gestureRef.current = {
+          ...gestureRef.current,
+          active: true, two: false, nodeId: lay.id,
+          startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
+          lastPointer: toCanvas(getStagePointer()),
+          centerCanvas: toCanvas(getStagePointer()),
+          startDist: 0, startAngle: 0,
+          startScaleX: (lay.node as any).scaleX?.() ?? 1,
+          startScaleY: (lay.node as any).scaleY?.() ?? 1,
+          startRot: (lay.node as any).rotation?.() ?? 0
+        }
+      }
+      return
+    }
+
+    // 2 пальца — масштаб/поворот
+    if (touches && touches.length >= 2) {
+      const lay = find(selectedId)
+      if (!lay || isStrokeGroup(lay.node) || isEraseGroup(lay.node) || lay.meta.locked) return
+
+      const rect = stageRef.current!.container().getBoundingClientRect()
+      const t1 = touches[0], t2 = touches[1]
+      const p1 = { x: t1.clientX - rect.left, y: t1.clientY - rect.top }
+      const p2 = { x: t2.clientX - rect.left, y: t2.clientY - rect.top }
+      const cx = (p1.x + p2.x) / 2
+      const cy = (p1.y + p2.y) / 2
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
+      const dist = Math.hypot(dx, dy)
+      const ang  = Math.atan2(dy, dx)
+
+      gestureRef.current = {
+        active: true, two: true, nodeId: lay.id,
+        startDist: Math.max(dist, 0.0001),
+        startAngle: ang,
+        startScaleX: (lay.node as any).scaleX?.() ?? 1,
+        startScaleY: (lay.node as any).scaleY?.() ?? 1,
+        startRot: (lay.node as any).rotation?.() ?? 0,
+        startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
+        centerCanvas: toCanvas({ x: cx, y: cy }),
+        lastPointer: undefined
+      }
+      trRef.current?.nodes([])
+      uiLayerRef.current?.batchDraw()
+    }
+  }
+
+  const onMove = (e: any) => {
+    const touches: TouchList | undefined = e.evt.touches
+    if (isTransformingRef.current) return
+    if (isTransformerChild(e.target)) return
+
+    if (tool === "brush" || tool === "erase") {
+      if (!isDrawing) return
+      const p = toCanvas(getStagePointer())
+      appendStroke(p.x, p.y)
+      return
+    }
+
+    if (gestureRef.current.active && !gestureRef.current.two) {
+      const lay = find(gestureRef.current.nodeId); if (!lay) return
+      const p = toCanvas(getStagePointer())
+      const prev = gestureRef.current.lastPointer || p
+      const dx = p.x - prev.x
+      const dy = p.y - prev.y
+      ;(lay.node as any).x(((lay.node as any).x?.() ?? 0) + dx)
+      ;(lay.node as any).y(((lay.node as any).y?.() ?? 0) + dy)
+      gestureRef.current.lastPointer = p
+      canvasLayerRef.current?.batchDraw()
+      return
+    }
+
+    if (gestureRef.current.active && gestureRef.current.two && touches && touches.length >= 2) {
+      const lay = find(gestureRef.current.nodeId); if (!lay) return
+
+      const rect = stageRef.current!.container().getBoundingClientRect()
+      const t1 = touches[0], t2 = touches[1]
+      const p1 = { x: t1.clientX - rect.left, y: t1.clientY - rect.top }
+      const p2 = { x: t2.clientX - rect.left, y: t2.clientY - rect.top }
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
+      const dist = Math.hypot(dx, dy)
+      const ang  = Math.atan2(dy, dx)
+
+      const rawS = dist / gestureRef.current.startDist
+      const s = Math.min(Math.max(rawS, 0.1), 10)
+
+      const baseScale = gestureRef.current.startScaleX
+      const newScale = baseScale * s
+      const newRot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180 / Math.PI)
+
+      const c = gestureRef.current.centerCanvas
+      const sp = { x: c.x * scale, y: c.y * scale }
+      applyAround(lay.node, sp, newScale, newRot)
+      canvasLayerRef.current?.batchDraw()
+    }
+  }
+
+  const onUp = () => {
+    if (isDrawing) finishStroke()
+    gestureRef.current.active = false
+    gestureRef.current.two = false
+    isTransformingRef.current = false
+    requestAnimationFrame(attachTransformer)
+  }
+
+  // ===== Данные для панелей/toolbar =====
+  const layerItems: LayerItem[] = useMemo(() => {
+    return layers
+      .filter(l => l.side === side)
+      .sort((a,b) => a.node.zIndex() - b.node.zIndex())
+      .reverse()
+      .map(l => ({
+        id: l.id, name: l.meta.name || l.type, type: l.type as any,
+        visible: l.meta.visible, locked: l.meta.locked,
+        blend: l.meta.blend, opacity: l.meta.opacity,
+      }))
+  }, [layers, side])
+
+  const deleteLayer = (id: string) => {
+    takeSnapshot()
+    setLayers(p => {
+      const l = p.find(x => x.id===id)
+      l?.node.destroy()
+      return p.filter(x => x.id!==id)
+    })
+    if (selectedId === id) select(null)
+    canvasLayerRef.current?.batchDraw()
+  }
+
+  const duplicateLayer = (id: string) => {
+    takeSnapshot()
+    const src = layers.find(l => l.id===id); if (!src) return
+    const clone = src.node.clone() as AnyNode
+    ;(clone as any).x((src.node as any).x?.() + 20)
+    ;(clone as any).y((src.node as any).y?.() + 20)
+    ;(clone as any).id(uid())
+    currentArt().add(clone as any)
+    const newLay: AnyLayer = { id: (clone as any).id?.() ?? uid(), node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
+    attachCommonHandlers(clone, newLay.id)
+    setLayers(p => [...p, newLay]); select(newLay.id)
+    clone.zIndex(nextTopZ())
+    canvasLayerRef.current?.batchDraw()
+  }
+
+  const reorder = (srcId: string, destId: string, place: "before" | "after") => {
+    setLayers((prev) => {
+      const current = prev.filter(l => l.side === side)
+      const others  = prev.filter(l => l.side !== side)
+      const orderTopToBottom = current.slice().sort((a,b)=> a.node.zIndex() - b.node.zIndex()).reverse()
+
+      const srcIdx = orderTopToBottom.findIndex(l=>l.id===srcId)
+      const dstIdx = orderTopToBottom.findIndex(l=>l.id===destId)
+      if (srcIdx === -1 || dstIdx === -1) return prev
+      const src = orderTopToBottom.splice(srcIdx,1)[0]
+      const insertAt = place==="before" ? dstIdx : dstIdx+1
+      orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
+
+      const bottomToTop = [...orderTopToBottom].reverse()
+      bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
+      canvasLayerRef.current?.batchDraw()
+
+      const sortedCurrent = [...bottomToTop]
+      return [...others, ...sortedCurrent]
+    })
+    select(srcId)
+    requestAnimationFrame(attachTransformer)
+  }
+
+  const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
+    setLayers(p => p.map(l => {
+      if (l.id !== id) return l
+      const meta = { ...l.meta, ...patch }
+      applyMeta(l.node, meta)
+      if (patch.visible !== undefined) l.node.visible(meta.visible && l.side === side)
+      return { ...l, meta }
+    }))
+    canvasLayerRef.current?.batchDraw()
+  }
+
+  const onLayerSelect = (id: string) => {
+    select(id)
+    if (tool !== "move") set({ tool: "move" })
+  }
+
+  // ===== снимки свойств выбранного узла (для тулбара) =====
+  const sel = find(selectedId)
+  const selectedKind: LayerType | null = sel?.type ?? null
+  const selectedProps =
+    sel && isTextNode(sel.node) ? {
+      text: sel.node.text(),
+      fontSize: sel.node.fontSize(),
+      fontFamily: sel.node.fontFamily(),
+      fill: sel.node.fill() as string,
+    }
+    : sel && (sel.node as any).fill ? {
+      fill: (sel.node as any).fill() ?? "#000000",
+      stroke: (sel.node as any).stroke?.() ?? "#000000",
+      strokeWidth: (sel.node as any).strokeWidth?.() ?? 0,
+    }
+    : {}
+
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); canvasLayerRef.current?.batchDraw() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); canvasLayerRef.current?.batchDraw() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); canvasLayerRef.current?.batchDraw() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); canvasLayerRef.current?.batchDraw() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); canvasLayerRef.current?.batchDraw() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); canvasLayerRef.current?.batchDraw() }
+  const setSelectedColor      = (hex:string)  => {
+    if (!sel) return
+    if (sel.type === "text") (sel.node as Konva.Text).fill(hex)
+    else if ((sel.node as any).fill) (sel.node as any).fill(hex)
+    canvasLayerRef.current?.batchDraw()
+  }
+
+  // восстановление слоя после undo/clear
+  const rebuildLayersFromArt = (s: Side) => {
+    const g = artGroup(s)
+    const fresh: AnyLayer[] = []
+    g.getChildren().each((n) => {
+      let t: LayerType =
+        isEraseGroup(n as any)   ? "erase"   :
+        isStrokeGroup(n as any)  ? "strokes" :
+        n instanceof Konva.Text  ? "text"    :
+        n instanceof Konva.Image ? "image"   : "shape"
+      const id = (n as any).id?.() ?? uid()
+      const meta = baseMeta(t)
+      attachCommonHandlers(n as any, id)
+      fresh.push({ id, side: s, node: n as any, meta: { ...meta, name: `${t}` }, type: t })
+    })
+    setLayers(prev => {
+      const other = prev.filter(l => l.side !== s)
+      return [...other, ...fresh]
+    })
+  }
+
+  // ===== Скачивание =====
+  const downloadBoth = async (s: Side) => {
+    const st = stageRef.current; if (!st) return
+    const pr = Math.max(2, Math.round(1/scale))
+    const hidden: AnyNode[] = []
+
+    // скрываем другую сторону
+    layers.forEach(l => { if (l.side !== s && l.node.visible()) { l.node.visible(false); hidden.push(l.node) } })
+    uiLayerRef.current?.visible(false)
+
+    // 1) с мокапом
+    frontBgRef.current?.visible(s === "front")
+    backBgRef.current?.visible(s === "back")
+    artGroup("front").visible(s === "front")
+    artGroup("back").visible(s === "back")
+    st.draw()
+    const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
+
+    // 2) только арт (скрываем мокап выбранной стороны)
+    if (s === "front") frontBgRef.current?.visible(false)
+    else backBgRef.current?.visible(false)
+    st.draw()
+    const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
+
+    // вернуть
+    frontBgRef.current?.visible(side === "front")
+    backBgRef.current?.visible(side === "back")
+    artGroup("front").visible(side === "front")
+    artGroup("back").visible(side === "back")
+    hidden.forEach(n => n.visible(true))
+    uiLayerRef.current?.visible(true)
+    st.draw()
+
+    const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
+    await new Promise(r => setTimeout(r, 300))
+    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
+  }
+
+  // ===== Render =====
   return (
-    <>
-      {/* Шторка LAYERS (сверху, с учётом хедера) */}
-      {layersOpenM && (
-        <div
-          className="fixed inset-x-0 z-40 px-3 overflow-hidden"
-          style={{ top: mobileTopOffset, bottom: 144 }}
-        >
-          <div className={clx(wrap, "p-2 h-full flex flex-col")}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] tracking-widest">LAYERS</div>
-              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
-            </div>
-            <div className="space-y-2 overflow-auto">
-              {mobileLayers.items.map((l)=>(
-                <div
-                  key={l.id}
-                  className={clx(
-                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
-                    mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
-                  )}
-                >
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
-                  <div className="text-xs flex-1 truncate">{l.name}</div>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}><ArrowDown className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+    <div
+      className="fixed inset-0 bg-white"
+      style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}
+    >
+      {/* Desktop-панель слоёв — только на десктопе */}
+      {!isMobile && showLayers && (
+        <LayersPanel
+          items={layerItems}
+          selectId={selectedId}
+          onSelect={onLayerSelect}
+          onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
+          onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
+          onDelete={deleteLayer}
+          onDuplicate={duplicateLayer}
+          onReorder={reorder}
+          onChangeBlend={(id, b)=>updateMeta(id,{ blend: b as Blend })}
+          onChangeOpacity={(id, o)=>updateMeta(id,{ opacity: o })}
+        />
       )}
 
-      {/* Нижняя панель — 3 строки */}
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers + clear */}
-        <div className="px-2 py-1 flex items-center gap-1">
-          {mobileButton("move", <Move className={ico}/>)}
-          {mobileButton("brush", <Brush className={ico}/>)}
-          {mobileButton("erase", <Eraser className={ico}/>)}
-          {mobileButton("text", <TypeIcon className={ico}/>, onAddText)}
-          {mobileButton("image", <ImageIcon className={ico}/>)}
-          {mobileButton("shape", <Shapes className={ico}/>)}
-          <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
-            <Layers className={ico}/>
-          </button>
-          <div className="ml-auto flex gap-1">
-            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onClear}><ClearIcon className={ico}/></button>
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
-        </div>
+      {/* Сцена */}
+      <div className="w-full h-full flex items-start justify-center">
+        <div style={{ touchAction: "none" }}>
+          <Stage
+            width={viewW} height={viewH} scale={{ x: scale, y: scale }}
+            ref={stageRef}
+            onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+            onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+          >
+            {/* Фон + ART-группы */}
+            <Layer ref={canvasLayerRef} listening={true}>
+              {frontMock && (
+                <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening />
+              )}
+              {backMock && (
+                <KImage ref={backBgRef} image={backMock} visible={side==="back"} width={BASE_W} height={BASE_H} listening />
+              )}
+              <KGroup ref={frontArtRef} visible={side==="front"} />
+              <KGroup ref={backArtRef}  visible={side==="back"}  />
+            </Layer>
 
-        {/* row 2 — динамика по инструменту */}
-        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-        <SecondRow />
-
-        {/* row 3 — FRONT/BACK + downloads (парами) */}
-        <div className="px-2 py-1 grid grid-cols-2 gap-2">
-          <div className="flex gap-2">
-            <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <button className={clx("flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2")} onClick={onDownloadFront}><Download className={ico}/>DL</button>
-          </div>
-          <div className="flex gap-2">
-            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/>DL</button>
-          </div>
+            {/* UI-слой для рамки трансформера */}
+            <Layer ref={uiLayerRef}>
+              <Transformer
+                ref={trRef}
+                rotateEnabled
+                anchorSize={12}
+                borderStroke="black"
+                anchorStroke="black"
+                anchorFill="white"
+              />
+            </Layer>
+          </Stage>
         </div>
       </div>
-    </>
+
+      {/* Toolbar */}
+      <Toolbar
+        side={side} setSide={(s: Side)=>set({ side: s })}
+        tool={tool} setTool={(t: Tool)=>set({ tool: t })}
+        brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
+        brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
+        shapeKind={shapeKind} setShapeKind={()=>{}}
+        onUploadImage={onUploadImage}
+        onAddText={onAddText}
+        onAddShape={onAddShape}
+        onDownloadFront={()=>downloadBoth("front")}
+        onDownloadBack={()=>downloadBoth("back")}
+        onUndo={undo}
+        onRedo={redo}
+        onClear={clearArt}
+        toggleLayers={toggleLayers}
+        layersOpen={showLayers}
+        selectedKind={selectedKind}
+        selectedProps={selectedProps}
+        setSelectedFill={setSelectedFill}
+        setSelectedStroke={setSelectedStroke}
+        setSelectedStrokeW={setSelectedStrokeW}
+        setSelectedText={setSelectedText}
+        setSelectedFontSize={setSelectedFontSize}
+        setSelectedFontFamily={setSelectedFontFamily}
+        setSelectedColor={setSelectedColor}
+        mobileTopOffset={padTop}
+        mobileLayers={{
+          items: layerItems,
+          selectedId: selectedId ?? undefined,
+          onSelect: onLayerSelect,
+          onToggleVisible: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) },
+          onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
+          onDelete: deleteLayer,
+          onDuplicate: duplicateLayer,
+          onChangeBlend: (id, b)=>{}, // скрыто на мобилке
+          onChangeOpacity: (id, o)=>{}, // скрыто
+          onMoveUp: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>0) reorder(id, order[i-1], "before") },
+          onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
+        }}
+      />
+    </div>
   )
 }
