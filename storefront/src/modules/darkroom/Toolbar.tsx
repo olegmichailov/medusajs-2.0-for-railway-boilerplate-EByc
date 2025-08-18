@@ -23,6 +23,7 @@ type MobileLayersItem = {
 
 type MobileLayersProps = {
   items: MobileLayersItem[]
+  selectedId?: string
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -82,6 +83,7 @@ type ToolbarProps = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
 
+  mobileTopOffset: number
   mobileLayers: MobileLayersProps
 }
 
@@ -115,7 +117,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// чёрный «квадратный» ползунок на слайдере
+// чёрный «квадратный» ползунок
 const sliderStyle: React.CSSProperties = {
   accentColor: "#000",
   WebkitAppearance: "none",
@@ -139,7 +141,7 @@ export default function Toolbar(props: ToolbarProps) {
     selectedKind, selectedProps,
     setSelectedFill, setSelectedStroke, setSelectedStrokeW,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
-    mobileLayers,
+    mobileTopOffset, mobileLayers,
   } = props
 
   // =================== DESKTOP ===================
@@ -255,7 +257,7 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* палитра (только десктоп) */}
+            {/* палитра */}
             <div className="grid grid-cols-12 gap-1" {...inputStop}>
               {PALETTE.map((c)=>(
                 <button
@@ -339,11 +341,91 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
+  // контент второй строки (динамично по инструменту)
+  const SecondRow = () => {
+    if (tool === "text") {
+      return (
+        <div className="px-2 py-1 flex items-center gap-2">
+          <input
+            value={selectedProps.text ?? ""}
+            onChange={(e)=>setSelectedText(e.target.value)}
+            placeholder="Text"
+            className="flex-1 h-10 border border-black px-2 text-sm"
+            {...inputStop}
+          />
+          <div className="w-32 flex items-center gap-2">
+            <input
+              type="range" min={8} max={800} step={1}
+              value={selectedProps.fontSize ?? 96}
+              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
+              className="w-full square"
+              style={sliderStyle}
+              {...inputStop}
+            />
+          </div>
+        </div>
+      )
+    }
+
+    if (tool === "shape") {
+      return (
+        <div className="px-2 py-1 flex items-center gap-1">
+          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
+          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
+          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
+          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
+          <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
+          {/* мини палитра — 10 цветов */}
+          <div className="ml-2 grid grid-cols-10 gap-1" {...inputStop}>
+            {PALETTE.slice(0,10).map((c)=>(
+              <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}}
+                onClick={(e)=>{e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c)}}/>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    // Brush / Erase
+    return (
+      <div className="px-2 py-1 flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          <div className="text-[10px]">Color</div>
+          <input
+            type="color"
+            value={brushColor}
+            onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
+            className="w-8 h-8 border border-black p-0"
+            {...inputStop}
+            disabled={tool==="erase"}
+          />
+        </div>
+        <div className="flex-1">
+          <input
+            type="range"
+            min={1}
+            max={200}
+            step={1}
+            value={brushSize}
+            onChange={(e)=>setBrushSize(parseInt(e.target.value))}
+            className="w-full square"
+            style={sliderStyle}
+            {...inputStop}
+          />
+        </div>
+        <div className="text-xs w-10 text-right">{brushSize}</div>
+      </div>
+    )
+  }
+
   return (
     <>
-      {/* Шторка LAYERS (сверху, без клиппинга) */}
+      {/* Шторка LAYERS (сверху, с учётом хедера) */}
       {layersOpenM && (
-        <div className="fixed inset-x-0 top-0 bottom-36 z-40 px-3 overflow-hidden">
+        <div
+          className="fixed inset-x-0 z-40 px-3 overflow-hidden"
+          style={{ top: mobileTopOffset, bottom: 144 }}
+        >
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] tracking-widest">LAYERS</div>
@@ -351,7 +433,13 @@ export default function Toolbar(props: ToolbarProps) {
             </div>
             <div className="space-y-2 overflow-auto">
               {mobileLayers.items.map((l)=>(
-                <div key={l.id} className="flex items-center gap-2 border border-black px-2 py-1 bg-white">
+                <div
+                  key={l.id}
+                  className={clx(
+                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
+                    mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
+                  )}
+                >
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
@@ -388,39 +476,9 @@ export default function Toolbar(props: ToolbarProps) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — настройки (без палитры на мобилке): цвет + слайдер (чёрный квадрат) */}
-        <div className="px-2 py-1 flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <div className="text-[10px]">Color</div>
-            <input
-              type="color"
-              value={brushColor}
-              onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-              className="w-8 h-8 border border-black p-0"
-              {...inputStop}
-            />
-          </div>
-          <div className="flex-1">
-            <input
-              type="range"
-              min={1}
-              max={tool==="text" ? 800 : 200}
-              step={1}
-              value={tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
-              onChange={(e)=>{
-                const v = parseInt(e.target.value)
-                if (tool==="text") setSelectedFontSize(v)
-                else setBrushSize(v)
-              }}
-              className="w-full square"
-              style={sliderStyle}
-              {...inputStop}
-            />
-          </div>
-          <div className="text-xs w-10 text-right">
-            {tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
-          </div>
-        </div>
+        {/* row 2 — динамика по инструменту */}
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
+        <SecondRow />
 
         {/* row 3 — FRONT/BACK + downloads (парами) */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
