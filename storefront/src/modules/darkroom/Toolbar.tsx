@@ -6,7 +6,7 @@ import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
   Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, Layers,
-  RotateCcw, RotateCw, X as ClearIcon
+  X as ClearIcon, GripHorizontal
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -58,7 +58,7 @@ type ToolbarProps = {
   onDownloadFront: () => void
   onDownloadBack: () => void
 
-  onUndo: () => void
+  onUndo: () => void    // оставлены в типах для совместимости
   onRedo: () => void
   onClear: () => void
 
@@ -132,7 +132,7 @@ export default function Toolbar(props: ToolbarProps) {
     brushSize, setBrushSize,
     onUploadImage, onAddText, onAddShape,
     onDownloadFront, onDownloadBack,
-    onUndo, onRedo, onClear,
+    onClear,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedFill, setSelectedStroke, setSelectedStrokeW,
@@ -182,13 +182,12 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
-            <button className={btn} title="Undo" onClick={(e)=>{e.stopPropagation(); onUndo()}}><RotateCcw className={ico}/></button>
-            <button className={btn} title="Redo" onClick={(e)=>{e.stopPropagation(); onRedo()}}><RotateCw className={ico}/></button>
+            {/* только Clear + раскрытие + ручка перемещения */}
             <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
             <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
               {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
             </button>
-            <button className={btn} onMouseDown={onDragStart}><Move className={ico}/></button>
+            <button className={btn} onMouseDown={onDragStart} title="Drag panel"><GripHorizontal className={ico}/></button>
           </div>
         </div>
 
@@ -274,7 +273,7 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* SELECTED: показываем атрибуты только по выделению */}
+            {/* SELECTED */}
             {selectedKind === "text" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
@@ -305,14 +304,26 @@ export default function Toolbar(props: ToolbarProps) {
                 <div className="text-[10px]">Selected shape</div>
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Fill</div>
-                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-6 h-6 border border-black" {...inputStop}/>
+                  <input
+                    type="color"
+                    value={selectedProps.fill ?? "#000000"}
+                    onChange={(e)=>setSelectedFill(e.target.value)}
+                    className="w-6 h-6 border border-black"
+                    {...inputStop}
+                  />
                   <div className="text-[10px] w-12">Stroke</div>
-                  <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black" {...inputStop}/>
+                  <input
+                    type="color"
+                    value={selectedProps.stroke ?? "#000000"}
+                    onChange={(e)=>setSelectedStroke(e.target.value)}
+                    className="w-6 h-6 border border-black"
+                    {...inputStop}
+                  />
                   <div className="flex-1">
                     <input
                       type="range" min={0} max={64} step={1}
                       value={selectedProps.strokeWidth ?? 0}
-                      onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value))}
+                      onChange={(e)=>setSelectedStrokeW(parseInt(e.target.value))}
                       className="w-full square"
                       style={sliderStyle}
                       {...inputStop}
@@ -346,7 +357,7 @@ export default function Toolbar(props: ToolbarProps) {
   const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) =>
     <button
       className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
+      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape" as Tool) : setTool(t as Tool)}}
     >
       {icon}
     </button>
@@ -361,19 +372,20 @@ export default function Toolbar(props: ToolbarProps) {
 
   const SecondRow = () => {
     // если выделен shape — показываем его атрибуты
-    if (props.selectedKind === "shape") {
+    if (selectedKind === "shape") {
       return (
         <div className="px-2 py-1 flex items-center gap-2">
-          <input type="color" value={selectedProps.fill ?? "#000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
-          <input type="color" value={selectedProps.stroke ?? "#000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
+          <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>setSelectedFill(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
+          <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>setSelectedStroke(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
           <div className="flex-1">
-            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value))} className="w-full square" style={sliderStyle} {...inputStop}/>
+            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>setSelectedStrokeW(parseInt(e.target.value))} className="w-full square" style={sliderStyle} {...inputStop}/>
           </div>
         </div>
       )
     }
 
-    if (tool === "text" || props.selectedKind === "text") {
+    // текст — либо выбран, либо активный инструмент
+    if (tool === "text" || selectedKind === "text") {
       return (
         <div className="px-2 py-1 flex items-center gap-2">
           <input
@@ -405,7 +417,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input
             type="color"
             value={brushColor}
-            onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
+            onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
             className="w-8 h-8 border border-black p-0"
             {...inputStop}
             disabled={tool==="erase"}
@@ -467,7 +479,7 @@ export default function Toolbar(props: ToolbarProps) {
 
       {/* Нижняя панель — 3 строки */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers + undo/redo/clear */}
+        {/* row 1 — инструменты + layers + clear */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -479,8 +491,6 @@ export default function Toolbar(props: ToolbarProps) {
             <Layers className={ico}/>
           </button>
           <div className="ml-auto flex gap-1">
-            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onUndo}><RotateCcw className={ico}/></button>
-            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onRedo}><RotateCw className={ico}/></button>
             <button className="h-12 w-12 grid place-items-center border border-black" onClick={onClear}><ClearIcon className={ico}/></button>
           </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
@@ -494,7 +504,7 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
+            <button className={clx("flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2")} onClick={onDownloadFront}><Download className={ico}/>DL</button>
           </div>
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
