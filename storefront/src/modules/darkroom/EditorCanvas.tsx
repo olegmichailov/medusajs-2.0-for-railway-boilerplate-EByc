@@ -137,6 +137,7 @@ export default function EditorCanvas() {
 
   // снимок исходных размеров для плавного ресайза текста
   const textStart = useRef<{ width: number; right: number; fontSize: number } | null>(null)
+  const lastAnchorRef = useRef<string | null>(null) // <<— запоминаем активный анкор
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -164,7 +165,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ---- ТЕКСТ: боковые = ширина (якорь справа), углы = кегль ----
+      // ---- ТЕКСТ: боковые = ширина (без дрожи), углы = кегль ----
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -178,27 +179,28 @@ export default function EditorCanvas() {
           right:  t.x() + (t.width() || 0),
           fontSize: t.fontSize()
         }
+        lastAnchorRef.current = null
       }
 
+      // >>> ПРАВКА: боковые анкоры не трогаем width во время перетаскивания
       const onTransform = () => {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+        lastAnchorRef.current = active || null
         if (!textStart.current) onStartText()
 
         if (active === "middle-left" || active === "middle-right") {
-          // ШИРИНА (без дрожи), считаем от исходной ширины
-          const baseW = textStart.current!.width
+          // визуально пускай тянется scaleX; фиксируем правый край при левом анкоре
+          const startW = textStart.current!.width
           const sx = Math.max(0.01, t.scaleX())
-          const newW = Math.max(TEXT_MIN_W, Math.min(baseW * sx, TEXT_MAX_W))
           if (active === "middle-left") {
             const right = textStart.current!.right
-            t.width(newW)
-            t.x(right - newW)        // фиксируем правую кромку
-          } else {
-            t.width(newW)
+            const visualW = Math.max(TEXT_MIN_W, Math.min(startW * sx, TEXT_MAX_W))
+            // двигаем X так, чтобы правый край стоял на месте
+            t.x(right - visualW)
           }
-          t.scaleX(1)
+          // width пока не трогаем — коммит на transformend
         } else {
-          // КЕГЛЬ: берём delta-скейл от исходного fontSize
+          // углы: меняем кегль «живьём»
           const s = Math.max(t.scaleX(), t.scaleY())
           const baseFS = textStart.current?.fontSize ?? t.fontSize()
           const next = Math.max(TEXT_MIN_FS, Math.min(baseFS * s, TEXT_MAX_FS))
@@ -208,7 +210,29 @@ export default function EditorCanvas() {
         t.getLayer()?.batchDraw()
       }
 
-      const onEnd = () => { onTransform(); textStart.current = null }
+      const onEnd = () => {
+        // коммит итогов
+        const active = lastAnchorRef.current
+        if (active === "middle-left" || active === "middle-right") {
+          const startW = textStart.current?.width ?? (t.width() || 1)
+          const sx = Math.max(0.01, t.scaleX())
+          const newW = Math.max(TEXT_MIN_W, Math.min(startW * sx, TEXT_MAX_W))
+          if (active === "middle-left") {
+            const right = (textStart.current?.right ?? (t.x() + (t.width() || 0)))
+            t.width(newW)
+            t.x(right - newW)
+          } else {
+            t.width(newW)
+          }
+          t.scaleX(1)
+        } else {
+          // углы — кегль уже записали «вживую», просто убеждаемся, что scale сброшен
+          t.scaleX(1); t.scaleY(1)
+        }
+        textStart.current = null
+        lastAnchorRef.current = null
+        t.getLayer()?.batchDraw()
+      }
 
       n.on("transformstart.textfix", onStartText)
       n.on("transform.textfix", onTransform)
