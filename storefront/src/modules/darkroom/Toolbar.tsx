@@ -5,7 +5,8 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, Layers, X as ClearIcon
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, ArrowUp, ArrowDown, Layers,
+  RotateCcw, RotateCw, X as ClearIcon
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -13,7 +14,7 @@ import { isMobile } from "react-device-detect"
 type MobileLayersItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes" | "erase"
+  type: "image" | "shape" | "text" | "strokes"
   visible: boolean
   locked: boolean
   blend: string
@@ -57,12 +58,14 @@ type ToolbarProps = {
   onDownloadFront: () => void
   onDownloadBack: () => void
 
+  onUndo: () => void
+  onRedo: () => void
   onClear: () => void
 
   toggleLayers: () => void
   layersOpen: boolean
 
-  selectedKind: "image" | "shape" | "text" | "strokes" | "erase" | null
+  selectedKind: "image" | "shape" | "text" | "strokes" | null
   selectedProps: {
     text?: string
     fontSize?: number
@@ -84,34 +87,13 @@ type ToolbarProps = {
   mobileLayers: MobileLayersProps
 }
 
-// палитра для браша на десктопе (как было)
-const PALETTE = [
-  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
-  "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
-  "#66FF00","#00FFA8","#00E5FF","#00A3FF","#0066FF","#2B00FF",
-  "#8A00FF","#FF00D4","#FF006A","#FF2F2F","#FF7A00","#FFAC00",
-  "#FFDF00","#B5E300","#61D836","#22C55E","#10B981","#06B6D4",
-  "#0EA5E9","#2563EB","#7C3AED","#C026D3","#E11D48","#8B5CF6",
-  "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
-  "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
-]
-
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
 const btn  =
   "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none " +
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
+
 const activeBtn = "bg-black text-white"
-
-// Чёрные треки и квадратные ползунки
-const sliderCss = `
-input[type="range"].square{height:16px;background:transparent}
-input[type="range"].square::-webkit-slider-runnable-track{height:2px;background:#000}
-input[type="range"].square::-moz-range-track{height:2px;background:#000}
-input[type="range"].square::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;background:#000;margin-top:-6px}
-input[type="range"].square::-moz-range-thumb{width:14px;height:14px;background:#000;border:none}
-`
-
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -124,6 +106,28 @@ const inputStop = {
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
 
+const PALETTE = [
+  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
+  "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
+  "#66FF00","#00FFA8","#00E5FF","#00A3FF","#0066FF","#2B00FF",
+  "#8A00FF","#FF00D4","#FF006A","#FF2F2F","#FF7A00","#FFAC00",
+  "#FFDF00","#B5E300","#61D836","#22C55E","#10B981","#06B6D4",
+  "#0EA5E9","#2563EB","#7C3AED","#C026D3","#E11D48","#8B5CF6",
+  "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
+  "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
+]
+
+// чёрный «квадратный» ползунок
+const sliderStyle: React.CSSProperties = {
+  accentColor: "#000",
+  WebkitAppearance: "none",
+  appearance: "none",
+}
+const sliderCss = `
+input[type="range"].square::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: #000; }
+input[type="range"].square::-moz-range-thumb { width: 14px; height: 14px; background: #000; border: none; }
+`
+
 export default function Toolbar(props: ToolbarProps) {
   const {
     side, setSide,
@@ -132,10 +136,11 @@ export default function Toolbar(props: ToolbarProps) {
     brushSize, setBrushSize,
     onUploadImage, onAddText, onAddShape,
     onDownloadFront, onDownloadBack,
-    onClear,
+    onUndo, onRedo, onClear,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
-    setSelectedText, setSelectedFontSize, setSelectedColor,
+    setSelectedFill, setSelectedStroke, setSelectedStrokeW,
+    setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
     mobileTopOffset, mobileLayers,
   } = props
 
@@ -169,127 +174,9 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // локальный текст
+    // Текст: локальный state для input
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
-
-    const ToolsRow = () => (
-      <div className="flex">
-        {[
-          {t:"move",   icon:<Move className={ico}/>},
-          {t:"brush",  icon:<Brush className={ico}/>},
-          {t:"erase",  icon:<Eraser className={ico}/>},
-          {t:"text",   icon:<TypeIcon className={ico}/>},
-          {t:"image",  icon:<Image as any className={ico}/>},
-          {t:"shape",  icon:<Shapes className={ico}/>},
-        ].map((b)=>(
-          <button
-            key={b.t}
-            className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
-            onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") setTool("shape" as Tool); else setTool(b.t as Tool) }}
-            title={b.t}
-          >{b.icon}</button>
-        ))}
-        <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
-          <Layers className={ico}/>
-        </button>
-        <button className={clx(btn, "bg-white ml-2")} title="Clear (current side)" onClick={(e)=>{e.stopPropagation(); onClear()}}>
-          <ClearIcon className={ico}/>
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
-      </div>
-    )
-
-    const Settings = () => {
-      if (tool === "text" || selectedKind === "text") {
-        return (
-          <>
-            <div className="text-[10px]">Text</div>
-            <textarea
-              value={textValue}
-              onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-              className="w-full h-16 border border-black p-1 text-sm"
-              placeholder="Enter text"
-              {...inputStop}
-            />
-            <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-            <div className="flex items-center gap-2">
-              <div className="text-[10px] w-12">Font size</div>
-              <input
-                type="range" min={8} max={800} step={1}
-                value={selectedProps.fontSize ?? 96}
-                onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-                className="flex-1 square"
-                {...inputStop}
-              />
-              <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
-            </div>
-          </>
-        )
-      }
-
-      if (tool === "shape") {
-        return (
-          <>
-            <div className="text-[10px] mb-1">Shapes</div>
-            <div className="flex">
-              <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
-              <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
-              <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
-              <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
-              <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
-            </div>
-            <div className="flex items-center gap-3 pt-2">
-              <div className="text-[10px] w-8">Color</div>
-              <input
-                type="color"
-                value={brushColor}
-                onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-                className="w-6 h-6 border border-black p-0"
-                {...inputStop}
-              />
-            </div>
-          </>
-        )
-      }
-
-      // Brush/Erase
-      return (
-        <>
-          <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-          <div className="flex items-center gap-3">
-            {tool !== "erase" && (
-              <>
-                <div className="text-[10px] w-8">Color</div>
-                <div className="w-6 h-6 border border-black cursor-pointer" style={{ background: brushColor }} />
-              </>
-            )}
-            <div className="flex-1">
-              <input
-                type="range" min={1} max={200} step={1} value={brushSize}
-                onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-                className="w-full square"
-                {...inputStop}
-              />
-            </div>
-            <div className="text-xs w-10 text-right">{brushSize}</div>
-          </div>
-
-          {tool !== "erase" && (
-            <div className="grid grid-cols-12 gap-1 mt-1" {...inputStop}>
-              {PALETTE.map((c)=>(
-                <button
-                  key={c}
-                  className={"h-5 w-5 border " + (brushColor===c ? "border-black" : "border-black/40")}
-                  style={{ background: c }}
-                  onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c) }}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )
-    }
 
     return (
       <div
@@ -302,18 +189,123 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
+            {/* Undo / Redo / Clear */}
+            <button className={btn} title="Undo" onClick={(e)=>{e.stopPropagation(); onUndo()}}><RotateCcw className={ico}/></button>
+            <button className={btn} title="Redo" onClick={(e)=>{e.stopPropagation(); onRedo()}}><RotateCw className={ico}/></button>
+            <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
             <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
               {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
             </button>
-            <button className={btn} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear"><ClearIcon className={ico}/></button>
-            <button className={btn} onMouseDown={(e)=>{e.stopPropagation(); onDragStart(e)}}><Move className={ico}/></button>
+            <button className={btn} onMouseDown={onDragStart}><Move className={ico}/></button>
           </div>
         </div>
 
         {open && (
           <div className="p-2 space-y-2">
-            <ToolsRow />
-            <Settings />
+            {/* row 1 — инструменты + layers */}
+            <div className="flex">
+              {[
+                {t:"move",   icon:<Move className={ico}/>},
+                {t:"brush",  icon:<Brush className={ico}/>},
+                {t:"erase",  icon:<Eraser className={ico}/>},
+                {t:"text",   icon:<TypeIcon className={ico}/>},
+                {t:"image",  icon:<ImageIcon className={ico}/>},
+                {t:"shape",  icon:<Shapes className={ico}/>},
+              ].map((b)=>(
+                <button
+                  key={b.t}
+                  className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
+                  onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") setTool("shape" as Tool); else setTool(b.t as Tool) }}
+                  title={b.t}
+                >{b.icon}</button>
+              ))}
+              <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
+                <Layers className={ico}/>
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
+            </div>
+
+            {/* row 2 — Color + Size */}
+            <div className="flex items-center gap-3">
+              <div className="text-[10px] w-8">Color</div>
+              <input
+                type="color"
+                value={brushColor}
+                onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
+                className="w-6 h-6 border border-black p-0"
+                {...inputStop}
+              />
+              <div className="flex-1">
+                <input
+                  type="range"
+                  min={1}
+                  max={tool==="text" ? 800 : 200}
+                  step={1}
+                  value={tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
+                  onChange={(e)=>{
+                    const v = parseInt(e.target.value)
+                    if (tool==="text") setSelectedFontSize(v)
+                    else setBrushSize(v)
+                  }}
+                  className="w-full square"
+                  style={sliderStyle}
+                  {...inputStop}
+                />
+              </div>
+              <div className="text-xs w-10 text-right">
+                {tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
+              </div>
+            </div>
+
+            {/* палитра */}
+            <div className="grid grid-cols-12 gap-1" {...inputStop}>
+              {PALETTE.map((c)=>(
+                <button
+                  key={c}
+                  className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
+                  style={{ background: c }}
+                  onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c) }}
+                />
+              ))}
+            </div>
+
+            {/* shapes */}
+            <div className="pt-1">
+              <div className="text-[10px] mb-1">Shapes</div>
+              <div className="flex">
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
+              </div>
+            </div>
+
+            {/* text props */}
+            <div className="pt-1 space-y-2">
+              <div className="text-[10px]">Text</div>
+              <textarea
+                value={textValue}
+                onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+                className="w-full h-16 border border-black p-1 text-sm"
+                placeholder="Enter text"
+                {...inputStop}
+              />
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] w-12">Font size</div>
+                <input
+                  type="range" min={8} max={800} step={1}
+                  value={selectedProps.fontSize ?? 96}
+                  onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
+                  className="flex-1 square"
+                  style={sliderStyle}
+                  {...inputStop}
+                />
+                <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
+              </div>
+            </div>
+
+            {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
               <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
               <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
@@ -349,8 +341,9 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
+  // контент второй строки (динамично по инструменту)
   const SecondRow = () => {
-    if (tool === "text" || selectedKind === "text") {
+    if (tool === "text") {
       return (
         <div className="px-2 py-1 flex items-center gap-2">
           <input
@@ -360,13 +353,13 @@ export default function Toolbar(props: ToolbarProps) {
             className="flex-1 h-10 border border-black px-2 text-sm"
             {...inputStop}
           />
-          <div className="w-36 flex items-center gap-2">
-            <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
+          <div className="w-32 flex items-center gap-2">
             <input
               type="range" min={8} max={800} step={1}
               value={selectedProps.fontSize ?? 96}
               onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
               className="w-full square"
+              style={sliderStyle}
               {...inputStop}
             />
           </div>
@@ -376,21 +369,18 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "shape") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2">
+        <div className="px-2 py-1 flex items-center gap-1">
           <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
           <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
           <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
           <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
           <button className="h-10 w-10 grid place-items-center border border-black" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-          <div className="ml-auto flex items-center gap-2">
-            <div className="text-[10px]">Color</div>
-            <input
-              type="color"
-              value={brushColor}
-              onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-              className="w-8 h-8 border border-black p-0"
-              {...inputStop}
-            />
+          {/* мини палитра — 10 цветов */}
+          <div className="ml-2 grid grid-cols-10 gap-1" {...inputStop}>
+            {PALETTE.slice(0,10).map((c)=>(
+              <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}}
+                onClick={(e)=>{e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c)}}/>
+            ))}
           </div>
         </div>
       )
@@ -399,25 +389,27 @@ export default function Toolbar(props: ToolbarProps) {
     // Brush / Erase
     return (
       <div className="px-2 py-1 flex items-center gap-2">
-        {tool !== "erase" && (
-          <div className="flex items-center gap-2">
-            <div className="text-[10px]">Color</div>
-            <input
-              type="color"
-              value={brushColor}
-              onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-              className="w-8 h-8 border border-black p-0"
-              {...inputStop}
-            />
-          </div>
-        )}
-        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
+        <div className="flex items-center gap-2">
+          <div className="text-[10px]">Color</div>
+          <input
+            type="color"
+            value={brushColor}
+            onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
+            className="w-8 h-8 border border-black p-0"
+            {...inputStop}
+            disabled={tool==="erase"}
+          />
+        </div>
         <div className="flex-1">
           <input
-            type="range" min={1} max={200} step={1}
+            type="range"
+            min={1}
+            max={200}
+            step={1}
             value={brushSize}
             onChange={(e)=>setBrushSize(parseInt(e.target.value))}
             className="w-full square"
+            style={sliderStyle}
             {...inputStop}
           />
         </div>
@@ -428,39 +420,44 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* Шторка LAYERS: не под хедер, видна кнопка Close, часть макета остаётся видимой */}
-      <div
-        className={"fixed inset-x-0 z-40 px-3 transition-transform duration-200 " + (layersOpenM ? "translate-y-0" : "-translate-y-full")}
-        style={{ top: mobileTopOffset + 8, height: `calc(60vh - ${mobileTopOffset}px)` }}
-      >
-        <div className={clx(wrap, "p-2 h-full flex flex-col")}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] tracking-widest">LAYERS</div>
-            <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
-          </div>
-          <div className="space-y-2 overflow-auto">
-            {mobileLayers.items.map((l)=>(
-              <div
-                key={l.id}
-                className={"flex items-center gap-2 border border-black px-2 py-1 bg-white " + (mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : "")}
-              >
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
-                <div className="text-xs flex-1 truncate">{l.name}</div>
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}><ArrowDown className="w-3 h-3"/></button>
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
-                <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
-                <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
-              </div>
-            ))}
+      {/* Шторка LAYERS (сверху, с учётом хедера) */}
+      {layersOpenM && (
+        <div
+          className="fixed inset-x-0 z-40 px-3 overflow-hidden"
+          style={{ top: mobileTopOffset, bottom: 144 }}
+        >
+          <div className={clx(wrap, "p-2 h-full flex flex-col")}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] tracking-widest">LAYERS</div>
+              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
+            </div>
+            <div className="space-y-2 overflow-auto">
+              {mobileLayers.items.map((l)=>(
+                <div
+                  key={l.id}
+                  className={clx(
+                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
+                    mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
+                  )}
+                >
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
+                  <div className="text-xs flex-1 truncate">{l.name}</div>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}><ArrowDown className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Нижняя панель — 3 строки */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers + clear */}
+        {/* row 1 — инструменты + layers + undo/redo/clear */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -472,20 +469,22 @@ export default function Toolbar(props: ToolbarProps) {
             <Layers className={ico}/>
           </button>
           <div className="ml-auto flex gap-1">
+            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onUndo}><RotateCcw className={ico}/></button>
+            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onRedo}><RotateCw className={ico}/></button>
             <button className="h-12 w-12 grid place-items-center border border-black" onClick={onClear}><ClearIcon className={ico}/></button>
           </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — динамические настройки */}
+        {/* row 2 — динамика по инструменту */}
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <SecondRow />
 
-        {/* row 3 — FRONT/BACK + downloads */}
+        {/* row 3 — FRONT/BACK + downloads (парами) */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
+            <button className={clx("flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2")} onClick={onDownloadFront}><Download className={ico}/>DL</button>
           </div>
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
