@@ -1,4 +1,3 @@
-// storefront/src/modules/darkroom/EditorCanvas.tsx
 "use client"
 
 import React, {
@@ -8,7 +7,13 @@ import React, {
   useRef,
   useState,
 } from "react"
-import { Stage, Layer, Image as KImage, Transformer, Group } from "react-konva"
+import {
+  Stage,
+  Layer,
+  Image as KImage,
+  Transformer,
+  Group,
+} from "react-konva"
 import Konva from "konva"
 import useImage from "use-image"
 import Toolbar from "./Toolbar"
@@ -16,13 +21,13 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ——— Макет
+// ===== БАЗА МАКЕТА =====
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC = "/mockups/MOCAP_BACK.png"
 
-// ——— Текст клампы
+// ===== КЛАМПЫ ТЕКСТА =====
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MIN_W = 60
@@ -46,7 +51,13 @@ type AnyNode =
   | Konva.Rect
   | Konva.Circle
   | Konva.RegularPolygon
-type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
+type AnyLayer = {
+  id: string
+  side: Side
+  node: AnyNode
+  meta: BaseMeta
+  type: LayerType
+}
 
 const isStrokeGroup = (n: AnyNode) =>
   n instanceof Konva.Group && (n as any)._isStrokes === true
@@ -66,18 +77,19 @@ export default function EditorCanvas() {
     toggleLayers,
   } = useDarkroom()
 
-  // точные хиты во время драга (мобилки)
+  // точные хиты во время драга (мобилка)
   useEffect(() => {
     ;(Konva as any).hitOnDragEnabled = true
   }, [])
 
+  // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock] = useImage(BACK_SRC, "anonymous")
 
   // refs
   const stageRef = useRef<Konva.Stage>(null)
   const canvasLayerRef = useRef<Konva.Layer>(null)
-  const artGroupRef = useRef<Konva.Group>(null) // сюда кладём весь арт
+  const artGroupRef = useRef<Konva.Group>(null) // только пользовательский арт
   const uiLayerRef = useRef<Konva.Layer>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const frontBgRef = useRef<Konva.Image>(null)
@@ -86,12 +98,8 @@ export default function EditorCanvas() {
   // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
-  const [seqs, setSeqs] = useState({
-    image: 1,
-    shape: 1,
-    text: 1,
-    strokes: 1,
-  })
+  const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1 })
+  const [toolbarH, setToolbarH] = useState(120)
 
   // stroke-группа на сторону
   const strokeGroupId = useRef<Record<Side, string | null>>({
@@ -131,17 +139,14 @@ export default function EditorCanvas() {
     set({ tool: "brush" as Tool })
   }, [set])
 
-  // верстка/масштаб
+  // верстка/масштаб + фикс ориентации
   const [headerH, setHeaderH] = useState(64)
-  const [toolbarH, setToolbarH] = useState(120)
   const [viewportTick, setViewportTick] = useState(0)
-
   useLayoutEffect(() => {
     const el =
       (document.querySelector("header") ||
         document.getElementById("site-header")) as HTMLElement | null
     setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 64))
-
     const onRes = () => setViewportTick((n) => n + 1)
     window.addEventListener("resize", onRes)
     window.addEventListener("orientationchange", onRes)
@@ -159,16 +164,10 @@ export default function EditorCanvas() {
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
-    return {
-      viewW: BASE_W * s,
-      viewH: BASE_H * s,
-      scale: s,
-      padTop,
-      padBottom,
-    }
-  }, [showLayers, headerH, toolbarH, viewportTick])
+    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
+  }, [headerH, toolbarH, viewportTick])
 
-  // блок скролла
+  // запрет скролла
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -203,7 +202,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ——— Transformer + фикс текста
+  // ===== Transformer + фикс текста =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard = useRef<(() => void) | null>(null)
   const textStartRef = useRef<{ w: number; x: number; fs: number } | null>(
@@ -273,9 +272,7 @@ export default function EditorCanvas() {
             x: t.x(),
             fs: t.fontSize(),
           } as any)
-        const active = (tr as any).getActiveAnchor?.() as
-          | string
-          | undefined
+        const active = (tr as any).getActiveAnchor?.() as string | undefined
 
         if (active === "middle-left" || active === "middle-right") {
           const sx = Math.max(0.01, t.scaleX())
@@ -344,7 +341,9 @@ export default function EditorCanvas() {
       const ae = document.activeElement as HTMLElement | null
       if (
         ae &&
-        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)
+        (ae.tagName === "INPUT" ||
+          ae.tagName === "TEXTAREA" ||
+          ae.isContentEditable)
       )
         return
 
@@ -387,7 +386,7 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  // stroke-группа
+  // stroke-группа (по стороне)
   const ensureStrokeGroup = (): Konva.Group => {
     const gId = strokeGroupId.current[side]
     if (gId) {
@@ -407,12 +406,13 @@ export default function EditorCanvas() {
     return g
   }
 
+  // сайт-шрифт
   const siteFont = () =>
     typeof window !== "undefined"
       ? window.getComputedStyle(document.body).fontFamily
       : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
 
-  // ——— Добавления
+  // ===== Добавления =====
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -424,8 +424,8 @@ export default function EditorCanvas() {
           (BASE_H * 0.9) / img.height,
           1
         )
-        const w = img.width * ratio,
-          h = img.height * ratio
+        const w = img.width * ratio
+        const h = img.height * ratio
         const kimg = new Konva.Image({
           image: img,
           x: BASE_W / 2 - w / 2,
@@ -504,7 +504,12 @@ export default function EditorCanvas() {
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")
-      n = new Konva.Circle({ x: BASE_W / 2, y: BASE_H / 2, radius: 160, fill: brushColor })
+      n = new Konva.Circle({
+        x: BASE_W / 2,
+        y: BASE_H / 2,
+        radius: 160,
+        fill: brushColor,
+      })
     else if (kind === "square")
       n = new Konva.Rect({
         x: BASE_W / 2 - 160,
@@ -558,7 +563,7 @@ export default function EditorCanvas() {
     })
   }
 
-  // ——— Кисть/Erase
+  // ===== Кисть / Erase =====
   let activeLine: Konva.Line | null = null
 
   const startStroke = (x: number, y: number) => {
@@ -608,14 +613,13 @@ export default function EditorCanvas() {
         canvasLayerRef.current?.batchDraw()
       },
       redo: () => {
-        // добавим обратно в арт
         artGroupRef.current?.add(line)
         canvasLayerRef.current?.batchDraw()
       },
     })
   }
 
-  // ——— Clear (только арт)
+  // ===== Clear (только арт) =====
   const clearArt = () => {
     const g = artGroupRef.current
     if (!g) return
@@ -623,7 +627,7 @@ export default function EditorCanvas() {
     if (!removed.length) return
     removed.forEach((c) => c.remove())
     canvasLayerRef.current?.batchDraw()
-    strokeGroupId.current[side] = null // чтобы новая кисть создала свежую группу
+    strokeGroupId.current[side] = null
     pushAction({
       undo: () => {
         removed.forEach((c) => g.add(c))
@@ -636,7 +640,7 @@ export default function EditorCanvas() {
     })
   }
 
-  // ——— Overlay-редактор текста
+  // ===== Overlay-редактор текста =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
@@ -702,7 +706,7 @@ export default function EditorCanvas() {
     ta.addEventListener("blur", () => commit(true))
   }
 
-  // ——— Жесты (центр = между пальцами; чувствительность приглушена)
+  // ===== Жесты (центр = между пальцами) =====
   type G = {
     active: boolean
     two: boolean
@@ -895,7 +899,7 @@ export default function EditorCanvas() {
     requestAnimationFrame(attachTransformer)
   }
 
-  // ——— Данные для панелей
+  // ===== Слои (панель справа на десктопе) =====
   const layerItems: LayerItem[] = useMemo(() => {
     return layers
       .filter((l) => l.side === side)
@@ -967,7 +971,11 @@ export default function EditorCanvas() {
     })
   }
 
-  const reorder = (srcId: string, destId: string, place: "before" | "after") => {
+  const reorder = (
+    srcId: string,
+    destId: string,
+    place: "before" | "after"
+  ) => {
     setLayers((prev) => {
       const current = prev.filter((l) => l.side === side)
       const others = prev.filter((l) => l.side !== side)
@@ -1018,7 +1026,7 @@ export default function EditorCanvas() {
     if (tool !== "move") set({ tool: "move" })
   }
 
-  // ——— Свойства выбранного узла для Toolbar
+  // ===== Выбранный узел для Toolbar =====
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -1080,7 +1088,7 @@ export default function EditorCanvas() {
     canvasLayerRef.current?.batchDraw()
   }
 
-  // ——— Скачивание
+  // ===== Скачивание =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current
     if (!st) return
@@ -1101,13 +1109,12 @@ export default function EditorCanvas() {
     st.draw()
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
-    // <<< FIX: нужны скобки у if/else >>>
+    // ⬇️ фикс синтаксиса if/else
     if (s === "front") {
       frontBgRef.current?.visible(false)
     } else {
       backBgRef.current?.visible(false)
     }
-
     st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
@@ -1128,7 +1135,7 @@ export default function EditorCanvas() {
     a2.click()
   }
 
-  // ——— Render
+  // ===== Render =====
   return (
     <div
       className="fixed inset-0 bg-white"
@@ -1140,6 +1147,7 @@ export default function EditorCanvas() {
         userSelect: "none",
       }}
     >
+      {/* десктопные слои справа (как на твоём макете) */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -1197,7 +1205,7 @@ export default function EditorCanvas() {
                   listening
                 />
               )}
-              {/* <<< FIX: react-konva Group, а не Konva.Group >>> */}
+              {/* важно: именно <Group/>, не <Konva.Group/> */}
               <Group ref={artGroupRef as any} />
             </Layer>
 
@@ -1226,7 +1234,7 @@ export default function EditorCanvas() {
         brushSize={brushSize}
         setBrushSize={(n: number) => set({ brushSize: n })}
         shapeKind={shapeKind}
-        setShapeKind={() => {}}
+        setShapeKind={(k: ShapeKind) => set({ shapeKind: k })}
         onUploadImage={onUploadImage}
         onAddText={onAddText}
         onAddShape={onAddShape}
