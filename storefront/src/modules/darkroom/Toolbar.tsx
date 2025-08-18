@@ -84,13 +84,35 @@ type ToolbarProps = {
   mobileLayers: MobileLayersProps
 }
 
+// палитра — КАК БЫЛО на десктопе (для браша)
+const PALETTE = [
+  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
+  "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
+  "#66FF00","#00FFA8","#00E5FF","#00A3FF","#0066FF","#2B00FF",
+  "#8A00FF","#FF00D4","#FF006A","#FF2F2F","#FF7A00","#FFAC00",
+  "#FFDF00","#B5E300","#61D836","#22C55E","#10B981","#06B6D4",
+  "#0EA5E9","#2563EB","#7C3AED","#C026D3","#E11D48","#8B5CF6",
+  "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
+  "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
+]
+
+// общий стиль
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
 const btn  =
   "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none " +
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
-
 const activeBtn = "bg-black text-white"
+
+// чёрный трек + квадратный чёрный ползунок (и на мобилке, и на десктопе)
+const sliderCss = `
+input[type="range"].square{height:16px;background:transparent}
+input[type="range"].square::-webkit-slider-runnable-track{height:2px;background:#000}
+input[type="range"].square::-moz-range-track{height:2px;background:#000}
+input[type="range"].square::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;background:#000;margin-top:-6px}
+input[type="range"].square::-moz-range-thumb{width:14px;height:14px;background:#000;border:none}
+`
+
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -102,15 +124,6 @@ const inputStop = {
   onMouseMove:   (e: any) => e.stopPropagation(),
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
-
-// чёрный трек + квадратный чёрный ползунок
-const sliderCss = `
-input[type="range"].square{height:16px;background:transparent}
-input[type="range"].square::-webkit-slider-runnable-track{height:2px;background:#000}
-input[type="range"].square::-moz-range-track{height:2px;background:#000}
-input[type="range"].square::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;background:#000;margin-top:-6px}
-input[type="range"].square::-moz-range-thumb{width:14px;height:14px;background:#000;border:none}
-`
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -182,11 +195,14 @@ export default function Toolbar(props: ToolbarProps) {
         <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
           <Layers className={ico}/>
         </button>
+        <button className={clx(btn, "bg-white ml-2")} title="Clear (current side)" onClick={(e)=>{e.stopPropagation(); onClear()}}>
+          <ClearIcon className={ico}/>
+        </button>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
       </div>
     )
 
-    // Настройки показываем только для активного инструмента
+    // Настройки — как на твоём скрине: Brush = цвет+слайдер+палитра; Text; Shapes
     const Settings = () => {
       if (tool === "text" || selectedKind === "text") {
         return (
@@ -239,30 +255,32 @@ export default function Toolbar(props: ToolbarProps) {
         )
       }
 
-      // Brush / Erase
+      // Brush (цвет + размер + палитра)
       return (
         <>
           <div className="flex items-center gap-3">
-            {tool !== "erase" && (<div className="text-[10px] w-8">Color</div>)}
-            {tool !== "erase" && (
-              <input
-                type="color"
-                value={brushColor}
-                onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind) setSelectedColor(e.target.value) }}
-                className="w-6 h-6 border border-black p-0"
-                {...inputStop}
-              />
-            )}
+            <div className="text-[10px] w-8">Color</div>
+            <div className="w-6 h-6 border border-black cursor-pointer" style={{ background: brushColor }} />
             <div className="flex-1">
               <input
-                type="range" min={1} max={200} step={1}
-                value={brushSize}
+                type="range" min={1} max={200} step={1} value={brushSize}
                 onChange={(e)=>setBrushSize(parseInt(e.target.value))}
                 className="w-full square"
                 {...inputStop}
               />
             </div>
             <div className="text-xs w-10 text-right">{brushSize}</div>
+          </div>
+
+          <div className="grid grid-cols-12 gap-1 mt-1" {...inputStop}>
+            {PALETTE.map((c)=>(
+              <button
+                key={c}
+                className={"h-5 w-5 border " + (brushColor===c ? "border-black" : "border-black/40")}
+                style={{ background: c }}
+                onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) props.setSelectedColor(c) }}
+              />
+            ))}
           </div>
         </>
       )
@@ -279,11 +297,11 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
-            <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
             <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
               {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
             </button>
-            <button className={btn} onMouseDown={onDragStart}><Move className={ico}/></button>
+            <button className={btn} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear"><ClearIcon className={ico}/></button>
+            <button className={btn} onMouseDown={(e)=>{e.stopPropagation(); onDragStart(e)}}><Move className={ico}/></button>
           </div>
         </div>
 
@@ -291,7 +309,6 @@ export default function Toolbar(props: ToolbarProps) {
           <div className="p-2 space-y-2">
             <ToolsRow />
             <Settings />
-            {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
               <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
               <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
@@ -327,9 +344,7 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
-  // Вторая строка — динамика
   const SecondRow = () => {
-    // показываем Text-контролы и при tool==="text", и когда выбран текстовый слой
     if (tool === "text" || selectedKind === "text") {
       return (
         <div className="px-2 py-1 flex items-center gap-2">
@@ -341,6 +356,7 @@ export default function Toolbar(props: ToolbarProps) {
             {...inputStop}
           />
           <div className="w-36 flex items-center gap-2">
+            <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
             <input
               type="range" min={8} max={800} step={1}
               value={selectedProps.fontSize ?? 96}
@@ -390,6 +406,7 @@ export default function Toolbar(props: ToolbarProps) {
             />
           </div>
         )}
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="flex-1">
           <input
             type="range" min={1} max={200} step={1}
@@ -406,12 +423,12 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* Шторка LAYERS (с анимацией, видна часть макета) */}
+      {/* Шторка LAYERS — не уезжает под хедер, часть макета видна */}
       <div
-        className={clx(
-          "fixed inset-x-0 z-40 px-3 transition-transform duration-200",
-          layersOpenM ? "translate-y-0" : "-translate-y-full"
-        )}
+        className={
+          "fixed inset-x-0 z-40 px-3 transition-transform duration-200 " +
+          (layersOpenM ? "translate-y-0" : "-translate-y-full")
+        }
         style={{ top: mobileTopOffset + 8, height: `calc(60vh - ${mobileTopOffset}px)` }}
       >
         <div className={clx(wrap, "p-2 h-full flex flex-col")}>
@@ -423,10 +440,10 @@ export default function Toolbar(props: ToolbarProps) {
             {mobileLayers.items.map((l)=>(
               <div
                 key={l.id}
-                className={clx(
-                  "flex items-center gap-2 border border-black px-2 py-1 bg-white",
-                  mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
-                )}
+                className={
+                  "flex items-center gap-2 border border-black px-2 py-1 bg-white " +
+                  (mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : "")
+                }
               >
                 <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                 <div className="text-xs flex-1 truncate">{l.name}</div>
@@ -442,11 +459,10 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       </div>
 
-      {/* Нижняя панель — 3 строки (стабильная высота) */}
+      {/* Нижняя панель — 3 строки (фикс. высота) */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         {/* row 1 — инструменты + layers + clear */}
         <div className="px-2 py-1 flex items-center gap-1">
-          <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
           {mobileButton("erase", <Eraser className={ico}/>)}
@@ -469,6 +485,7 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
+            <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
             <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
           </div>
           <div className="flex gap-2">
