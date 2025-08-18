@@ -179,7 +179,9 @@ export default function EditorCanvas() {
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
-  const textStart = useRef<{ width: number; right: number; fontSize: number } | null>(null)
+
+  // снимок исходных размеров/рамки для плавного ресайза текста (абсолютно от начала жеста)
+  const textStart = useRef<{ width: number; right: number; fontSize: number; boxW: number; boxH: number } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -192,7 +194,6 @@ export default function EditorCanvas() {
     if (disabled) {
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
-      // вернуть дефолт для boundBox
       trRef.current?.boundBoxFunc?.((o, b) => b)
       return
     }
@@ -209,7 +210,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ---- ТЕКСТ: боковые = ширина (без дрожи), углы = кегль ----
+      // ---- ТЕКСТ: боковые = ширина (без визуального скейла), углы = кегль ----
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -217,11 +218,15 @@ export default function EditorCanvas() {
       ])
 
       const t = n as Konva.Text
+
       const onStartText = () => {
+        const r = t.getClientRect({ skipShadow: true, skipStroke: true })
         textStart.current = {
           width:  Math.max(1, t.width() || 1),
           right:  t.x() + (t.width() || 0),
-          fontSize: t.fontSize()
+          fontSize: t.fontSize(),
+          boxW: Math.max(1, r.width),
+          boxH: Math.max(1, r.height),
         }
       }
       const onEndText = () => { textStart.current = null }
@@ -230,43 +235,47 @@ export default function EditorCanvas() {
       n.on("transformend.textfix", onEndText)
       detachTextFix.current = () => { n.off(".textfix") }
 
-      // ВАЖНО: не даём Text визуально скалироваться — сами применяем width/x или fontSize
+      // Полностью перехватываем деформацию через boundBox
       tr.boundBoxFunc((oldB, newB) => {
         if (!textStart.current) onStartText()
+        const start = textStart.current!
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
+        // вспом: вернуть актуальную рамку текста
         const boxFromText = () => {
           const r = t.getClientRect({ skipShadow: true, skipStroke: true })
           return { x: r.x, y: r.y, width: r.width, height: r.height, rotation: oldB.rotation }
         }
 
+        // БОКОВЫЕ — ширина относительно рамки НА СТАРТЕ
         if (active === "middle-left" || active === "middle-right") {
-          const baseW = textStart.current!.width
-          const scaleX = Math.max(0.01, newB.width / Math.max(1e-6, oldB.width))
-          const newW   = Math.max(TEXT_MIN_W, Math.min(baseW * scaleX, TEXT_MAX_W))
+          const scaleAbs = Math.max(0.01, newB.width / start.boxW) // абсолютный масштаб по X
+          const newW     = Math.max(TEXT_MIN_W, Math.min(start.width * scaleAbs, TEXT_MAX_W))
 
           if (active === "middle-left") {
-            const right = textStart.current!.right
+            const right = start.right
             t.width(newW)
-            t.x(right - newW) // фиксируем правую кромку
+            t.x(right - newW) // фиксируем правый край
           } else {
             t.width(newW)
           }
+          // никаких визуальных скейлов
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           return boxFromText()
         }
 
+        // УГЛОВЫЕ — меняем кегль относительно рамки НА СТАРТЕ
         if (
           active === "top-left" || active === "top-right" ||
           active === "bottom-left" || active === "bottom-right"
         ) {
-          const sx = Math.max(0.01, newB.width  / Math.max(1e-6, oldB.width))
-          const sy = Math.max(0.01, newB.height / Math.max(1e-6, oldB.height))
-          const s  = Math.max(sx, sy)
-          const baseFS = textStart.current?.fontSize ?? t.fontSize()
-          const next   = Math.max(TEXT_MIN_FS, Math.min(baseFS * s, TEXT_MAX_FS))
-          t.fontSize(next)
+          const sx = Math.max(0.01, newB.width  / start.boxW)
+          const sy = Math.max(0.01, newB.height / start.boxH)
+          const s  = Math.max(sx, sy) // изометрический масштаб по max
+          const nextFS = Math.max(TEXT_MIN_FS, Math.min(start.fontSize * s, TEXT_MAX_FS))
+
+          t.fontSize(nextFS)
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           return boxFromText()
@@ -754,7 +763,7 @@ export default function EditorCanvas() {
     if (sel.type === "text") (sel.node as Konva.Text).fill(hex)
     else {
       const hasFill = getNodeFill(sel.node) !== undefined
-      if (hasFill) setNodeFill(sel.node, hex); else setNodeStroke(sel.node, hex) // Line — только stroke
+      if (hasFill) setNodeFill(sel.node, hex); else setNodeStroke(sel.node, hex)
     }
     artLayerRef.current?.batchDraw()
   }
