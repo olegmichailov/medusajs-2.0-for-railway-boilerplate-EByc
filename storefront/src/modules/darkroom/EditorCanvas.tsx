@@ -41,6 +41,51 @@ const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
+const isGroup       = (n: AnyNode): n is Konva.Group => n instanceof Konva.Group
+
+// ==== Цвет/обводка для любых узлов (чинит Group/Line) ====
+const getNodeFill = (n: AnyNode): string | undefined => {
+  const any = n as any
+  if (typeof any.fill === "function") return any.fill()
+  if (isGroup(n)) {
+    const c = n.getChildren().find((ch: any) => typeof ch.fill === "function")
+    return c ? c.fill() : undefined
+  }
+  return undefined
+}
+const setNodeFill = (n: AnyNode, hex: string) => {
+  const any = n as any
+  if (typeof any.fill === "function") { any.fill(hex); return }
+  if (isGroup(n)) n.getChildren().forEach((ch: any) => { if (typeof ch.fill === "function") ch.fill(hex) })
+}
+const getNodeStroke = (n: AnyNode): string | undefined => {
+  const any = n as any
+  if (typeof any.stroke === "function") return any.stroke()
+  if (isGroup(n)) {
+    const c = n.getChildren().find((ch: any) => typeof ch.stroke === "function")
+    return c ? c.stroke() : undefined
+  }
+  return undefined
+}
+const setNodeStroke = (n: AnyNode, hex: string) => {
+  const any = n as any
+  if (typeof any.stroke === "function") { any.stroke(hex); return }
+  if (isGroup(n)) n.getChildren().forEach((ch: any) => { if (typeof ch.stroke === "function") ch.stroke(hex) })
+}
+const getNodeStrokeW = (n: AnyNode): number | undefined => {
+  const any = n as any
+  if (typeof any.strokeWidth === "function") return any.strokeWidth()
+  if (isGroup(n)) {
+    const c = n.getChildren().find((ch: any) => typeof ch.strokeWidth === "function")
+    return c ? c.strokeWidth() : undefined
+  }
+  return undefined
+}
+const setNodeStrokeW = (n: AnyNode, w: number) => {
+  const any = n as any
+  if (typeof any.strokeWidth === "function") { any.strokeWidth(w); return }
+  if (isGroup(n)) n.getChildren().forEach((ch: any) => { if (typeof ch.strokeWidth === "function") ch.strokeWidth(w) })
+}
 
 export default function EditorCanvas() {
   const {
@@ -134,10 +179,7 @@ export default function EditorCanvas() {
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
-
-  // снимок исходных размеров для плавного ресайза текста
   const textStart = useRef<{ width: number; right: number; fontSize: number } | null>(null)
-  const lastAnchorRef = useRef<string | null>(null) // <<— запоминаем активный анкор
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -150,6 +192,8 @@ export default function EditorCanvas() {
     if (disabled) {
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
+      // вернуть дефолт для boundBox
+      trRef.current?.boundBoxFunc?.((o, b) => b)
       return
     }
 
@@ -179,65 +223,57 @@ export default function EditorCanvas() {
           right:  t.x() + (t.width() || 0),
           fontSize: t.fontSize()
         }
-        lastAnchorRef.current = null
       }
+      const onEndText = () => { textStart.current = null }
 
-      // >>> ПРАВКА: боковые анкоры не трогаем width во время перетаскивания
-      const onTransform = () => {
-        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
-        lastAnchorRef.current = active || null
+      n.on("transformstart.textfix", onStartText)
+      n.on("transformend.textfix", onEndText)
+      detachTextFix.current = () => { n.off(".textfix") }
+
+      // ВАЖНО: не даём Text визуально скалироваться — сами применяем width/x или fontSize
+      tr.boundBoxFunc((oldB, newB) => {
         if (!textStart.current) onStartText()
+        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+
+        const boxFromText = () => {
+          const r = t.getClientRect({ skipShadow: true, skipStroke: true })
+          return { x: r.x, y: r.y, width: r.width, height: r.height, rotation: oldB.rotation }
+        }
 
         if (active === "middle-left" || active === "middle-right") {
-          // визуально пускай тянется scaleX; фиксируем правый край при левом анкоре
-          const startW = textStart.current!.width
-          const sx = Math.max(0.01, t.scaleX())
+          const baseW = textStart.current!.width
+          const scaleX = Math.max(0.01, newB.width / Math.max(1e-6, oldB.width))
+          const newW   = Math.max(TEXT_MIN_W, Math.min(baseW * scaleX, TEXT_MAX_W))
+
           if (active === "middle-left") {
             const right = textStart.current!.right
-            const visualW = Math.max(TEXT_MIN_W, Math.min(startW * sx, TEXT_MAX_W))
-            // двигаем X так, чтобы правый край стоял на месте
-            t.x(right - visualW)
-          }
-          // width пока не трогаем — коммит на transformend
-        } else {
-          // углы: меняем кегль «живьём»
-          const s = Math.max(t.scaleX(), t.scaleY())
-          const baseFS = textStart.current?.fontSize ?? t.fontSize()
-          const next = Math.max(TEXT_MIN_FS, Math.min(baseFS * s, TEXT_MAX_FS))
-          t.fontSize(next)
-          t.scaleX(1); t.scaleY(1)
-        }
-        t.getLayer()?.batchDraw()
-      }
-
-      const onEnd = () => {
-        // коммит итогов
-        const active = lastAnchorRef.current
-        if (active === "middle-left" || active === "middle-right") {
-          const startW = textStart.current?.width ?? (t.width() || 1)
-          const sx = Math.max(0.01, t.scaleX())
-          const newW = Math.max(TEXT_MIN_W, Math.min(startW * sx, TEXT_MAX_W))
-          if (active === "middle-left") {
-            const right = (textStart.current?.right ?? (t.x() + (t.width() || 0)))
             t.width(newW)
-            t.x(right - newW)
+            t.x(right - newW) // фиксируем правую кромку
           } else {
             t.width(newW)
           }
-          t.scaleX(1)
-        } else {
-          // углы — кегль уже записали «вживую», просто убеждаемся, что scale сброшен
           t.scaleX(1); t.scaleY(1)
+          t.getLayer()?.batchDraw()
+          return boxFromText()
         }
-        textStart.current = null
-        lastAnchorRef.current = null
-        t.getLayer()?.batchDraw()
-      }
 
-      n.on("transformstart.textfix", onStartText)
-      n.on("transform.textfix", onTransform)
-      n.on("transformend.textfix", onEnd)
-      detachTextFix.current = () => { n.off(".textfix") }
+        if (
+          active === "top-left" || active === "top-right" ||
+          active === "bottom-left" || active === "bottom-right"
+        ) {
+          const sx = Math.max(0.01, newB.width  / Math.max(1e-6, oldB.width))
+          const sy = Math.max(0.01, newB.height / Math.max(1e-6, oldB.height))
+          const s  = Math.max(sx, sy)
+          const baseFS = textStart.current?.fontSize ?? t.fontSize()
+          const next   = Math.max(TEXT_MIN_FS, Math.min(baseFS * s, TEXT_MAX_FS))
+          t.fontSize(next)
+          t.scaleX(1); t.scaleY(1)
+          t.getLayer()?.batchDraw()
+          return boxFromText()
+        }
+
+        return newB
+      })
     } else {
       // ---- КАРТИНКИ/ФИГУРЫ: углы пропорц., боковые свободные ----
       tr.keepRatio(false)
@@ -245,6 +281,7 @@ export default function EditorCanvas() {
         "top-left","top-right","bottom-left","bottom-right",
         "middle-left","middle-right","top-center","bottom-center"
       ])
+      tr.boundBoxFunc((o, b) => b)
 
       const onTransform = () => {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
@@ -699,23 +736,26 @@ export default function EditorCanvas() {
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
     }
-    : sel && (sel.node as any).fill ? {
-      fill: (sel.node as any).fill() ?? "#000000",
-      stroke: (sel.node as any).stroke?.() ?? "#000000",
-      strokeWidth: (sel.node as any).strokeWidth?.() ?? 0,
+    : sel ? {
+      fill: getNodeFill(sel.node) ?? "#000000",
+      stroke: getNodeStroke(sel.node) ?? "#000000",
+      strokeWidth: getNodeStrokeW(sel.node) ?? 0,
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw() }
+  const setSelectedFill       = (hex:string) => { if (!sel) return; setNodeFill(sel.node, hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStroke     = (hex:string) => { if (!sel) return; setNodeStroke(sel.node, hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStrokeW    = (w:number)    => { if (!sel) return; setNodeStrokeW(sel.node, w); artLayerRef.current?.batchDraw() }
   const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw() }
   const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
   const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
-    if (sel.type === "text") { (sel.node as Konva.Text).fill(hex) }
-    else if ((sel.node as any).fill) (sel.node as any).fill(hex)
+    if (sel.type === "text") (sel.node as Konva.Text).fill(hex)
+    else {
+      const hasFill = getNodeFill(sel.node) !== undefined
+      if (hasFill) setNodeFill(sel.node, hex); else setNodeStroke(sel.node, hex) // Line — только stroke
+    }
     artLayerRef.current?.batchDraw()
   }
 
