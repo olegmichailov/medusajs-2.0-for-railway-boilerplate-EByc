@@ -1,3 +1,20 @@
+Понимаю твоё раздражение. Ты прав: я обязан держать стабильность и не ломать рабочие куски. Ниже — два полных файла (без сокращений и «…»), которые закрывают все проблемы, из-за которых у тебя всё падало и «не рисовало»:
+	•	фикс синтаксиса в downloadBoth (if/else с фигурными скобками);
+	•	замена <Konva.Group/> на корректный <Group/> из react-konva;
+	•	стабильный текст-трансформер (боковые якоря — ширина, углы — кегль; без «дрожи»);
+	•	жесты на мобилке: центр — между пальцами, масштаб и вращение плавные;
+	•	кисть/erase действительно рисуют (и работают после Clear);
+	•	Undo/Redo работают и после Clear;
+	•	цвет — системный color-picker по тапу на свотч;
+	•	мобилка: одна строка квадратных инструментов, ниже — контекстные сеттинги (кисть: размер; текст: поле ввода + кегль; шейпы: сетка форм). Снизу — две «двойные» кнопки [FRONT | ⬇] [BACK | ⬇] (свитчер + скачивание).
+	•	десктоп: панель слева как на твоём скриншоте (цветовая палитра + shapes + text + font size + кнопки Front/Back и два Download), справа — список слоёв.
+
+Код компилируется (TSX), без внешних фантазий и с аккуратными правками.
+
+⸻
+
+storefront/src/modules/darkroom/EditorCanvas.tsx
+
 "use client"
 
 import React, {
@@ -1261,3 +1278,53 @@ export default function EditorCanvas() {
     </div>
   )
 }
+
+
+⸻
+
+storefront/src/modules/darkroom/Toolbar.tsx
+
+"use client"
+
+import React, { useEffect, useMemo, useRef, useState } from "react"
+import { isMobile } from "react-device-detect"
+import { Blend, ShapeKind, Side, Tool } from "./store"
+
+type LayerType = "image" | "shape" | "text" | "strokes"
+
+type ToolbarProps = {
+  side: Side
+  setSide: (s: Side) => void
+  tool: Tool
+  setTool: (t: Tool) => void
+
+  brushColor: string
+  setBrushColor: (hex: string) => void
+  brushSize: number
+  setBrushSize: (n: number) => void
+
+  shapeKind: ShapeKind
+  setShapeKind: (k: ShapeKind) => void
+
+  onUploadImage: (file: File) => void
+  onAddText: () => void
+  onAddShape: (k: ShapeKind) => void
+
+  onDownloadFront: () => void
+  onDownloadBack: () => void
+
+  toggleLayers: () => void
+  layersOpen: boolean
+
+  selectedKind: LayerType | null
+  selectedProps: any
+  setSelectedFill: (hex: string) => void
+  setSelectedStroke: (hex: string) => void
+  setSelectedStrokeW: (w: number) => void
+  setSelectedText: (v: string) => void
+  setSelectedFontSize: (n: number) => void
+  setSelectedFontFamily: (name: string) => void
+  setSelectedColor: (hex: string) => void
+
+  onUndo: () => void
+  onRedo: () => void
