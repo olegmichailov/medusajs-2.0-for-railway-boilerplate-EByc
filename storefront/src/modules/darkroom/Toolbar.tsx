@@ -89,7 +89,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// Унифицированный вид слайдера: скрываем нативный трек, ставим свой
+// центрированные слайды с собственным треком
 const sliderCss = `
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
@@ -147,7 +147,6 @@ export default function Toolbar(props: ToolbarProps) {
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
-    // Универсальный «центрированный» слайдер (инпут + свой трек)
     const Track = ({ className }: { className?: string }) =>
       <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
 
@@ -169,7 +168,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers */}
+            {/* tools */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -192,7 +191,7 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...stop}/>
             </div>
 
-            {/* row 2 — Color + Brush/Eraser size */}
+            {/* color + brush size */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <input
@@ -216,7 +215,7 @@ export default function Toolbar(props: ToolbarProps) {
               <div className="text-xs w-10 text-right">{brushSize}</div>
             </div>
 
-            {/* палитра */}
+            {/* palette */}
             <div className="grid grid-cols-12 gap-1" {...stop}>
               {PALETTE.map((c)=>(
                 <button
@@ -333,7 +332,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input type="color" value={selectedProps.fill ?? "#000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-8 h-8 border border-black" {...stop}/>
           <input type="color" value={selectedProps.stroke ?? "#000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-8 h-8 border border-black" {...stop}/>
           <div className="relative flex-1 text-black">
-            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))} className="ui" style={{}} {...stop}/>
+            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))} className="ui" {...stop}/>
             <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
           </div>
         </div>
