@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
-import { Eye, EyeOff, Lock, Unlock, Copy, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
 const blends = [
   "source-over",
@@ -17,11 +17,11 @@ const blends = [
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes"
+  type: "image" | "shape" | "text" | "strokes" | "erase"
   visible: boolean
   locked: boolean
   blend: string
-  opacity: number // 0..1
+  opacity: number
 }
 
 type Props = {
@@ -36,29 +36,6 @@ type Props = {
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
 }
-
-// глушим dnd/клик строки для интерактивной зоны
-const stopAll = {
-  onPointerDown: (e: any) => e.stopPropagation(),
-  onPointerMove: (e: any) => e.stopPropagation(),
-  onPointerUp:   (e: any) => e.stopPropagation(),
-  onTouchStart:  (e: any) => e.stopPropagation(),
-  onTouchMove:   (e: any) => e.stopPropagation(),
-  onTouchEnd:    (e: any) => e.stopPropagation(),
-  onMouseDown:   (e: any) => e.stopPropagation(),
-  onMouseMove:   (e: any) => e.stopPropagation(),
-  onMouseUp:     (e: any) => e.stopPropagation(),
-  onClick:       (e: any) => e.stopPropagation(),
-}
-
-// общий стиль бегунка
-const sliderCss = `
-input[type="range"].lp-range{appearance:none;-webkit-appearance:none;background:transparent;height:20px}
-input[type="range"].lp-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;background:#000}
-input[type="range"].lp-range.dark::-webkit-slider-thumb{background:#fff}
-input[type="range"].lp-range::-moz-range-thumb{width:12px;height:12px;background:#000;border:none}
-input[type="range"].lp-range.dark::-moz-range-thumb{background:#fff}
-`
 
 export default function LayersPanel({
   items,
@@ -113,7 +90,6 @@ export default function LayersPanel({
 
   return (
     <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
-      <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase">Layers</div>
 
       <div className="max-h-[64vh] overflow-auto p-2 space-y-1">
@@ -125,16 +101,11 @@ export default function LayersPanel({
                 ? "ring-2 ring-blue-500 -mt-[1px]"
                 : "ring-2 ring-blue-500 -mb-[1px]"
               : ""
-          const op = Math.round((it.opacity ?? 1) * 100) // 0..100
-          const baseLine = isActive ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.35)"
-          const fillLine = isActive ? "rgba(255,255,255,.9)"  : "rgba(0,0,0,.9)"
 
           return (
             <div
               key={it.id}
               ref={(el) => (rowRefs.current[it.id] = el)}
-              draggable
-              onDragStart={(e) => handleDragStart(it.id, e)}
               onDragOver={(e) => handleDragOver(it.id, e)}
               onDragEnd={handleDragEnd}
               onDrop={(e) => handleDrop(it.id, e)}
@@ -146,62 +117,53 @@ export default function LayersPanel({
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* drag handle */}
-              <div className="w-3 h-6 grid place-items-center cursor-grab active:cursor-grabbing">
-                <div className={clx("w-2 h-4 border", isActive ? "border-white/60" : "border-black/60")} />
+              {/* GRAB HANDLE — ТОЛЬКО ОН draggable */}
+              <div
+                className="w-5 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
+                draggable
+                onDragStart={(e)=>handleDragStart(it.id, e)}
+                title="Drag to reorder"
+                onClick={(e)=>e.stopPropagation()}
+              >
+                <GripVertical className={clx("w-3 h-3", isActive ? "text-white/70" : "text-black/70")} />
               </div>
 
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
-              {/* Blend (изолировано от dnd) */}
-              <div className="relative" {...stopAll}>
-                <select
-                  className={clx(
-                    "h-8 px-1 border rounded-none text-xs",
-                    isActive ? "bg-black text-white border-white/40" : "bg-white"
-                  )}
-                  value={it.blend}
-                  onChange={(e) => onChangeBlend(it.id, e.target.value)}
-                >
-                  {blends.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Opacity (трек + заполнение, полностью «тихая» зона) */}
-              <div
-                className="relative w-24 h-8 flex items-center"
-                {...stopAll}
-                title={`Opacity: ${op}%`}
+              {/* Blend */}
+              <select
+                className={clx(
+                  "h-8 px-1 border rounded-none text-xs",
+                  isActive ? "bg-black text-white border-white/40" : "bg-white"
+                )}
+                value={it.blend}
+                onChange={(e) => onChangeBlend(it.id, e.target.value)}
+                onMouseDown={(e)=>e.stopPropagation()}
               >
-                <div
-                  aria-hidden
-                  className="absolute left-0 right-0 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ height: 2, background: baseLine }}
-                />
-                <div
-                  aria-hidden
-                  className="absolute left-0 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ height: 2, width: `${op}%`, background: fillLine }}
-                />
+                {blends.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+
+              {/* Opacity + линия под слайдером */}
+              <div className="w-24" onMouseDown={(e)=>e.stopPropagation()} onClick={(e)=>e.stopPropagation()}>
                 <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={op}
-                  onChange={(e)=> onChangeOpacity(it.id, Number(e.target.value)/100)}
-                  className={clx("lp-range w-full", isActive ? "dark" : "")}
-                  style={{ color: isActive ? "#fff" : "#000" }}
+                  type="range" min={10} max={100}
+                  value={Math.round(it.opacity * 100)}
+                  onChange={(e)=> onChangeOpacity(it.id, parseInt(e.target.value,10)/100)}
+                  className={clx(
+                    "w-full h-[2px] bg-current appearance-none square",
+                  )}
+                  title="Opacity"
                 />
+                <div className={clx("h-[1px] mt-1", isActive ? "bg-white/40" : "bg-black/20")} />
               </div>
 
               {/* controls */}
               <button
                 className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                {...stopAll}
-                onClick={() => onToggleVisible(it.id)}
+                onMouseDown={(e)=>e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
                 title={it.visible ? "Hide" : "Show"}
               >
                 {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
@@ -209,8 +171,8 @@ export default function LayersPanel({
 
               <button
                 className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                {...stopAll}
-                onClick={() => onToggleLock(it.id)}
+                onMouseDown={(e)=>e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
                 title={it.locked ? "Unlock" : "Lock"}
               >
                 {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
@@ -218,8 +180,8 @@ export default function LayersPanel({
 
               <button
                 className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                {...stopAll}
-                onClick={() => onDuplicate(it.id)}
+                onMouseDown={(e)=>e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
                 title="Duplicate"
               >
                 <Copy className="w-4 h-4"/>
@@ -227,8 +189,8 @@ export default function LayersPanel({
 
               <button
                 className="w-8 h-8 grid place-items-center border border-current bg-transparent"
-                {...stopAll}
-                onClick={() => onDelete(it.id)}
+                onMouseDown={(e)=>e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
                 title="Delete"
               >
                 <Trash2 className="w-4 h-4"/>
