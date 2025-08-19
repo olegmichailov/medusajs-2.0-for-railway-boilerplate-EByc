@@ -18,6 +18,8 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 // ТЕКСТ: клампы
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
+const TEXT_MIN_W  = 60
+const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // id-helper
 const uid = () => "n_" + Math.random().toString(36).slice(2)
@@ -40,56 +42,6 @@ const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
-// ====== Рекурсивные геттеры/сеттеры для Group (CREST и др.) ======
-const getFillDeep = (n: AnyNode): string | undefined => {
-  // @ts-ignore
-  if (typeof (n as any).fill === "function") return (n as any).fill()
-  if (n instanceof Konva.Group) {
-    for (const ch of n.getChildren()) {
-      const v = getFillDeep(ch as any)
-      if (v !== undefined) return v
-    }
-  }
-  return undefined
-}
-const getStrokeDeep = (n: AnyNode): string | undefined => {
-  // @ts-ignore
-  if (typeof (n as any).stroke === "function") return (n as any).stroke()
-  if (n instanceof Konva.Group) {
-    for (const ch of n.getChildren()) {
-      const v = getStrokeDeep(ch as any)
-      if (v !== undefined) return v
-    }
-  }
-  return undefined
-}
-const getStrokeWDeep = (n: AnyNode): number | undefined => {
-  // @ts-ignore
-  if (typeof (n as any).strokeWidth === "function") return (n as any).strokeWidth()
-  if (n instanceof Konva.Group) {
-    for (const ch of n.getChildren()) {
-      const v = getStrokeWDeep(ch as any)
-      if (v !== undefined) return v
-    }
-  }
-  return undefined
-}
-const setFillDeep = (n: AnyNode, hex: string) => {
-  if (n instanceof Konva.Group) n.getChildren().forEach((ch) => setFillDeep(ch as any, hex))
-  // @ts-ignore
-  else if (typeof (n as any).fill === "function") (n as any).fill(hex)
-}
-const setStrokeDeep = (n: AnyNode, hex: string) => {
-  if (n instanceof Konva.Group) n.getChildren().forEach((ch) => setStrokeDeep(ch as any, hex))
-  // @ts-ignore
-  else if (typeof (n as any).stroke === "function") (n as any).stroke(hex)
-}
-const setStrokeWDeep = (n: AnyNode, w: number) => {
-  if (n instanceof Konva.Group) n.getChildren().forEach((ch) => setStrokeWDeep(ch as any, w))
-  // @ts-ignore
-  else if (typeof (n as any).strokeWidth === "function") (n as any).strokeWidth(w)
-}
-
 export default function EditorCanvas() {
   const {
     side, set, tool, brushColor, brushSize, shapeKind,
@@ -108,20 +60,19 @@ export default function EditorCanvas() {
 
   // refs
   const stageRef        = useRef<Konva.Stage>(null)
-  const bgLayerRef      = useRef<Konva.Layer>(null)    // ТОЛЬКО мокап
-  const artLayerRef     = useRef<Konva.Layer>(null)    // ТОЛЬКО пользовательский контент + erase
-  const uiLayerRef      = useRef<Konva.Layer>(null)    // трансформер
+  const bgLayerRef      = useRef<Konva.Layer>(null)
+  const artLayerRef     = useRef<Konva.Layer>(null)
+  const uiLayerRef      = useRef<Konva.Layer>(null)
   const trRef           = useRef<Konva.Transformer>(null)
   const frontBgRef      = useRef<Konva.Image>(null)
   const backBgRef       = useRef<Konva.Image>(null)
-  const frontArtRef     = useRef<Konva.Group>(null)    // контент (front)
-  const backArtRef      = useRef<Konva.Group>(null)    // контент (back)
+  const frontArtRef     = useRef<Konva.Group>(null)
+  const backArtRef      = useRef<Konva.Group>(null)
 
   // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
-  const [, tick] = useState(0) // для синка UI (кегль/панель) во время трансформации текста
 
   // активные сессии кисти/стирания
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
@@ -184,8 +135,14 @@ export default function EditorCanvas() {
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
 
-  // снимок исходных параметров для плавного МАСШТАБА текста (без сплющивания)
-  const textStart = useRef<{ fontSize: number; centerX: number; centerY: number } | null>(null)
+  // снимок исходных размеров для плавного ресайза текста
+  const textStart = useRef<{
+    width: number
+    left: number
+    right: number
+    fontSize: number
+    anchor: string | null
+  } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -213,55 +170,78 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // === ВАЖНО: все хэндлы дают УНИФОРМНЫЙ масштаб (через fontSize), без горизонтального искажения ===
-      tr.keepRatio(true)
+      // ---- ТЕКСТ ----
+      // боковые = ширина (живьём), углы = кегль; без промежуточного скейла.
+      tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
-        "middle-left","middle-right" // боковые оставляем, но они тоже ведут к униформ-скейлу
+        "middle-left","middle-right"
       ])
 
       const t = n as Konva.Text
 
       const onStartText = () => {
-        // фиксируем центр в абсолютных координатах, чтобы он оставался на месте
-        const box = t.getClientRect({ skipShadow: true, skipStroke: true })
-        const cx = box.x + box.width / 2
-        const cy = box.y + box.height / 2
-        textStart.current = { fontSize: t.fontSize(), centerX: cx, centerY: cy }
+        const a = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+        textStart.current = {
+          width:  Math.max(1, t.width() || 1),
+          left:   t.x(),
+          right:  t.x() + (t.width() || 0),
+          fontSize: t.fontSize(),
+          anchor: a ?? null,
+        }
+        // нормализуем скейлы перед серией кадров
+        t.scaleX(1); t.scaleY(1)
       }
 
       const onTransform = () => {
         if (!textStart.current) onStartText()
-        // относительный масштаб, независимый от истории — берём max из scaleX/Y
-        const sx = Math.abs(t.scaleX())
-        const sy = Math.abs(t.scaleY())
-        const s = Math.max(sx, sy)
-        const nextFS = Math.max(TEXT_MIN_FS, Math.min(textStart.current!.fontSize * (s || 1), TEXT_MAX_FS))
+        const anchor = textStart.current!.anchor
 
-        // применяем КЕГЛЬ, полностью убираем геометрический scale
-        t.fontSize(nextFS)
-        t.scaleX(1); t.scaleY(1)
+        if (anchor === "middle-left" || anchor === "middle-right") {
+          // === Горизонтальные хэндлы: ширина растёт «инкрементно» ===
+          const prevW = textStart.current!.width
+          const sx = Math.max(0.01, t.scaleX())        // дельта текущего кадра
+          const nextW = Math.max(TEXT_MIN_W, Math.min(prevW * sx, TEXT_MAX_W))
 
-        // держим центр стабильным — пересчитываем box и смещаем x/y так, чтобы центр совпал
-        const boxNow = t.getClientRect({ skipShadow: true, skipStroke: true })
-        const cxNow = boxNow.x + boxNow.width / 2
-        const cyNow = boxNow.y + boxNow.height / 2
-        const dx = textStart.current!.centerX - cxNow
-        const dy = textStart.current!.centerY - cyNow
-        t.x(t.x() + dx)
-        t.y(t.y() + dy)
+          if (anchor === "middle-left") {
+            const right = textStart.current!.right     // правую кромку держим
+            t.width(nextW)
+            t.x(right - nextW)
+          } else {
+            // правая тянется, левая остаётся
+            t.x(textStart.current!.left)
+            t.width(nextW)
+          }
 
-        // перерисовка и синх слайдера
-        artLayerRef.current?.batchDraw()
-        tick((v) => v + 1)
+          // сброс скейла, чтобы не было нелепых искажений
+          t.scaleX(1); t.scaleY(1)
+
+          // обновляем базу для следующего кадра (инкремент!)
+          textStart.current!.width = nextW
+          textStart.current!.left  = t.x()
+          textStart.current!.right = t.x() + nextW
+        } else {
+          // === Углы: меняем кегль «инкрементно» ===
+          const prevFS = textStart.current!.fontSize
+          const s = Math.max(t.scaleX(), t.scaleY())
+          const nextFS = Math.max(TEXT_MIN_FS, Math.min(prevFS * s, TEXT_MAX_FS))
+          t.fontSize(nextFS)
+          t.scaleX(1); t.scaleY(1)
+          textStart.current!.fontSize = nextFS
+        }
+
+        t.getLayer()?.batchDraw()
       }
 
       const onEnd = () => {
         // финальная нормализация
-        t.scaleX(1); t.scaleY(1)
+        if (textStart.current?.anchor === "middle-left" || textStart.current?.anchor === "middle-right") {
+          t.scaleX(1); t.scaleY(1)
+        } else {
+          t.scaleX(1); t.scaleY(1)
+        }
         textStart.current = null
-        artLayerRef.current?.batchDraw()
-        tick((v) => v + 1)
+        t.getLayer()?.batchDraw()
       }
 
       n.on("transformstart.textfix", onStartText)
@@ -437,9 +417,7 @@ export default function EditorCanvas() {
       fontSize: 96,
       fontFamily: siteFont(),
       fontStyle: "bold",
-      fill: brushColor,
-      width: 600, // оставляем как было: фиксированная ширина для многострочного вида
-      align: "center",
+      fill: brushColor, width: 600, align: "center",
       draggable: false,
     })
     t.id(uid())
@@ -730,25 +708,45 @@ export default function EditorCanvas() {
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
     }
-    : sel ? {
-      fill: getFillDeep(sel.node) ?? "#000000",
-      stroke: getStrokeDeep(sel.node) ?? "#000000",
-      strokeWidth: getStrokeWDeep(sel.node) ?? 0,
+    : sel && (sel.node as any).fill ? {
+      fill: (sel.node as any).fill() ?? "#000000",
+      stroke: (sel.node as any).stroke?.() ?? "#000000",
+      strokeWidth: (sel.node as any).strokeWidth?.() ?? 0,
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { if (!sel) return; setFillDeep(sel.node, hex);  artLayerRef.current?.batchDraw(); tick(v=>v+1) }
-  const setSelectedStroke     = (hex:string) => { if (!sel) return; setStrokeDeep(sel.node, hex); artLayerRef.current?.batchDraw(); tick(v=>v+1) }
-  const setSelectedStrokeW    = (w:number)    => { if (!sel) return; setStrokeWDeep(sel.node, w); artLayerRef.current?.batchDraw(); tick(v=>v+1) }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); tick(v=>v+1) }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw(); tick(v=>v+1) }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); tick(v=>v+1) }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
+
+  // === FIX: универсальная перекраска (включая Group/CREST и Line) ===
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
-    if (sel.type === "text") { (sel.node as Konva.Text).fill(hex) }
-    else setFillDeep(sel.node, hex)
+    const n = sel.node as any
+    if (sel.type === "text") {
+      (n as Konva.Text).fill(hex)
+    } else if (sel.type === "shape") {
+      if (n instanceof Konva.Group) {
+        // перекрашиваем все дочерние фигуры
+        n.find((child: any) =>
+          child instanceof Konva.Rect ||
+          child instanceof Konva.Circle ||
+          child instanceof Konva.RegularPolygon ||
+          child instanceof Konva.Line
+        ).forEach((child: any) => {
+          if (child instanceof Konva.Line) child.stroke(hex)
+          if (typeof child.fill === "function") child.fill(hex)
+        })
+      } else if (n instanceof Konva.Line) {
+        n.stroke(hex)
+      } else if (typeof n.fill === "function") {
+        n.fill(hex)
+      }
+    }
     artLayerRef.current?.batchDraw()
-    tick((v)=>v+1)
   }
 
   // ===== Clear (только арт текущей стороны) =====
@@ -835,7 +833,7 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* 1. ТОЛЬКО мокап (в отдельном canvas-слое) */}
+            {/* 1. ТОЛЬКО мокап */}
             <Layer ref={bgLayerRef} listening={true}>
               {frontMock && (
                 <KImage
@@ -859,13 +857,13 @@ export default function EditorCanvas() {
               )}
             </Layer>
 
-            {/* 2. АРТ (контент + erase в этом же canvas-слое) */}
+            {/* 2. АРТ */}
             <Layer ref={artLayerRef} listening={true}>
               <KGroup ref={frontArtRef} visible={side==="front"} />
               <KGroup ref={backArtRef}  visible={side==="back"}  />
             </Layer>
 
-            {/* 3. UI-слой для рамки трансформера */}
+            {/* 3. UI */}
             <Layer ref={uiLayerRef}>
               <Transformer
                 ref={trRef}
