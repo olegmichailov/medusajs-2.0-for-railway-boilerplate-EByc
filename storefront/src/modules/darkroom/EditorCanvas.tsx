@@ -47,16 +47,17 @@ const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
-// ===== WebGL ScreenPrint+ (GPU) =====
+// ===== WebGL ScreenPrint+ (GPU overlay) =====
 type FxParams = {
   enabled: boolean
   live: boolean
-  cell: number      // px
+  cell: number      // px (в экранных пикселях, т.к. источник — канвас слоя)
   levels: number    // posterize steps
   angle: number     // deg
   dot: number       // 0..1 coverage
   palette: string[] // 5 HEX
 }
+
 const DEFAULT_FX: FxParams = {
   enabled: false,
   live: true,
@@ -64,24 +65,23 @@ const DEFAULT_FX: FxParams = {
   levels: 4,
   angle: 45,
   dot: 0.7,
-  palette: ["#EAEAEA","#FFD447","#00C2FF","#FF4DA6","#2B2B2B"], // light, mid, acc1, acc2, black
+  palette: ["#EAEAEA","#FFD447","#00C2FF","#FF4DA6","#2B2B2B"], // свет, фон, доп1, доп2, чёрный
 }
 
+// minimal shader (WebGL2)
 const VERT = `#version 300 es
 precision highp float;
 in vec2 a_pos;
 out vec2 v_uv;
 void main(){
-  v_uv = (a_pos + 1.0) * 0.5;
-  gl_Position = vec4(a_pos, 0.0, 1.0);
+  v_uv = (a_pos+1.0)*0.5;
+  gl_Position = vec4(a_pos,0.0,1.0);
 }`
 
-// ВАЖНО: учитываем альфу исходного слоя ⇒ никакого чёрного фона
 const FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
-
 uniform sampler2D u_image;
 uniform vec2  u_resolution;
 uniform float u_cell;
@@ -91,40 +91,46 @@ uniform float u_dot;    // 0..1
 uniform vec3  u_pal[5];
 
 float luma(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
-vec2 rot(vec2 p, float a){ float s=sin(a), c=cos(a); return vec2(c*p.x - s*p.y, s*p.x + c*p.y); }
 
-// простая палитра по порогам
-vec3 posterizePal(float g, float steps){
-  float stepv = 1.0 / max(steps, 1.0);
+// pick palette by threshold (Warhol-like posterize)
+vec3 posterizePal(float g){
+  float stepv = 1.0 / max(u_levels,1.0);
   float t0 = stepv*1.0;
   float t1 = stepv*2.0;
   float t2 = stepv*3.0;
   float t3 = stepv*4.0;
-  if (g < t0) return u_pal[4];
+  if (g < t0) return u_pal[4];    // darkest -> black ink
   if (g < t1) return u_pal[3];
   if (g < t2) return u_pal[2];
   if (g < t3) return u_pal[1];
   return u_pal[0];
 }
 
+vec2 rot(vec2 p, float a){
+  float s = sin(a), c = cos(a);
+  return vec2(c*p.x - s*p.y, s*p.x + c*p.y);
+}
+
 void main(){
-  vec4 src4 = texture(u_image, v_uv);
-  float a = src4.a;
-  if (a <= 0.001) { outColor = vec4(0.0,0.0,0.0,0.0); return; } // прозрачные пиксели оставляем прозрачными
+  vec2 uv = v_uv;
+  vec4 tex = texture(u_image, uv);
+  vec3 src = tex.rgb;
 
-  float g = luma(src4.rgb / max(a, 1e-3)); // распремножим для корректной яркости
+  // если прозрачность — оставляем прозрачность
+  if (tex.a <= 0.001) { outColor = vec4(0.0,0.0,0.0,0.0); return; }
 
-  // полутона
-  vec2 px = v_uv * u_resolution;
-  vec2 pr = rot(px, u_angle) / max(u_cell, 1.0);
-  vec2 f = fract(pr) - 0.5;
+  float g = luma(src);
+
+  vec2 px = uv * u_resolution;
+  vec2 pr = rot(px, u_angle) / max(u_cell,1.0);
+  vec2 f = fract(pr)-0.5;
   float r = length(f*2.0);
   float dotMask = smoothstep(u_dot, 0.0, r);
 
-  vec3 baseCol = posterizePal(g, u_levels);
-  vec3 col = mix(baseCol, baseCol * dotMask, 0.85);
+  vec3 baseCol = posterizePal(g);
+  vec3 col = baseCol * mix(1.0, dotMask, 0.8);
 
-  outColor = vec4(col, a); // сохраняем оригинальную альфу
+  outColor = vec4(col, 1.0);
 }`
 
 function hexToRGB(hex: string): [number, number, number] {
@@ -144,25 +150,17 @@ export default function EditorCanvas() {
   const fxCanvasRef = useRef<HTMLCanvasElement|null>(null)
   const glRef = useRef<WebGL2RenderingContext|null>(null)
   const glProgRef = useRef<WebGLProgram|null>(null)
-  const glBufRef = useRef<WebGLBuffer|null>(null)
   const glUniformsRef = useRef<Record<string, WebGLUniformLocation|null>>({})
   const scheduleFx = useRef<number|undefined>(undefined)
 
-  // позиция/состояние карточки эффектов (док ниже Tools, drag, collapse)
-  const [fxUI, setFxUI] = useState<{x:number,y:number,open:boolean}>({ x: 16, y: 370, open: true })
-  const dragRef = useRef<{dx:number,dy:number,dragging:boolean}>({dx:0,dy:0,dragging:false})
+  // позиция панели (desktop), мобилка — шторка
+  const [fxOpenMobile, setFxOpenMobile] = useState(false)
 
-  useEffect(() => {
-    // стартовая док-позиция: под Tools
-    setFxUI(v => ({...v, y: (isMobile ? 300 : 340) }))
-  }, [])
-
-  // GL init
   const ensureGL = useCallback(() => {
     if (glRef.current) return true
     const canvas = fxCanvasRef.current
     if (!canvas) return false
-    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false })
+    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true })
     if (!gl) return false
     glRef.current = gl
 
@@ -181,20 +179,17 @@ export default function EditorCanvas() {
     gl.attachShader(prog, vs)
     gl.attachShader(prog, fs)
     gl.linkProgram(prog)
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      console.error(gl.getProgramInfoLog(prog))
-    }
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog))
     glProgRef.current = prog
     gl.useProgram(prog)
 
     // fullscreen tri
     const buf = gl.createBuffer()!
     gl.bindBuffer(gl.ARRAY_BUFFER, buf)
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([ -1,-1,  3,-1,  -1,3 ]), gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW)
     const loc = gl.getAttribLocation(prog, "a_pos")
     gl.enableVertexAttribArray(loc)
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
-    glBufRef.current = buf
 
     // uniforms
     const uni = (name:string)=>gl.getUniformLocation(prog, name)
@@ -211,17 +206,71 @@ export default function EditorCanvas() {
       u_pal3: uni("u_pal[3]"),
       u_pal4: uni("u_pal[4]"),
     }
-    gl.clearColor(0,0,0,0)
     return true
   }, [])
+
+  // draw FX from art layer DOM canvas (без «обнуления» Konva-слоя)
+  const renderFx = useCallback(() => {
+    if (!fx.enabled) return
+    const gl = glRef.current
+    const fxCanvas = fxCanvasRef.current
+    const artDomCanvas = ((artLayerRef.current?.getCanvas() as any)?._canvas) as HTMLCanvasElement | undefined
+    if (!gl || !fxCanvas || !artDomCanvas) return
+
+    // подгоняем размеры оверлея под реальный канвас слоя
+    const w = artDomCanvas.width
+    const h = artDomCanvas.height
+    if (fxCanvas.width !== w) fxCanvas.width = w
+    if (fxCanvas.height !== h) fxCanvas.height = h
+
+    // у оверлея всегда «натянутые» CSS-пиксели под Stage
+    fxCanvas.style.width = `${viewW}px`
+    fxCanvas.style.height = `${viewH}px`
+
+    gl.viewport(0,0,w,h)
+    gl.useProgram(glProgRef.current)
+
+    // источник как текстура (без CPU readback)
+    const tex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, artDomCanvas)
+
+    const U = glUniformsRef.current
+    gl.uniform1i(U.u_image!, 0)
+    gl.uniform2f(U.u_resolution!, w, h)
+    gl.uniform1f(U.u_cell!, fx.cell)
+    gl.uniform1f(U.u_levels!, Math.max(1, Math.min(8, fx.levels)))
+    gl.uniform1f(U.u_angle!, (fx.angle*Math.PI)/180)
+    gl.uniform1f(U.u_dot!, Math.min(1, Math.max(0, fx.dot)))
+    const p0 = hexToRGB(fx.palette[0]); gl.uniform3f(U.u_pal0!, p0[0],p0[1],p0[2])
+    const p1 = hexToRGB(fx.palette[1]); gl.uniform3f(U.u_pal1!, p1[0],p1[1],p1[2])
+    const p2 = hexToRGB(fx.palette[2]); gl.uniform3f(U.u_pal2!, p2[0],p2[1],p2[2])
+    const p3 = hexToRGB(fx.palette[3]); gl.uniform3f(U.u_pal3!, p3[0],p3[1],p3[2])
+    const p4 = hexToRGB(fx.palette[4]); gl.uniform3f(U.u_pal4!, p4[0],p4[1],p4[2])
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+    gl.deleteTexture(tex)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fx, /* размеры */])
+
+  const requestFx = useCallback(() => {
+    if (!fx.enabled || !fx.live) return
+    if (scheduleFx.current) cancelAnimationFrame(scheduleFx.current)
+    scheduleFx.current = requestAnimationFrame(() => renderFx())
+  }, [fx.enabled, fx.live, renderFx])
 
   // ================== Редактор/канвас ==================
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
   const stageRef   = useRef<Konva.Stage>(null)
-  const bgLayerRef = useRef<Konva.Layer>(null)    // мокап
-  const artLayerRef= useRef<Konva.Layer>(null)    // пользовательский контент + erase
+  const bgLayerRef = useRef<Konva.Layer>(null)    // ТОЛЬКО мокап
+  const artLayerRef= useRef<Konva.Layer>(null)    // ТОЛЬКО пользовательский контент + erase
   const uiLayerRef = useRef<Konva.Layer>(null)    // трансформер
   const trRef      = useRef<Konva.Transformer>(null)
   const frontBgRef = useRef<Konva.Image>(null)
@@ -262,7 +311,6 @@ export default function EditorCanvas() {
     return () => { document.body.style.overflow = prev }
   }, [set])
 
-  // helper’ы
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
@@ -270,6 +318,7 @@ export default function EditorCanvas() {
     n.opacity(meta.opacity)
     ;(n as any).globalCompositeOperation = meta.blend
   }
+
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
@@ -284,74 +333,14 @@ export default function EditorCanvas() {
     artLayerRef.current?.batchDraw()
     attachTransformer()
     if (fx.enabled) requestFx()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, layers])
 
-  // ===== FX render (из артового canvas) =====
-  const renderFx = useCallback(() => {
-    if (!fx.enabled) return
-    const gl = glRef.current
-    const canvas = fxCanvasRef.current
-    const artCanvas = (artLayerRef.current?.getCanvas() as any)?._canvas as HTMLCanvasElement | undefined
-    if (!gl || !canvas || !artCanvas) return
-
-    // sync sizes (логические пиксели канваса = базовый макет)
-    if (canvas.width !== BASE_W) {
-      canvas.width = BASE_W
-      canvas.height = BASE_H
-    }
-    canvas.style.width = `${viewW}px`
-    canvas.style.height = `${viewH}px`
-
-    gl.viewport(0,0,canvas.width,canvas.height)
-    gl.useProgram(glProgRef.current!)
-    gl.clear(gl.COLOR_BUFFER_BIT)
-
-    // текстура из внутреннего canvas Konva-слоя (без CPU-костов)
-    const tex = gl.createTexture()!
-    gl.bindTexture(gl.TEXTURE_2D, tex)
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, artCanvas)
-
-    const U = glUniformsRef.current
-    gl.uniform1i(U.u_image!, 0)
-    gl.uniform2f(U.u_resolution!, BASE_W, BASE_H)
-    gl.uniform1f(U.u_cell!, fx.cell)
-    gl.uniform1f(U.u_levels!, Math.max(1, Math.min(8, fx.levels)))
-    gl.uniform1f(U.u_angle!, (fx.angle*Math.PI)/180)
-    gl.uniform1f(U.u_dot!, Math.min(1, Math.max(0, fx.dot)))
-    const p0 = hexToRGB(fx.palette[0]); gl.uniform3f(U["u_pal0"]!, p0[0],p0[1],p0[2])
-    const p1 = hexToRGB(fx.palette[1]); gl.uniform3f(U["u_pal1"]!, p1[0],p1[1],p1[2])
-    const p2 = hexToRGB(fx.palette[2]); gl.uniform3f(U["u_pal2"]!, p2[0],p2[1],p2[2])
-    const p3 = hexToRGB(fx.palette[3]); gl.uniform3f(U["u_pal3"]!, p3[0],p3[1],p3[2])
-    const p4 = hexToRGB(fx.palette[4]); gl.uniform3f(U["u_pal4"]!, p4[0],p4[1],p4[2])
-
-    gl.drawArrays(gl.TRIANGLES, 0, 3)
-    gl.deleteTexture(tex)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fx, viewW, viewH])
-
-  const requestFx = useCallback(() => {
-    if (!fx.enabled || !fx.live) return
-    if (scheduleFx.current) cancelAnimationFrame(scheduleFx.current)
-    scheduleFx.current = requestAnimationFrame(() => renderFx())
-  }, [fx.enabled, fx.live, renderFx])
-
-  // ===== Transformer: анти-джиттер текста =====
+  // ===== Transformer: анти-джиттер текст =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
 
-  type TStart = {
-    width: number
-    left: number
-    right: number
-    fontSize: number
-    anchor: "middle-left" | "middle-right" | "corner" | null
-  }
+  type TStart = { width: number; left: number; right: number; fontSize: number; anchor: "middle-left" | "middle-right" | "corner" | null }
   const textStart = useRef<TStart | null>(null)
 
   const attachTransformer = () => {
@@ -368,7 +357,6 @@ export default function EditorCanvas() {
       uiLayerRef.current?.batchDraw()
       return
     }
-
     tr.nodes([n])
     tr.rotateEnabled(true)
 
@@ -381,9 +369,9 @@ export default function EditorCanvas() {
     if (isTextNode(n)) {
       tr.keepRatio(false)
       tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right"])
-
       const t = n as Konva.Text
-      tr.boundBoxFunc((oldB) => oldB) // нейтрализуем «скачки» от масштабов
+
+      tr.boundBoxFunc((oldB) => oldB)
 
       const onStartText = () => {
         const a = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
@@ -398,19 +386,15 @@ export default function EditorCanvas() {
       }
 
       const onTransform = () => {
-        const snap = textStart.current
-        if (!snap) return
+        const snap = textStart.current; if (!snap) return
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         if (active === "middle-left" || active === "middle-right" || snap.anchor === "middle-left" || snap.anchor === "middle-right") {
           const sx = Math.max(0.01, t.scaleX())
           const targetW = Math.max(TEXT_MIN_W, Math.min(snap.width * sx, TEXT_MAX_W))
           const curW = t.width() || snap.width
           if (Math.abs(targetW - curW) > EPS) {
-            if (active === "middle-left" || snap.anchor === "middle-left") {
-              t.width(targetW); t.x(snap.right - targetW)
-            } else {
-              t.x(snap.left);   t.width(targetW)
-            }
+            if (active === "middle-left" || snap.anchor === "middle-left") { t.width(targetW); t.x(snap.right - targetW) }
+            else { t.x(snap.left); t.width(targetW) }
           }
           t.scaleX(1); t.scaleY(1)
         } else {
@@ -428,7 +412,9 @@ export default function EditorCanvas() {
         t.scaleX(1); t.scaleY(1)
         textStart.current = null
         t.getLayer()?.batchDraw()
+        if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
       }
+
       n.on("transformstart.textfix", onStartText)
       n.on("transform.textfix", onTransform)
       n.on("transformend.textfix", onEnd)
@@ -440,16 +426,14 @@ export default function EditorCanvas() {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         let sx = (n as any).scaleX?.() ?? 1
         let sy = (n as any).scaleY?.() ?? 1
-        const isCorner = active && (active==="top-left"||active==="top-right"||active==="bottom-left"||active==="bottom-right")
+        const isCorner = active && (active === "top-left" || active === "top-right" || active === "bottom-left" || active === "bottom-right")
         if (isCorner) { const s = Math.max(Math.abs(sx), Math.abs(sy)); sx = s; sy = s }
         if (isImgOrRect(n)) {
           const w = (n as any).width?.() ?? 0
           const h = (n as any).height?.() ?? 0
-          ;(n as any).width(Math.max(1, w * sx))
-          ;(n as any).height(Math.max(1, h * sy))
+          ;(n as any).width(Math.max(1, w * sx)); (n as any).height(Math.max(1, h * sy))
         } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
-          const r = (n as any).radius()
-          ;(n as any).radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
+          const r = (n as any).radius(); (n as any).radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
         }
         ;(n as any).scaleX(1); (n as any).scaleY(1)
         n.getLayer()?.batchDraw()
@@ -610,12 +594,8 @@ export default function EditorCanvas() {
       if (!gid) gid = createStrokeGroup().id
       const g = find(gid)!.node as Konva.Group
       const line = new Konva.Line({
-        points: [x, y],
-        stroke: brushColor,
-        strokeWidth: brushSize,
-        lineCap: "round",
-        lineJoin: "round",
-        globalCompositeOperation: "source-over",
+        points: [x, y], stroke: brushColor, strokeWidth: brushSize,
+        lineCap: "round", lineJoin: "round", globalCompositeOperation: "source-over",
       })
       g.add(line); setIsDrawing(true)
     } else if (tool === "erase") {
@@ -623,12 +603,8 @@ export default function EditorCanvas() {
       if (!gid) gid = createEraseGroup().id
       const g = find(gid)!.node as Konva.Group
       const line = new Konva.Line({
-        points: [x, y],
-        stroke: "#000",
-        strokeWidth: brushSize,
-        lineCap: "round",
-        lineJoin: "round",
-        globalCompositeOperation: "destination-out",
+        points: [x, y], stroke: "#000", strokeWidth: brushSize,
+        lineCap: "round", lineJoin: "round", globalCompositeOperation: "destination-out",
       })
       g.add(line); setIsDrawing(true)
     }
@@ -656,17 +632,12 @@ export default function EditorCanvas() {
   const finishStroke = () => { setIsDrawing(false); if (fx.enabled && fx.live) requestFx() }
 
   // ===== Overlay-редактор текста =====
-  const editingRef = useRef<{
-    ta: HTMLTextAreaElement
-    nodeId: string
-    prevOpacity: number
-    cleanup: (apply?: boolean) => void
-    sync: () => void
-  } | null>(null)
+  const editingRef = useRef<{ ta: HTMLTextAreaElement; nodeId: string; prevOpacity: number; cleanup: (apply?: boolean) => void; sync: () => void } | null>(null)
 
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stContainer = stage.container()
+
     if (editingRef.current) { editingRef.current.cleanup(); editingRef.current = null }
 
     const prevOpacity = t.opacity()
@@ -675,6 +646,7 @@ export default function EditorCanvas() {
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
+
     Object.assign(ta.style, {
       position: "absolute", padding: "0", margin: "0", border: "none",
       background: "transparent", color: String(t.fill() || "#000"),
@@ -726,18 +698,10 @@ export default function EditorCanvas() {
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
       select(find(selectedId)?.id ?? (t.id() as string))
-      requestAnimationFrame(() => {
-        attachTransformer()
-        uiLayerRef.current?.batchDraw()
-        if (fx.enabled && fx.live) requestFx()
-      })
+      requestAnimationFrame(() => { attachTransformer(); uiLayerRef.current?.batchDraw(); if (fx.enabled && fx.live) requestFx() })
     }
 
-    const onKey = (ev: KeyboardEvent) => {
-      ev.stopPropagation()
-      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); cleanup(true) }
-      if (ev.key === "Escape") { ev.preventDefault(); cleanup(false) }
-    }
+    const onKey = (ev: KeyboardEvent) => { ev.stopPropagation(); if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); cleanup(true) } if (ev.key === "Escape") { ev.preventDefault(); cleanup(false) } }
     const onResize = () => sync()
     const onScroll = () => sync()
 
@@ -925,8 +889,6 @@ export default function EditorCanvas() {
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
-
-    // временно прячем UI-слой
     uiLayerRef.current?.visible(false)
 
     const showFront = s === "front"
@@ -935,13 +897,11 @@ export default function EditorCanvas() {
     frontArtRef.current?.visible(showFront)
     backArtRef.current?.visible(!showFront)
 
-    // при FX — арт уже прозрачный под оверлеем, просто экспортируем как есть
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
     bgLayerRef.current?.visible(false); st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
     bgLayerRef.current?.visible(true)
 
-    // вернуть состояния
     frontBgRef.current?.visible(side === "front")
     backBgRef.current?.visible(side === "back")
     frontArtRef.current?.visible(side === "front")
@@ -954,20 +914,20 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ==== FX lifecycle: делаем арт прозрачным (для подмены предпросмотром), но интерактивным
+  // ==== FX lifecycle: прячем арт-канвас ТОЛЬКО CSS-прозрачностью и рисуем оверлей ====
   useEffect(() => {
+    const dom = ((artLayerRef.current?.getCanvas() as any)?._canvas) as HTMLCanvasElement | undefined
     if (!fxCanvasRef.current) return
     if (fx.enabled) {
       if (!ensureGL()) return
-      artLayerRef.current?.opacity(0) // арт не исчезает — его «замещает» прозрачный GL-оверлей
+      if (dom) dom.style.opacity = "0" // визуально скрыт, но пиксели есть
       requestFx()
     } else {
-      artLayerRef.current?.opacity(1)
+      if (dom) dom.style.opacity = "1"
       const gl = glRef.current
       if (gl) gl.clear(gl.COLOR_BUFFER_BIT)
     }
-    uiLayerRef.current?.batchDraw()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fx.enabled])
 
   useEffect(() => { if (fx.enabled && fx.live) requestFx() }, [fx.cell, fx.levels, fx.angle, fx.dot, fx.palette, fx.live]) // eslint-disable-line
@@ -978,6 +938,25 @@ export default function EditorCanvas() {
       className="fixed inset-0 bg-white"
       style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}
     >
+      {/* Локальный CSS для «плоских» фейдеров */}
+      <style>{`
+        .fx-panel{ width: 172px; font-family: inherit; }
+        .fx-row{ display:flex; align-items:center; justify-content:space-between; margin:4px 0; }
+        .fx-label{ font-size:11px; letter-spacing:.2px; opacity:.8; }
+        .fx-range{ -webkit-appearance:none; appearance:none; width:100%; height:4px; background:#e5e7eb; border-radius:0; outline:none; }
+        .fx-range::-webkit-slider-thumb{ -webkit-appearance:none; width:10px; height:16px; background:#111; border:1px solid #111; border-radius:0; margin-top:-6px; }
+        .fx-range::-moz-range-thumb{ width:10px; height:16px; background:#111; border:1px solid #111; border-radius:0; }
+        .fx-btn{ height:24px; padding:0 8px; font-size:11px; background:#111; color:#fff; border:1px solid #111; border-radius:0; }
+        .fx-btn--ghost{ background:#fff; color:#111; }
+        .fx-chip{ width:16px; height:16px; border:1px solid #d1d5db; }
+        .fx-toggle{ width:14px; height:14px; border:1px solid #111; background:#fff; }
+        .fx-toggle.on{ background:#111; }
+        .fx-card{ background:#fff; border:1px solid #e5e7eb; box-shadow:0 3px 14px rgba(0,0,0,.06); }
+        .fx-title{ font-size:12px; font-weight:700; letter-spacing:.2px; }
+        .fx-fab{ position:fixed; left:12px; bottom:12px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid #111; z-index:25; }
+        .fx-sheet{ position:fixed; left:8px; right:8px; bottom:8px; padding:8px; z-index:24; }
+      `}</style>
+
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -1002,17 +981,13 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* 1. Мокап (НЕ фильтруем) */}
+            {/* 1. Мокап */}
             <Layer ref={bgLayerRef} listening={true}>
-              {frontMock && (
-                <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening={true} />
-              )}
-              {backMock && (
-                <KImage ref={backBgRef} image={backMock} visible={side==="back"} width={BASE_W} height={BASE_H} listening={true} />
-              )}
+              {frontMock && (<KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening={true} />)}
+              {backMock &&  (<KImage ref={backBgRef}  image={backMock}  visible={side==="back"}  width={BASE_W} height={BASE_H} listening={true} />)}
             </Layer>
 
-            {/* 2. Арт (поверх мокапа). При FX — opacity:0, но живой */}
+            {/* 2. Арт */}
             <Layer ref={artLayerRef} listening={true}>
               <KGroup ref={frontArtRef} visible={side==="front"} />
               <KGroup ref={backArtRef}  visible={side==="back"}  />
@@ -1020,32 +995,19 @@ export default function EditorCanvas() {
 
             {/* 3. UI-слой трансформера */}
             <Layer ref={uiLayerRef}>
-              <Transformer
-                ref={trRef}
-                rotateEnabled
-                anchorSize={12}
-                borderStroke="black"
-                anchorStroke="black"
-                anchorFill="white"
-              />
+              <Transformer ref={trRef} rotateEnabled anchorSize={12} borderStroke="black" anchorStroke="black" anchorFill="white" />
             </Layer>
           </Stage>
 
           {/* FX overlay canvas (GPU), pointer-events:none */}
           <canvas
             ref={fxCanvasRef}
-            style={{
-              position: "absolute", left: 0, top: 0,
-              width: `${viewW}px`, height: `${viewH}px`,
-              pointerEvents: "none", opacity: fx.enabled ? 1 : 0,
-              imageRendering: "auto",
-              transition: "opacity 120ms ease"
-            }}
+            style={{ position: "absolute", left: 0, top: 0, width: `${viewW}px`, height: `${viewH}px`, pointerEvents: "none", opacity: fx.enabled ? 1 : 0, transition: "opacity 120ms ease" }}
           />
         </div>
       </div>
 
-      {/* === Toolbar */}
+      {/* Toolbar */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
@@ -1085,129 +1047,118 @@ export default function EditorCanvas() {
         }}
       />
 
-      {/* === EFFECTS PANEL (док под Tools, квадратный UI) === */}
-      <div
-        style={{
-          position: "fixed",
-          left: fxUI.x, top: fxUI.y + padTop - 64,
-          width: 208,
-          background: "#fff",
-          border: "1px solid #111",
-          borderRadius: 0,
-          boxShadow: "none",
-          zIndex: 12
-        }}
-      >
-        <div
-          onMouseDown={(e)=>{
-            dragRef.current.dragging = true
-            dragRef.current.dx = e.clientX - fxUI.x
-            dragRef.current.dy = e.clientY - (fxUI.y + padTop - 64)
-            e.preventDefault()
-          }}
-          style={{cursor:"move", background:"#111", color:"#fff", padding:"6px 8px", userSelect:"none", display:"flex", alignItems:"center", justifyContent:"space-between"}}
-        >
-          <span style={{fontSize:12, letterSpacing:.3}}>EFFECTS</span>
-          <div style={{display:"flex", gap:8, alignItems:"center"}}>
-            <label style={{display:"flex", gap:4, alignItems:"center", fontSize:11}}>
-              <input type="checkbox" checked={fx.enabled} onChange={e=>{ setFx(v=>({...v, enabled: e.target.checked })); if (e.target.checked) ensureGL(); }} />
-              <span>On</span>
-            </label>
+      {/* === EFFECTS PANEL (под Tools) — desktop */}
+      {!isMobile && (
+        <div className="fx-panel fx-card"
+          style={{ position:"fixed", left: 16, top: padTop + 220, padding:8, zIndex: 10 }}>
+          <div className="fx-row" style={{marginBottom:6}}>
+            <div className="fx-title">EFFECTS</div>
             <button
-              onClick={()=> setFxUI(v=>({...v, open: !v.open}))}
-              style={{border:"1px solid #fff", background:"transparent", color:"#fff", padding:"0 6px", height:20, fontSize:11}}
-            >{fxUI.open ? "–" : "+"}</button>
+              className={`fx-toggle ${fx.enabled ? "on":""}`}
+              onClick={()=> setFx(v=>({...v, enabled: !v.enabled}))}
+              aria-label="Toggle FX"
+            />
+          </div>
+
+          <div className="fx-row"><span className="fx-label">Mode</span><span className="fx-label">ScreenPrint+</span></div>
+          <div style={{margin:"6px 0"}}>
+            <div className="fx-row"><span className="fx-label">Cell</span><span>{fx.cell}</span></div>
+            <input className="fx-range" type="range" min={4} max={64} step={1} value={fx.cell} onChange={e=>setFx(p=>({...p, cell:Number(e.target.value)}))}/>
+          </div>
+          <div style={{margin:"6px 0"}}>
+            <div className="fx-row"><span className="fx-label">Levels</span><span>{fx.levels}</span></div>
+            <input className="fx-range" type="range" min={2} max={6} step={1} value={fx.levels} onChange={e=>setFx(p=>({...p, levels:Number(e.target.value)}))}/>
+          </div>
+          <div style={{margin:"6px 0"}}>
+            <div className="fx-row"><span className="fx-label">Angle</span><span>{fx.angle}°</span></div>
+            <input className="fx-range" type="range" min={0} max={90} step={1} value={fx.angle} onChange={e=>setFx(p=>({...p, angle:Number(e.target.value)}))}/>
+          </div>
+          <div style={{margin:"6px 0"}}>
+            <div className="fx-row"><span className="fx-label">Dot</span><span>{Math.round(fx.dot*100)}%</span></div>
+            <input className="fx-range" type="range" min={0} max={1} step={0.01} value={fx.dot} onChange={e=>setFx(p=>({...p, dot:Number(e.target.value)}))}/>
+          </div>
+
+          <div className="fx-row" style={{marginTop:6}}>
+            <span className="fx-label">Palette</span>
+            <div style={{display:"flex", gap:6}}>
+              {fx.palette.map((c, i)=>(
+                <button key={i} className="fx-chip" style={{background:c}} title={c}
+                  onClick={()=> {
+                    const val = prompt("Hex color", c) || c
+                    setFx(p=>{ const pal=[...p.palette]; pal[i]=val; return {...p, palette: pal} })
+                  }}/>
+              ))}
+            </div>
+          </div>
+
+          <div className="fx-row" style={{marginTop:8}}>
+            <label className="fx-row" style={{gap:6}}>
+              <input type="checkbox" checked={fx.live} onChange={e=>setFx(v=>({...v, live: e.target.checked}))}/>
+              <span className="fx-label">Live</span>
+            </label>
+            <div style={{display:"flex", gap:6}}>
+              <button className="fx-btn" onClick={()=>{ if (!fx.enabled) return; ensureGL(); renderFx() }}>Update</button>
+              <button className="fx-btn fx-btn--ghost" onClick={()=>setFx(DEFAULT_FX)}>Reset</button>
+            </div>
           </div>
         </div>
+      )}
 
-        {fxUI.open && (
-          <div style={{padding:8}}>
-            <FxRow label="Mode" right="ScreenPrint+" />
+      {/* === MOBILE: кнопка + шторка === */}
+      {isMobile && (
+        <>
+          <button className="fx-fab" onClick={()=>setFxOpenMobile(v=>!v)} aria-label="FX">FX</button>
+          {fxOpenMobile && (
+            <div className="fx-card fx-sheet">
+              <div className="fx-row" style={{marginBottom:6}}>
+                <div className="fx-title">EFFECTS</div>
+                <button className={`fx-toggle ${fx.enabled ? "on":""}`} onClick={()=> setFx(v=>({...v, enabled: !v.enabled}))}/>
+              </div>
 
-            <FxRange label="Cell"  min={4} max={64} step={1}   value={fx.cell}   onChange={v=>setFx(p=>({...p, cell:v}))} />
-            <FxRange label="Levels"min={2} max={6}  step={1}   value={fx.levels} onChange={v=>setFx(p=>({...p, levels:v}))} />
-            <FxRange label="Angle" min={0} max={90} step={1}   value={fx.angle}  onChange={v=>setFx(p=>({...p, angle:v}))} suffix="°" />
-            <FxRange label="Dot"   min={0} max={1}  step={0.01} value={fx.dot}    onChange={v=>setFx(p=>({...p, dot:v}))} toPercent />
+              <div className="fx-row"><span className="fx-label">Mode</span><span className="fx-label">ScreenPrint+</span></div>
+              <div style={{margin:"6px 0"}}>
+                <div className="fx-row"><span className="fx-label">Cell</span><span>{fx.cell}</span></div>
+                <input className="fx-range" type="range" min={4} max={64} step={1} value={fx.cell} onChange={e=>setFx(p=>({...p, cell:Number(e.target.value)}))}/>
+              </div>
+              <div style={{margin:"6px 0"}}>
+                <div className="fx-row"><span className="fx-label">Levels</span><span>{fx.levels}</span></div>
+                <input className="fx-range" type="range" min={2} max={6} step={1} value={fx.levels} onChange={e=>setFx(p=>({...p, levels:Number(e.target.value)}))}/>
+              </div>
+              <div style={{margin:"6px 0"}}>
+                <div className="fx-row"><span className="fx-label">Angle</span><span>{fx.angle}°</span></div>
+                <input className="fx-range" type="range" min={0} max={90} step={1} value={fx.angle} onChange={e=>setFx(p=>({...p, angle:Number(e.target.value)}))}/>
+              </div>
+              <div style={{margin:"6px 0"}}>
+                <div className="fx-row"><span className="fx-label">Dot</span><span>{Math.round(fx.dot*100)}%</span></div>
+                <input className="fx-range" type="range" min={0} max={1} step={0.01} value={fx.dot} onChange={e=>setFx(p=>({...p, dot:Number(e.target.value)}))}/>
+              </div>
+              <div className="fx-row" style={{marginTop:6}}>
+                <span className="fx-label">Palette</span>
+                <div style={{display:"flex", gap:6}}>
+                  {fx.palette.map((c, i)=>(
+                    <button key={i} className="fx-chip" style={{background:c}} title={c}
+                      onClick={()=> {
+                        const val = prompt("Hex color", c) || c
+                        setFx(p=>{ const pal=[...p.palette]; pal[i]=val; return {...p, palette: pal} })
+                      }}/>
+                  ))}
+                </div>
+              </div>
 
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:6}}>
-              <div style={{fontSize:11, opacity:.7}}>Palette</div>
-              <div style={{display:"flex", gap:6}}>
-                {fx.palette.map((c, i)=>(
-                  <button key={i}
-                    onClick={()=> {
-                      const val = prompt("Hex color", c) || c
-                      setFx(p=>{ const pal=[...p.palette]; pal[i]=val; return {...p, palette: pal} })
-                    }}
-                    title={c}
-                    style={{width:16, height:16, border:"1px solid #111", background:c}}
-                  />
-                ))}
+              <div className="fx-row" style={{marginTop:8}}>
+                <label className="fx-row" style={{gap:6}}>
+                  <input type="checkbox" checked={fx.live} onChange={e=>setFx(v=>({...v, live: e.target.checked}))}/>
+                  <span className="fx-label">Live</span>
+                </label>
+                <div style={{display:"flex", gap:6}}>
+                  <button className="fx-btn" onClick={()=>{ if (!fx.enabled) return; ensureGL(); renderFx() }}>Update</button>
+                  <button className="fx-btn fx-btn--ghost" onClick={()=>setFx(DEFAULT_FX)}>Reset</button>
+                </div>
               </div>
             </div>
-
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:8}}>
-              <label style={{display:"flex", alignItems:"center", gap:6, fontSize:11}}>
-                <input type="checkbox" checked={fx.live} onChange={e=>setFx(v=>({...v, live: e.target.checked}))} />
-                <span>Live</span>
-              </label>
-              <div style={{display:"flex", gap:6}}>
-                <button onClick={()=>{ if (!fx.enabled) return; ensureGL(); renderFx() }} style={btnSquare}>Update</button>
-                <button onClick={()=>setFx(DEFAULT_FX)} style={{...btnSquare, background:"#fff", color:"#111"}}>Reset</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* drag listeners для панели */}
-      <div
-        onMouseMove={(e)=>{
-          if (!dragRef.current.dragging) return
-          const nx = Math.max(8, e.clientX - dragRef.current.dx)
-          const ny = Math.max(padTop, e.clientY - dragRef.current.dy)
-          setFxUI(v=>({...v, x: nx, y: ny - padTop + 64 }))
-        }}
-        onMouseUp={()=>{ dragRef.current.dragging=false }}
-        style={{position:"fixed", inset:0, pointerEvents:"none"}}
-      />
-
-      {/* локальные стили для прямых «линейных» ползунков */}
-      <style>{`
-        .fx-range { -webkit-appearance:none; width:100%; height:2px; background:#111; outline:none; }
-        .fx-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:10px; height:10px; background:#111; border:1px solid #111; cursor:pointer; }
-        .fx-range::-moz-range-thumb { width:10px; height:10px; background:#111; border:1px solid #111; cursor:pointer; }
-      `}</style>
+          )}
+        </>
+      )}
     </div>
   )
-}
-
-/* ===== Квадратный UI для панели ===== */
-function FxRow({label,right}:{label:string;right?:string}) {
-  return (
-    <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", margin:"4px 0"}}>
-      <div style={{fontSize:11, opacity:.7}}>{label}</div>
-      <div style={{fontSize:11}}>{right}</div>
-    </div>
-  )
-}
-function FxRange({
-  label, min, max, step, value, onChange, suffix, toPercent
-}:{
-  label:string; min:number; max:number; step:number; value:number;
-  onChange:(v:number)=>void; suffix?:string; toPercent?:boolean
-}) {
-  const display = toPercent ? `${Math.round(value*100)}%` : (suffix ? `${value}${suffix}` : String(value))
-  return (
-    <div style={{margin:"6px 0"}}>
-      <div style={{display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:3}}>
-        <span style={{opacity:.7}}>{label}</span>
-        <span>{display}</span>
-      </div>
-      <input className="fx-range" type="range" min={min} max={max} step={step} value={value}
-             onChange={e=>onChange(Number(e.target.value))} />
-    </div>
-  )
-}
-const btnSquare: React.CSSProperties = {
-  height:24, padding:"0 8px", fontSize:11, background:"#111", color:"#fff", border:"1px solid #111", borderRadius:0
 }
