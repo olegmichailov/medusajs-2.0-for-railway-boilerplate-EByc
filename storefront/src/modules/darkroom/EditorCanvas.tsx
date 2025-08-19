@@ -15,14 +15,14 @@ const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// ТЕКСТ: клампы
+// ТЕКСТ — лимиты
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MIN_W  = 60
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // анти-джиттер
-const EPS = 0.0005
+const EPS = 0.25
 
 // id-helper
 const uid = () => "n_" + Math.random().toString(36).slice(2)
@@ -51,9 +51,9 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
-  // мобильный старт — сразу кисть
+  // мобайл — стартуем кисть
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
-  // корректная хит-тест логика во время драг/трансформа
+  // корректная hit-логика во время драг/трансформа
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
@@ -131,15 +131,6 @@ export default function EditorCanvas() {
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
 
-  // состояние для «мягкого» текста
-  const textStateRef = useRef<{
-    centerStage: { x: number; y: number }
-    startWidth: number
-    startLeft: number
-    startRight: number
-    startFont: number
-  } | null>(null)
-
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
@@ -166,7 +157,9 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // --- ТЕКСТ: боковые = ширина симметрично; углы = пропорциональный скейл вокруг центра ---
+      // ТЕКСТ:
+      // - боковые ручки => меняем width симметрично (центр фиксирован)
+      // - углы => пропорциональный масштаб через fontSize (НЕ scale)
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -174,104 +167,76 @@ export default function EditorCanvas() {
       ])
 
       const t = n as Konva.Text
+      const start = { width: 0, fontSize: 0, cx: 0, cy: 0, h: 0 }
+
+      const snapshot = () => {
+        const w = Math.max(1, t.width() || 1)
+        const h = t.height()
+        start.width = w
+        start.fontSize = t.fontSize()
+        start.cx = t.x() + w/2
+        start.cy = t.y() + h/2
+        start.h  = h
+      }
+
+      const normalizeScale = () => { t.scaleX(1); t.scaleY(1) }
 
       const onStartText = () => {
-        const r = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
-        textStateRef.current = {
-          centerStage: { x: r.x + r.width/2, y: r.y + r.height/2 },
-          startWidth: Math.max(1, t.width() || 1),
-          startLeft: t.x(),
-          startRight: t.x() + (t.width() || 0),
-          startFont: t.fontSize(),
-        }
+        snapshot()
+        normalizeScale()
       }
 
       const onTransform = () => {
-        const st = textStateRef.current; if (!st) return
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         if (!active) return
 
-        // БОКОВЫЕ — меняем width, центр фиксируем
+        // боковые ручки — меняем ширину симметрично, без scale
         if (active === "middle-left" || active === "middle-right") {
           const sx = Math.max(0.01, Math.abs(t.scaleX()))
-          const nextW = Math.max(TEXT_MIN_W, Math.min(st.startWidth * sx, TEXT_MAX_W))
-          const cx = st.startLeft + st.startWidth / 2
-          // симметрия относительно центра
+          const nextW = Math.round(Math.max(TEXT_MIN_W, Math.min(start.width * sx, TEXT_MAX_W)))
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
             t.width(nextW)
-            t.x(cx - nextW / 2)
+            const nx = Math.round(start.cx - nextW/2)
+            if (Math.abs(t.x() - nx) > EPS) t.x(nx)
           }
-          // важный момент: не накапливаем scale
-          t.scaleX(1); t.scaleY(1)
+          normalizeScale()
           t.getLayer()?.batchDraw()
           trRef.current?.forceUpdate()
           uiLayerRef.current?.batchDraw()
           return
         }
 
-        // УГЛЫ — строго пропорционально и вокруг исходного центра
+        // углы — пропорциональный масштаб через fontSize; центр фиксируем по X/Y
         const sx = Math.abs(t.scaleX())
         const sy = Math.abs(t.scaleY())
         const s  = Math.max(sx, sy)
-        // выравниваем scaleX/scaleY, сохраняя знак (на всякий)
-        t.scaleX((t.scaleX() < 0 ? -1 : 1) * s)
-        t.scaleY((t.scaleY() < 0 ? -1 : 1) * s)
-
-        // держим центр: считаем текущий bbox и подвигаем позицию
-        const r = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
-        const dx = st.centerStage.x - (r.x + r.width/2)
-        const dy = st.centerStage.y - (r.y + r.height/2)
-        if (Math.abs(dx) > EPS || Math.abs(dy) > EPS) {
-          t.x(t.x() + dx)
-          t.y(t.y() + dy)
+        const nextFS = Math.max(TEXT_MIN_FS, Math.min(TEXT_MAX_FS, Math.round(start.fontSize * s)))
+        if (Math.abs(t.fontSize() - nextFS) > EPS) {
+          t.fontSize(nextFS)
+          // после смены кегля высота изменилась — пересчёт Y по центру
+          const newH = t.height()
+          const ny = Math.round(start.cy - newH/2)
+          if (Math.abs(t.y() - ny) > EPS) t.y(ny)
         }
-
+        normalizeScale()
         t.getLayer()?.batchDraw()
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
       }
 
-      const onEndText = () => {
-        const st = textStateRef.current; if (!st) return
-        // «Запекаем» масштаб в fontSize и width; сбрасываем scale к 1; центр сохраняем
-        const s = Math.max(Math.abs(t.scaleX()), Math.abs(t.scaleY()))
-        // Тонкий порог — если масштаб почти 1, просто нормализуем scale
-        if (Math.abs(s - 1) <= 1e-4) {
-          t.scaleX(1); t.scaleY(1)
-          t.getLayer()?.batchDraw()
-          textStateRef.current = null
-          return
-        }
-
-        const cx = st.centerStage.x
-        const cy = st.centerStage.y
-
-        // новые параметры
-        const newFont = Math.max(TEXT_MIN_FS, Math.min(TEXT_MAX_FS, Math.round(st.startFont * s)))
-        const newW    = Math.max(TEXT_MIN_W,  Math.min(TEXT_MAX_W,  st.startWidth * s))
-
-        // применяем
-        t.scaleX(1); t.scaleY(1)
-        t.fontSize(newFont)
-        t.width(newW)
-
-        // вернуть центр
-        const r2 = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
-        const dx = cx - (r2.x + r2.width/2)
-        const dy = cy - (r2.y + r2.height/2)
-        t.x(t.x() + dx)
-        t.y(t.y() + dy)
-
+      const onEnd = () => {
+        normalizeScale()
         t.getLayer()?.batchDraw()
-        textStateRef.current = null
+        trRef.current?.forceUpdate()
+        uiLayerRef.current?.batchDraw()
       }
 
       n.on("transformstart.textfix", onStartText)
       n.on("transform.textfix", onTransform)
-      n.on("transformend.textfix", onEndText)
+      n.on("transformend.textfix", onEnd)
       detachTextFix.current = () => { n.off(".textfix") }
     } else {
-      // ИЗОБРАЖЕНИЯ/ФИГУРЫ: углы — пропорционально, боковые — свободно; bake масштаба в геометрию
+      // ИЗОБРАЖЕНИЯ/ФИГУРЫ: углы — пропорционально, боковые — свободно; переносим scale в геометрию
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -282,7 +247,6 @@ export default function EditorCanvas() {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         let sx = (n as any).scaleX?.() ?? 1
         let sy = (n as any).scaleY?.() ?? 1
-
         const isCorner = active && (
           active === "top-left" || active === "top-right" ||
           active === "bottom-left" || active === "bottom-right"
@@ -473,7 +437,7 @@ export default function EditorCanvas() {
       const lay = ensureStrokeGroup()
       const g = lay.node as Konva.Group
       const line = new Konva.Line({
-        points: [x, y, x + 0.01, y + 0.01], // сразу с первого клика
+        points: [x, y, x + 0.01, y + 0.01],
         stroke: brushColor,
         strokeWidth: brushSize,
         lineCap: "round",
@@ -522,12 +486,12 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста — хэндлы остаются видимыми =====
+  // ===== Overlay-редактор текста — хэндлы остаются =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stContainer = stage.container()
 
-    // НЕ скрываем ноду, а делаем почти прозрачной — Transformer остаётся
+    // НЕ скрываем ноду — делаем почти прозрачной, чтобы Transformer оставался
     const prevOpacity = t.opacity()
     t.opacity(0.01)
     t.getLayer()?.batchDraw()
@@ -538,9 +502,9 @@ export default function EditorCanvas() {
     const place = () => {
       const b = stContainer.getBoundingClientRect()
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      ta.style.left = `${b.left + r.x * scale}px`
-      ta.style.top = `${b.top + r.y * scale}px`
-      ta.style.width = `${Math.max(2, r.width * scale)}px`
+      ta.style.left   = `${b.left + r.x * scale}px`
+      ta.style.top    = `${b.top  + r.y * scale}px`
+      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
       ta.style.height = `${Math.max(2, r.height * scale)}px`
     }
 
@@ -553,9 +517,8 @@ export default function EditorCanvas() {
       color: String(t.fill() || "#000"),
       fontFamily: t.fontFamily(),
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
-      fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      // учитываем scaleY при оверлее
-      fontSize: `${t.fontSize() * (Math.abs(t.scaleY()) || 1) * scale}px`,
+      fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
+      fontSize:   `${t.fontSize() * scale}px`,
       lineHeight: String(t.lineHeight()),
       letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
       whiteSpace: "pre-wrap",
@@ -584,11 +547,20 @@ export default function EditorCanvas() {
       })
     }
 
+    // Слушаем изменения свойств у Konva-ноды (кегль/ширина/позиция) — синк textarea live
+    const onFontSize = () => { ta.style.fontSize = `${t.fontSize() * scale}px`; place() }
+    const onWidth    = () => { place() }
+    const onXY       = () => { place() }
+
     const cleanup = (apply = true) => {
       window.removeEventListener("scroll", place, true)
       window.removeEventListener("resize", place)
       ta.removeEventListener("input", onInput)
       ta.removeEventListener("keydown", onKey as any)
+      t.off("fontSizeChange.overlay")
+      t.off("widthChange.overlay")
+      t.off("xChange.overlay")
+      t.off("yChange.overlay")
       if (apply) t.text(ta.value)
       ta.remove()
       t.opacity(prevOpacity)
@@ -607,6 +579,11 @@ export default function EditorCanvas() {
     ta.addEventListener("keydown", onKey as any)
     window.addEventListener("resize", place)
     window.addEventListener("scroll", place, true)
+
+    t.on("fontSizeChange.overlay", onFontSize)
+    t.on("widthChange.overlay",    onWidth)
+    t.on("xChange.overlay",        onXY)
+    t.on("yChange.overlay",        onXY)
   }
 
   // ===== Жесты/указатель =====
@@ -621,7 +598,9 @@ export default function EditorCanvas() {
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
   const onDown = (e: any) => {
+    // НЕ делаем preventDefault — иначе Konva ломает трансформ
     if (isTransformerChild(e.target)) return
+
     if (tool === "brush" || tool === "erase") {
       const sp = getStagePointer(); const p = toCanvas(sp)
       startStroke(p.x, p.y); return
@@ -905,8 +884,8 @@ export default function EditorCanvas() {
           onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
           onDelete: deleteLayer,
           onDuplicate: duplicateLayer,
-          onChangeBlend: (id, b)=>{}, // blend скрыт на мобилке
-          onChangeOpacity: (id, o)=>{}, // скрыт
+          onChangeBlend: (id, b)=>{}, // скрыто на мобилке
+          onChangeOpacity: (id, o)=>{}, // скрыто
           onMoveUp: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>0) reorder(id, order[i-1], "before") },
           onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
         }}
