@@ -136,7 +136,9 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
 
   // снимок исходных размеров для плавного ресайза текста
-  const textStart = useRef<{ width: number; left: number; right: number; fontSize: number; anchor: string | null } | null>(null)
+  const textStart = useRef<{
+    width: number; left: number; right: number; fontSize: number; anchor: string | null
+  } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -187,6 +189,13 @@ export default function EditorCanvas() {
 
       const onTransform = () => {
         if (!textStart.current) onStartText()
+
+        // если по какой-то причине anchor ещё не пойман — возьмём сейчас
+        if (textStart.current && !textStart.current.anchor) {
+          const a = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+          textStart.current.anchor = a ?? null
+        }
+
         const anchor = textStart.current!.anchor
 
         if (anchor === "middle-left" || anchor === "middle-right") {
@@ -288,7 +297,6 @@ export default function EditorCanvas() {
       ;(l.node as any).draggable(enable && !l.meta.locked)
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
-
   }, [tool, layers, side])
 
   // ===== хоткеи (без Undo/Redo) =====
@@ -486,95 +494,84 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста (обновлён под «внутри рамки») =====
+  // ===== Overlay-редактор текста (внутри bbox, без подложки) =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
 
-    // абсолютные координаты, вращение, масштаб
-    const absPos = t.getAbsolutePosition()
-    const absRot = t.getAbsoluteRotation() || t.rotation()
+    // точное попадание по bbox, учитывая любые трансформации
+    const place = () => {
+      const rect = t.getClientRect({ skipStroke: true }) // координаты в системе Stage
+      ta.style.left   = `${stBox.left + rect.x * scale}px`
+      ta.style.top    = `${stBox.top  + rect.y * scale}px`
+      ta.style.width  = `${Math.max(1, rect.width  * scale)}px`
+      ta.style.height = `${Math.max(1, rect.height * scale)}px`
+    }
 
-    const x = stBox.left + absPos.x * scale
-    const y = stBox.top  + absPos.y * scale
-    const w = (t.width()  || 0) * scale
-    const h = (t.height() || t.fontSize()) * scale
-
-    // прячем канвас-текст, рамку — тоже, чтобы не мешала выделению
+    // спрячем ноду и рамку
     t.visible(false)
     trRef.current?.nodes([])
 
+    // textarea
     const ta = document.createElement("textarea")
     ta.value = t.text()
-
-    // ——— визуал
-    ta.style.position = "absolute"
-    ta.style.left = `${x}px`
-    ta.style.top  = `${y}px`
-    ta.style.width  = `${Math.max(4, w)}px`
-    ta.style.height = `${Math.max(4, h)}px`
-    ta.style.padding = "0"
-    ta.style.margin = "0"
-    ta.style.border = "none"
-    ta.style.background = "transparent"
-    ta.style.color = String(t.fill() || "#000")
-    ta.style.fontFamily = t.fontFamily()
-    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
-    ta.style.fontStyle  = t.fontStyle()?.includes("italic") ? "italic" : "normal"
-    ta.style.fontSize = `${t.fontSize() * scale}px`
-    ta.style.lineHeight = String(t.lineHeight())
-    ta.style.letterSpacing = `${(t.letterSpacing?.() ?? 0) * scale}px`
-    ta.style.whiteSpace = "pre-wrap"
-    ta.style.overflow = "hidden"
-    ta.style.outline = "none"
-    ta.style.resize = "none"
-    ta.style.transformOrigin = "left top"
-    ta.style.transform = `rotate(${absRot}deg)`
-    ta.style.zIndex = "9999"
-    ta.style.userSelect = "text"
-    ta.style.caretColor = String(t.fill() || "#000")
-
-    // выравнивание
-    ta.style.textAlign = (t.align?.() as any) || "left"
+    Object.assign(ta.style, {
+      position: "absolute",
+      padding: "0",
+      margin: "0",
+      background: "transparent",
+      border: "0",
+      outline: "0",
+      color: String(t.fill() || "#000"),
+      fontFamily: t.fontFamily(),
+      fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
+      fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
+      fontSize: `${t.fontSize() * scale}px`,
+      lineHeight: String(t.lineHeight()),
+      letterSpacing: `${((t as any).letterSpacing?.() || 0) * scale}px`,
+      textAlign: (t.align?.() || "left") as any,
+      whiteSpace: "pre-wrap",
+      overflow: "hidden",
+      transformOrigin: "left top",
+      zIndex: "9999",
+      resize: "none",
+      userSelect: "text",
+      caretColor: String(t.fill() || "#000"),
+    } as CSSStyleDeclaration)
 
     document.body.appendChild(ta)
+    place()
     ta.focus()
-    // выделять весь текст не будем — оставим курсор в конце, как в Adobe
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    // следим за изменением текста — обновляем высоту в рамках bbox
-    const clampHeight = () => {
-      // ограничиваемся рамкой текста
-      ta.style.height = `${Math.max(4, h)}px`
-      // а ширина фиксирована рамкой
-      ta.style.width  = `${Math.max(4, w)}px`
-    }
-    clampHeight()
+    const onViewportMove = () => place()
+    window.addEventListener("scroll", onViewportMove, true)
+    window.addEventListener("resize", onViewportMove)
 
-    const commit = (apply: boolean) => {
+    const finish = (apply: boolean) => {
+      window.removeEventListener("scroll", onViewportMove, true)
+      window.removeEventListener("resize", onViewportMove)
+
       if (apply) t.text(ta.value)
       ta.remove()
       t.visible(true)
       artLayerRef.current?.batchDraw()
-      attachTransformer()
+
+      // вернуть рамку
+      set({ tool: "move" as Tool })
+      requestAnimationFrame(() => {
+        select(find(selectedId)?.id ?? (t.id() as string))
+        attachTransformer()
+      })
     }
 
-    ta.addEventListener("input", clampHeight)
+    ta.addEventListener("input", place) // размер bbox может меняться у текста
     ta.addEventListener("keydown", (ev) => {
       ev.stopPropagation()
-      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
-      if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); finish(true) }
+      if (ev.key === "Escape") { ev.preventDefault(); finish(false) }
     })
-    ta.addEventListener("blur", () => commit(true))
-
-    // если пользователь прокрутил страницу — подвинем textarea вместе с bbox
-    const onScroll = () => {
-      const b = stage.container().getBoundingClientRect()
-      ta.style.left = `${b.left + absPos.x * scale}px`
-      ta.style.top  = `${b.top  + absPos.y * scale}px`
-    }
-    window.addEventListener("scroll", onScroll, { passive: true })
-    ta.addEventListener("remove", () => window.removeEventListener("scroll", onScroll))
+    ta.addEventListener("blur", () => finish(true))
   }
 
   // ===== Жесты/указатель =====
