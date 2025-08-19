@@ -69,7 +69,7 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // тик UI для синхры
+  // тик UI
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
@@ -107,7 +107,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // НЕ меняем blend у кисти/ластика — только opacity
+  // НЕ трогаем blend у кисти/ластика — только opacity
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -134,14 +134,8 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
-  // снапшот для текста — убирает «дрожь» и любые сбросы
-  const textSnap = useRef<{
-    box:{x:number;y:number;width:number;height:number}
-    fs:number
-    w:number
-    cx:number
-    cy:number
-  }|null>(null)
+  // снапшот для текста
+  const textSnap = useRef<{ fs:number; w:number; cx:number; cy:number } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -175,72 +169,66 @@ export default function EditorCanvas() {
         "middle-left","middle-right"
       ])
 
-      // на всякий — чистим снапшот в конце
-      const onEndText = () => { textSnap.current = null }
-      n.on("transformend.textsnap", onEndText)
-
-      // ЛЕНИВАЯ инициализация снапшота: прямо в boundBoxFunc (она вызывается раньше transformstart)
-      const makeSnap = (t: Konva.Text) => {
+      // 1) фиксируем стартовые параметры на transformstart
+      const onStartText = () => {
+        const t = n as Konva.Text
         const w = Math.max(1, t.width() || 1)
         const h = Math.max(1, t.height() || 1)
-        return {
-          box: { x: t.x(), y: t.y(), width: w, height: h },
+        textSnap.current = {
           fs: t.fontSize(),
           w,
           cx: t.x() + w/2,
           cy: t.y() + h/2,
         }
+        // сброс локальных scale в 1, чтобы дальше считать ровно
+        t.scaleX(1); t.scaleY(1)
       }
 
-      ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
+      // 2) свой трансформ вместо стандартного — НИКАКОГО СКАЧКА
+      const onTransformText = () => {
         const t = n as Konva.Text
-        if (!textSnap.current) textSnap.current = makeSnap(t)
-        const snap = textSnap.current!
+        const snap = textSnap.current
+        if (!snap) return
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
-        if (!active) return oldBox
+        const sx = Math.abs((t as any).scaleX?.() ?? 1)
+        const sy = Math.abs((t as any).scaleY?.() ?? 1)
 
-        const ratioW = newBox.width  / Math.max(1e-6, snap.box.width)
-        const ratioH = newBox.height / Math.max(1e-6, snap.box.height)
-
-        // боковые — только ширина, симметрия относительно центра
         if (active === "middle-left" || active === "middle-right") {
-          const nextW = clamp(Math.round(snap.w * ratioW), TEXT_MIN_W, TEXT_MAX_W)
+          const nextW = clamp(Math.round(snap.w * sx), TEXT_MIN_W, TEXT_MAX_W)
           if (Math.abs((t.width()||0) - nextW) > EPS) {
             t.width(nextW)
             t.x(Math.round(snap.cx - nextW/2))
           }
-          t.scaleX(1); t.scaleY(1)
-          t.getLayer()?.batchDraw()
-          requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-          return oldBox
+        } else {
+          const s = Math.max(sx, sy)
+          const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
+          if (Math.abs(t.fontSize() - nextFS) > EPS) {
+            t.fontSize(nextFS)
+            const nh = Math.max(1, t.height())
+            const nw = Math.max(1, t.width() || snap.w)
+            t.y(Math.round(snap.cy - nh/2))
+            t.x(Math.round(snap.cx - nw/2))
+          }
         }
 
-        // углы — масштабируем fontSize из снапшота, удерживая центр
-        const s = Math.max(ratioW, ratioH)
-        const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
-        if (Math.abs(t.fontSize() - nextFS) > EPS) {
-          t.fontSize(nextFS)
-          const nh = Math.max(1, t.height())
-          const nw = Math.max(1, t.width() || snap.w)
-          t.y(Math.round(snap.cy - nh/2))
-          t.x(Math.round(snap.cx - nw/2))
-        }
+        // всегда гасим scale, тянем «размером», не масштабом
         t.scaleX(1); t.scaleY(1)
         t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-        return oldBox
-      })
-
-      const onEnd = () => {
-        const t = n as Konva.Text
-        t.scaleX(1); t.scaleY(1)
-        t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+        trRef.current?.forceUpdate()
+        uiLayerRef.current?.batchDraw()
+        bump()
       }
-      n.on("transformend.textfix", onEnd)
 
-      // снятие хэндлеров текста
-      detachTextFix.current = () => { n.off(".textfix"); n.off(".textsnap") }
+      const onEndText = () => { textSnap.current = null; onTransformText() }
+
+      n.on("transformstart.text", onStartText)
+      n.on("transform.text",      onTransformText)
+      n.on("transformend.text",   onEndText)
+
+      // блокируем внутреннюю геометрию конвы — всё делаем сами
+      ;(tr as any).boundBoxFunc((oldBox:any) => oldBox)
+
+      detachTextFix.current = () => { n.off(".text") }
     } else {
       tr.keepRatio(false)
       tr.enabledAnchors([
@@ -334,13 +322,7 @@ export default function EditorCanvas() {
     let gid = currentStrokeId.current[side]
     if (gid) {
       const ex = find(gid)!
-      // если слой кисти полностью погашен — оживим для нового мазка
-      if (ex && ex.node.opacity() < 0.02) {
-        ex.node.opacity(1)
-        ex.meta.opacity = 1
-        artLayerRef.current?.batchDraw()
-        bump()
-      }
+      if (ex && ex.node.opacity() < 0.02) { ex.node.opacity(1); ex.meta.opacity = 1; artLayerRef.current?.batchDraw(); bump() }
       return ex!
     }
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isStrokes = true
@@ -559,7 +541,6 @@ export default function EditorCanvas() {
       t.getLayer()?.batchDraw()
       set({ tool: "move" as Tool })
       requestAnimationFrame(() => {
-        // гарантируем, что трансформер снова на тексте
         const id = (t as any).id?.() as string | undefined
         if (id) select(id)
         attachTransformer()
