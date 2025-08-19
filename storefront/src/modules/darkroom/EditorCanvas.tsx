@@ -21,7 +21,7 @@ const TEXT_MAX_FS = 800
 const TEXT_MIN_W  = 60
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
-// мелкий порог, чтобы убрать дрожь из-за округлений
+// мелкий порог против дрожи
 const EPS = 0.25
 
 // id-helper
@@ -490,17 +490,19 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста — в bbox + хэндлы всегда видимы + синхронизация =====
+  // ===== Overlay-редактор текста — синхронный bbox, хэндлы всегда видны =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
-    const stageBox = stage.container().getBoundingClientRect()
 
-    // не скрываем рамку — оставляем Transformer на узле
-    // сам текст делаем почти прозрачным, чтобы не мешал визуально
+    // оставить узел выделенным и хэндлы включёнными
+    trRef.current?.nodes([t])
+    trRef.current?.forceUpdate?.()
+    uiLayerRef.current?.batchDraw()
+
+    // делаем текст почти прозрачным, чтобы не мешал, но геометрия/рамка остаются
     const prevOpacity = t.opacity()
     t.opacity(0.0001)
     artLayerRef.current?.batchDraw()
-    uiLayerRef.current?.batchDraw()
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
@@ -528,15 +530,14 @@ export default function EditorCanvas() {
       caretColor: String(t.fill() || "#000"),
     } as CSSStyleDeclaration)
 
+    // точное позиционирование: каждый раз берём свежий stageBox + текущий clientRect
     const place = () => {
+      const stageBox = stage.container().getBoundingClientRect()
       const r = t.getClientRect({ skipStroke: true })
       ta.style.left   = `${stageBox.left + r.x * scale}px`
       ta.style.top    = `${stageBox.top  + r.y * scale}px`
       ta.style.width  = `${Math.max(1, r.width  * scale)}px`
       ta.style.height = `${Math.max(1, r.height * scale)}px`
-      // поддержка вращения
-      const rot = t.getAbsoluteRotation?.() ?? t.rotation()
-      ta.style.transform = `rotate(${rot}deg)`
     }
 
     document.body.appendChild(ta)
@@ -544,7 +545,6 @@ export default function EditorCanvas() {
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    // следим за трансформациями и перетаскиванием — двигаем textarea вслед
     const follow = () => { place(); trRef.current?.forceUpdate?.(); uiLayerRef.current?.batchDraw() }
     t.on("transform.textovl dragmove.textovl", follow)
 
@@ -552,12 +552,12 @@ export default function EditorCanvas() {
     window.addEventListener("scroll", onViewport, true)
     window.addEventListener("resize", onViewport)
 
-    // набор текста: обновляем Konva.Text -> bbox/рамка/textarea синхронизируются
+    // набор текста: обновляем Konva.Text → рамка и textarea синхронно
     ta.addEventListener("input", () => {
       t.text(ta.value)
       artLayerRef.current?.batchDraw()
-      trRef.current?.forceUpdate?.()
       place()
+      trRef.current?.forceUpdate?.()
     })
 
     const cleanup = () => {
@@ -570,11 +570,10 @@ export default function EditorCanvas() {
       cleanup()
       if (apply) t.text(ta.value)
       ta.remove()
-      // вернуть видимость текста
       t.opacity(prevOpacity)
       artLayerRef.current?.batchDraw()
 
-      // остаёмся в режиме move и держим рамку
+      // оставить выделение + свежий bbox
       set({ tool: "move" as Tool })
       select(t.id())
       requestAnimationFrame(() => {
