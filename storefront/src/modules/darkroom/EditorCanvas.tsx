@@ -51,8 +51,8 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
-  // включаем фикс рендеринга текста Konva
-  useEffect(() => { (Konva as any)._fixTextRendering = true }, [])
+  // рекомендованный флаг Konva для рендера шрифтов (см. оф. пример editable text)
+  useEffect(() => { ;(Konva as any)._fixTextRendering = true }, [])
 
   // мобильная кисть по умолчанию
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
@@ -202,14 +202,13 @@ export default function EditorCanvas() {
         if (!snap) return
 
         if (snap.anchor === "middle-left" || snap.anchor === "middle-right") {
-          // боковые: ширина; у левого — фиксируем правый край
           const sx = Math.max(0.01, t.scaleX())
           const targetW = Math.max(TEXT_MIN_W, Math.min(snap.width * sx, TEXT_MAX_W))
           const curW = t.width() || snap.width
           if (Math.abs(targetW - curW) > EPS) {
             if (snap.anchor === "middle-left") {
               t.width(targetW)
-              t.x(snap.right - targetW)
+              t.x(snap.right - targetW) // держим правый край
             } else {
               t.x(snap.left)
               t.width(targetW)
@@ -217,7 +216,6 @@ export default function EditorCanvas() {
           }
           t.scaleX(1); t.scaleY(1)
         } else {
-          // углы: кегль
           const s = Math.max(t.scaleX(), t.scaleY())
           const targetFS = Math.max(TEXT_MIN_FS, Math.min(snap.fontSize * s, TEXT_MAX_FS))
           if (Math.abs(targetFS - t.fontSize()) > EPS) {
@@ -268,12 +266,9 @@ export default function EditorCanvas() {
           const h = (n as any).height?.() ?? 0
           ;(n as any).width(Math.max(1, w * sx))
           ;(n as any).height(Math.max(1, h * sy))
-        } else if (n instanceof Konva.Circle) {
-          const r = n.radius()
-          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
-        } else if (n instanceof Konva.RegularPolygon) {
-          const r = n.radius()
-          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
+        } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
+          const r = (n as any).radius()
+          ;(n as any).radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
         }
 
         ;(n as any).scaleX(1); (n as any).scaleY(1)
@@ -504,88 +499,128 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста — синхронный, с постоянными хэндлами =====
+  // ===== Overlay-редактор текста — синхронный с поворотом/скейлом и постоянными хэндлами =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
-    const containerBox = stage.container().getBoundingClientRect()
+    const stageBox = stage.container().getBoundingClientRect()
+    const S = scale // scale Stage'а к вьюпорту
 
-    // НЕ скрываем ноду — делаем её почти прозрачной, чтобы трансформер оставался.
+    // 1) делаем ноду почти прозрачной, но НЕ скрываем — трансформер остаётся привязан
     const prevOpacity = t.opacity()
     const prevListening = t.listening()
     t.opacity(0.001)
     t.listening(false)
     artLayerRef.current?.batchDraw()
+
+    // держим рамку трансформера
     trRef.current?.nodes([t])
     trRef.current?.forceUpdate()
 
+    // 2) создаём textarea
     const ta = document.createElement("textarea")
     ta.value = t.text()
     ta.setAttribute("spellcheck", "false")
 
-    // стили textarea под ноду
-    Object.assign(ta.style, {
-      position: "absolute",
-      padding: "0",
-      margin: "0",
-      border: "none",
-      background: "transparent",
-      outline: "none",
-      resize: "none",
-      overflow: "hidden",
-      transformOrigin: "left top",
-      zIndex: "9999",
-      userSelect: "text",
-      color: String(t.fill() || "#000"),
-      fontFamily: t.fontFamily(),
-      fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
-      fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      fontSize:   `${t.fontSize() * scale}px`,
-      lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
-      textAlign: (t.align?.() as any) || "left",
-      whiteSpace: "pre-wrap",
-    } as CSSStyleDeclaration)
-
-    const place = () => {
-      // точный bbox в координатах Stage
-      const r = (t as any).getClientRect({ relativeTo: stage }) as { x:number; y:number; width:number; height:number }
-      ta.style.left   = `${containerBox.left + r.x * scale}px`
-      ta.style.top    = `${containerBox.top  + r.y * scale}px`
-      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
-      ta.style.height = `${Math.max(2, r.height * scale)}px`
-    }
+    // базовые стили (шрифты — «кристально», без двойного масштабирования)
+    ta.style.position = "absolute"
+    ta.style.padding = "0"
+    ta.style.margin = "0"
+    ta.style.border = "none"
+    ta.style.background = "transparent"
+    ta.style.outline = "none"
+    ta.style.resize = "none"
+    ta.style.overflow = "hidden"
+    ta.style.transformOrigin = "left top"
+    ta.style.zIndex = "9999"
+    ta.style.userSelect = "text"
+    ta.style.color = String(t.fill() || "#000")
+    ta.style.fontFamily = t.fontFamily()
+    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
+    ta.style.fontStyle  = t.fontStyle()?.includes("italic") ? "italic" : "normal"
+    // важный момент: fontSize и letterSpacing умножаем на S (scale Stage'а) для чёткости
+    ta.style.fontSize = `${t.fontSize() * S}px`
+    ta.style.lineHeight = String(t.lineHeight())
+    ta.style.letterSpacing = `${(t.letterSpacing?.() ?? 0) * S}px`
+    ta.style.textAlign = (t.align?.() as any) || "left"
+    ta.style.whiteSpace = "pre-wrap"
+    // размещаем относительно угла контейнера Stage
+    ta.style.left = `${stageBox.left}px`
+    ta.style.top  = `${stageBox.top}px`
 
     document.body.appendChild(ta)
-    place()
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    const onViewport = () => { place() }
+    // хелпер: применить абсолютную трансформацию ноды к textarea
+    const placeByTransform = () => {
+      const abs = t.getAbsoluteTransform().decompose() // {x,y,scaleX,scaleY,skewX,skewY,rotation}
+      // ширину/высоту берём из текущих размеров ноды (в «стейдж»-единицах), умножаем на S
+      ta.style.width  = `${t.width()  * S}px`
+      ta.style.height = `${t.height() * S}px`
 
+      // origin совпадает с offset ноды
+      const ox = (t.offsetX?.() ?? 0) * S
+      const oy = (t.offsetY?.() ?? 0) * S
+      ta.style.transformOrigin = `${ox}px ${oy}px`
+
+      // важное: сам масштаб Stage (S) уже вложен в fontSize/letterSpacing и размеры,
+      // поэтому в CSS-трансформ кладём ТОЛЬКО собственные scale/rotate/skew ноды + translate с учётом S.
+      const tx = abs.x * S
+      const ty = abs.y * S
+      const rot = abs.rotation // deg
+      const skewX = abs.skewX  // rad
+      const skewY = abs.skewY  // rad
+      const sx = abs.scaleX
+      const sy = abs.scaleY
+
+      ta.style.transform =
+        `translate(${tx}px, ${ty}px) rotate(${rot}deg) skew(${skewX}rad, ${skewY}rad) scale(${sx}, ${sy})`
+    }
+
+    // живое обновление при ресайзе/скролле страницы и при трансформации/драге ноды
+    const onViewport = () => {
+      const fresh = stage.container().getBoundingClientRect()
+      // обновляем «якорь» левого-верхнего Stage
+      ta.style.left = `${fresh.left}px`
+      ta.style.top  = `${fresh.top}px`
+      placeByTransform()
+    }
+    const onNodeTransform = () => { placeByTransform(); trRef.current?.forceUpdate() }
+
+    // ввод строго «live» — сначала применяем к Konva.Text, потом пересчитываем размеры
     const syncFromInput = () => {
-      // live-синхронизация: обновляем канвас-текст, чтобы трансформер и bbox росли вместе
       t.text(ta.value)
+      // Konva пересчитает height/lines; размер textarea синхронизируем через placeByTransform
       t.getLayer()?.batchDraw()
       trRef.current?.forceUpdate()
-      place()
+      placeByTransform()
     }
+
+    // первичное размещение
+    placeByTransform()
+
+    // подписки
+    window.addEventListener("scroll", onViewport, true)
+    window.addEventListener("resize", onViewport)
+    t.on("transform.overlay", onNodeTransform)
+    t.on("dragmove.overlay", onNodeTransform)
 
     const commit = (apply: boolean) => {
       window.removeEventListener("scroll", onViewport, true)
       window.removeEventListener("resize", onViewport)
+      t.off(".overlay")
+      if (apply) t.text(ta.value)
       ta.remove()
-      if (apply) {
-        // текст уже синхронизирован live; на всякий — ещё раз
-        t.text(ta.value)
-      }
+
       // вернуть видимость/слушание
       t.opacity(prevOpacity)
       t.listening(prevListening)
       artLayerRef.current?.batchDraw()
+
+      // оставляем выделение и обновляем рамку
       trRef.current?.nodes([t])
       trRef.current?.forceUpdate()
       uiLayerRef.current?.batchDraw()
-      // оставляем выделение
       select(t.id())
       attachTransformer()
     }
@@ -597,9 +632,6 @@ export default function EditorCanvas() {
       if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
     })
     ta.addEventListener("blur", () => commit(true))
-
-    window.addEventListener("scroll", onViewport, true)
-    window.addEventListener("resize", onViewport)
   }
 
   // ===== Жесты/указатель =====
