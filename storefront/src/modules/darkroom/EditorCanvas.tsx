@@ -298,7 +298,7 @@ export default function EditorCanvas() {
     ;(g as any)._isStrokes = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(strokes ${seqs.strokes})
+    const meta = baseMeta(`strokes ${seqs.strokes}`)
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
@@ -313,7 +313,7 @@ export default function EditorCanvas() {
     ;(g as any)._isErase = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(erase ${seqs.erase})
+    const meta = baseMeta(`erase ${seqs.erase}`)
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
@@ -330,6 +330,90 @@ export default function EditorCanvas() {
       : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
 
   // ===== Добавление: Image =====
+  const startTextOverlayEdit = (t: Konva.Text) => {
+    const stage = stageRef.current!
+    const stBox = stage.container().getBoundingClientRect()
+
+    const rect = (t as any).getClientRect({ relativeTo: stage }) as { x:number; y:number; width:number; height:number }
+
+    const place = (ta: HTMLTextAreaElement) => {
+      ta.style.left   = `${stBox.left + rect.x * scale}px`
+      ta.style.top    = `${stBox.top  + rect.y * scale}px`
+      ta.style.width  = `${Math.max(2, rect.width  * scale)}px`
+      ta.style.height = `${Math.max(2, rect.height * scale)}px`
+    }
+
+    // скрываем канвас-текст и трансформер
+    t.visible(false)
+    trRef.current?.nodes([])
+    artLayerRef.current?.batchDraw()
+    uiLayerRef.current?.batchDraw()
+
+    const ta = document.createElement("textarea")
+    ta.value = t.text()
+
+    // визуал
+    ta.style.position = "absolute"
+    ta.style.padding = "0"
+    ta.style.margin = "0"
+    ta.style.border = "none"
+    ta.style.background = "transparent"
+    ta.style.color = String(t.fill() || "#000")
+    ta.style.fontFamily = t.fontFamily()
+    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
+    ta.style.fontStyle  = t.fontStyle()?.includes("italic") ? "italic" : "normal"
+    ta.style.fontSize = `${t.fontSize() * scale}px`
+    ta.style.lineHeight = String(t.lineHeight())
+    // @ts-ignore (в типах Konva letterSpacing может не быть метода)
+    ta.style.letterSpacing = `${(t.letterSpacing?.() ?? 0) * scale}px`
+    ta.style.whiteSpace = "pre-wrap"
+    ta.style.overflow = "hidden"
+    ta.style.outline = "none"
+    ta.style.resize = "none"
+    ta.style.transformOrigin = "left top"
+    ta.style.zIndex = "9999"
+    ta.style.userSelect = "text"
+    ta.style.caretColor = String(t.fill() || "#000")
+    // @ts-ignore
+    ta.style.textAlign = (t.align?.() as any) || "left"
+
+    place(ta)
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+
+    const reposition = () => {
+      const b = stage.container().getBoundingClientRect()
+      const r = (t as any).getClientRect({ relativeTo: stage })
+      ta.style.left   = `${b.left + r.x * scale}px`
+      ta.style.top    = `${b.top  + r.y * scale}px`
+      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
+      ta.style.height = `${Math.max(2, r.height * scale)}px`
+    }
+
+    const commit = (apply: boolean) => {
+      window.removeEventListener("scroll", reposition)
+      window.removeEventListener("resize", reposition)
+      if (apply) t.text(ta.value)
+      ta.remove()
+      t.visible(true)
+      artLayerRef.current?.batchDraw()
+      select(find(selectedId)?.id ?? t.id()) // держим выделение
+      requestAnimationFrame(() => { attachTransformer(); uiLayerRef.current?.batchDraw() })
+    }
+
+    ta.addEventListener("input", () => { /* размер фиксируем по bbox */ })
+    ta.addEventListener("keydown", (ev) => {
+      ev.stopPropagation()
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
+      if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
+    })
+    ta.addEventListener("blur", () => commit(true))
+
+    window.addEventListener("scroll", reposition, { passive: true })
+    window.addEventListener("resize", reposition)
+  }
+
   const attachCommonHandlers = (k: AnyNode, id: string) => {
     ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
@@ -347,7 +431,7 @@ export default function EditorCanvas() {
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid())
         const id = kimg.id()
-        const meta = baseMeta(image ${seqs.image})
+        const meta = baseMeta(`image ${seqs.image}`)
         currentArt().add(kimg)
         attachCommonHandlers(kimg, id)
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
@@ -374,7 +458,7 @@ export default function EditorCanvas() {
     })
     t.id(uid())
     const id = t.id()
-    const meta = baseMeta(text ${seqs.text})
+    const meta = baseMeta(`text ${seqs.text}`)
     currentArt().add(t)
     attachCommonHandlers(t, id)
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
@@ -390,11 +474,11 @@ export default function EditorCanvas() {
     if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
     else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
     else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
-    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g }
+    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g as any }
     else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
     ;(n as any).id(uid())
     const id = (n as any).id?.() ?? uid()
-    const meta = baseMeta(shape ${seqs.shape})
+    const meta = baseMeta(`shape ${seqs.shape}`)
     currentArt().add(n as any)
     attachCommonHandlers(n, id)
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
@@ -458,90 +542,6 @@ export default function EditorCanvas() {
   }
 
   const finishStroke = () => setIsDrawing(false)
-
-  // ===== Overlay-редактор текста — внутри bbox, без смещения =====
-  const startTextOverlayEdit = (t: Konva.Text) => {
-    const stage = stageRef.current!
-    const stBox = stage.container().getBoundingClientRect()
-
-    // Берём ровно clientRect узла относительно Stage — совпадает с рамкой трансформера
-    const rect = (t as any).getClientRect({ relativeTo: stage }) as { x:number; y:number; width:number; height:number }
-
-    const place = (ta: HTMLTextAreaElement) => {
-      ta.style.left   = ${stBox.left + rect.x * scale}px
-      ta.style.top    = ${stBox.top  + rect.y * scale}px
-      ta.style.width  = ${Math.max(2, rect.width  * scale)}px
-      ta.style.height = ${Math.max(2, rect.height * scale)}px
-    }
-
-    // скрываем канвас-текст и трансформер
-    t.visible(false)
-    trRef.current?.nodes([])
-    artLayerRef.current?.batchDraw()
-    uiLayerRef.current?.batchDraw()
-
-    const ta = document.createElement("textarea")
-    ta.value = t.text()
-
-    // визуал
-    ta.style.position = "absolute"
-    ta.style.padding = "0"
-    ta.style.margin = "0"
-    ta.style.border = "none"
-    ta.style.background = "transparent"
-    ta.style.color = String(t.fill() || "#000")
-    ta.style.fontFamily = t.fontFamily()
-    ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
-    ta.style.fontStyle  = t.fontStyle()?.includes("italic") ? "italic" : "normal"
-    ta.style.fontSize = ${t.fontSize() * scale}px
-    ta.style.lineHeight = String(t.lineHeight())
-    ta.style.letterSpacing = ${(t.letterSpacing?.() ?? 0) * scale}px
-    ta.style.whiteSpace = "pre-wrap"
-    ta.style.overflow = "hidden"
-    ta.style.outline = "none"
-    ta.style.resize = "none"
-    ta.style.transformOrigin = "left top"
-    ta.style.zIndex = "9999"
-    ta.style.userSelect = "text"
-    ta.style.caretColor = String(t.fill() || "#000")
-    ta.style.textAlign = (t.align?.() as any) || "left"
-
-    place(ta)
-    document.body.appendChild(ta)
-    ta.focus()
-    ta.setSelectionRange(ta.value.length, ta.value.length)
-
-    const reposition = () => {
-      const b = stage.container().getBoundingClientRect()
-      const r = (t as any).getClientRect({ relativeTo: stage })
-      ta.style.left   = ${b.left + r.x * scale}px
-      ta.style.top    = ${b.top  + r.y * scale}px
-      ta.style.width  = ${Math.max(2, r.width  * scale)}px
-      ta.style.height = ${Math.max(2, r.height * scale)}px
-    }
-
-    const commit = (apply: boolean) => {
-      window.removeEventListener("scroll", reposition)
-      window.removeEventListener("resize", reposition)
-      if (apply) t.text(ta.value)
-      ta.remove()
-      t.visible(true)
-      artLayerRef.current?.batchDraw()
-      select(find(selectedId)?.id ?? t.id()) // держим выделение
-      requestAnimationFrame(() => { attachTransformer(); uiLayerRef.current?.batchDraw() })
-    }
-
-    ta.addEventListener("input", () => { /* размер фиксируем по bbox */ })
-    ta.addEventListener("keydown", (ev) => {
-      ev.stopPropagation()
-      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
-      if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
-    })
-    ta.addEventListener("blur", () => commit(true))
-
-    window.addEventListener("scroll", reposition, { passive: true })
-    window.addEventListener("resize", reposition)
-  }
 
   // ===== Жесты/указатель =====
   const isTransformerChild = (t: Konva.Node | null) => {
@@ -695,7 +695,7 @@ export default function EditorCanvas() {
   const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
   const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
 
-  // === FIX: универсальная перекраска (включая CREST / Group и Line) ===
+  // === FIX: универсальная перекраска (включая Group/Line) ===
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
     const n = sel.node as any
@@ -754,9 +754,9 @@ export default function EditorCanvas() {
     backArtRef.current?.visible(side === "back")
     uiLayerRef.current?.visible(true)
     st.draw()
-    const a1 = document.createElement("a"); a1.href = withMock; a1.download = darkroom-${s}_mockup.png; a1.click()
+    const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
     await new Promise(r => setTimeout(r, 250))
-    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = darkroom-${s}_art.png; a2.click()
+    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
   // ===== Render =====
@@ -868,8 +868,8 @@ export default function EditorCanvas() {
           onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
           onDelete: deleteLayer,
           onDuplicate: duplicateLayer,
-          onChangeBlend: (id, b)=>{}, // blend скрыт на мобилке
-          onChangeOpacity: (id, o)=>{}, // скрыт
+          onChangeBlend: (id, b)=>{},
+          onChangeOpacity: (id, o)=>{},
           onMoveUp: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>0) reorder(id, order[i-1], "before") },
           onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
         }}
