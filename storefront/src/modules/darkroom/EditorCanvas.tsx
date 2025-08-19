@@ -15,16 +15,12 @@ const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// ТЕКСТ: клампы
+// ==== ТЕКСТ: клампы/сглаживание ====
 const TEXT_MIN_FS = 2
 const TEXT_MAX_FS = 800
 const TEXT_MIN_W  = 20
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
-
-// анти-джиттер
 const EPS = 0.25
-
-// id-helper
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 
 // ==== ТИПЫ ====
@@ -40,108 +36,153 @@ type AnyNode =
   | Konva.RegularPolygon
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
-// эффекты
-type Effect = "none" | "screenprint"
-
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
-// ====== Кастомный фильтр ScreenPrint (постеризация + растровая точка) ======
-function ensureScreenPrintFilter() {
-  const K: any = Konva as any
-  if (K.Filters.ScreenPrint) return
-
-  K.Filters.ScreenPrint = function (imageData: ImageData) {
-    const data = imageData.data
-    const w = imageData.width
-    const h = imageData.height
-
-    const cell = this.getAttr("screenCellSize") ?? 8
-    const levels = Math.max(2, this.getAttr("screenLevels") ?? 5)
-    const angle = this.getAttr("screenAngle") ?? Math.PI / 4
-    const strength = this.getAttr("screenContrast") ?? 0.7
-
-    const cosA = Math.cos(angle)
-    const sinA = Math.sin(angle)
-    const step = 255 / (levels - 1)
-    const quant = (v: number) => Math.max(0, Math.min(255, Math.round(v / step) * step))
-
-    for (let y = 0; y < h; y++) {
-      const ycos = y * cosA
-      const ysin = y * sinA
-      for (let x = 0; x < w; x++) {
-        const idx = (y * w + x) * 4
-        let r = quant(data[idx])
-        let g = quant(data[idx + 1])
-        let b = quant(data[idx + 2])
-        const a = data[idx + 3]
-
-        const L = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        const rx = x * cosA + ysin
-        const ry = -x * sinA + ycos
-
-        const cx = Math.floor(rx / cell) * cell + cell / 2
-        const cy = Math.floor(ry / cell) * cell + cell / 2
-        const dx = rx - cx
-        const dy = ry - cy
-        const dist = Math.hypot(dx, dy)
-
-        const radius = (1 - L / 255) * (cell * 0.5)
-        let k = 1
-        const t = (dist - (radius - 1))
-        if (t <= 0) k = 1
-        else if (t >= 2) k = 0
-        else k = 1 - t / 2
-
-        const darken = 1 - strength * k
-        r = r * darken
-        g = g * darken
-        b = b * darken
-
-        data[idx] = r
-        data[idx + 1] = g
-        data[idx + 2] = b
-        data[idx + 3] = a
-      }
-    }
-  }
+// ==== FX: состояние/параметры ====
+type Effect = "none" | "screenprintPlus"
+type FxParams = {
+  enabled: boolean
+  live: boolean
+  cell: number
+  levels: number
+  angle: number
+  dot: number
+  palette: string[] // 2..6 цветов
+}
+const defaultFx: FxParams = {
+  enabled: false,
+  live: false,            // по умолчанию — не в лайве (для скорости)
+  cell: 10,
+  levels: 4,
+  angle: 45,
+  dot: 0.7,               // сила «растровой» тени (0..1)
+  palette: ["#ff005d","#ffe500","#00e0ff","#111111"],
 }
 
+// ==== УТИЛИТЫ: цвет/матем ====
+const clamp = (v:number,min:number,max:number)=> Math.max(min, Math.min(max, v))
+const roundPx = (v:number)=> Math.round(v)
+const hex2rgb = (hex:string) => {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  const to = (x:string)=>parseInt(x,16)
+  return m ? { r: to(m[1]), g: to(m[2]), b: to(m[3]) } : { r:0,g:0,b:0 }
+}
+const mix = (a:{r:number,g:number,b:number}, b:{r:number,g:number,b:number}, t:number) => ({
+  r: a.r + (b.r - a.r)*t,
+  g: a.g + (b.g - a.g)*t,
+  b: a.b + (b.b - a.b)*t,
+})
+
+// ==== FX: рендер в offscreen-canvas (быстро, не блокирует кисть) ====
+function renderScreenPrintPlus(
+  srcCanvas: HTMLCanvasElement,
+  params: FxParams
+): HTMLCanvasElement {
+  const { cell, levels, angle, dot, palette } = params
+  const w = srcCanvas.width
+  const h = srcCanvas.height
+  const out = document.createElement("canvas")
+  out.width = w; out.height = h
+  const sctx = srcCanvas.getContext("2d", { willReadFrequently: true })!
+  const dctx = out.getContext("2d")!
+
+  // берём пиксели
+  const src = sctx.getImageData(0,0,w,h)
+  const s = src.data
+  const dst = dctx.createImageData(w,h)
+  const d = dst.data
+
+  const rad = (angle*Math.PI)/180
+  const cosA = Math.cos(rad), sinA = Math.sin(rad)
+  const step = 255 / Math.max(1, (levels-1))
+  const quant = (v:number)=> Math.round(v/step)*step
+  const pals = palette.map(hex2rgb)
+  const LUM = (r:number,g:number,b:number)=> 0.2126*r + 0.7152*g + 0.0722*b
+
+  for (let y=0; y<h; y++){
+    for (let x=0; x<w; x++){
+      const idx = (y*w+x)*4
+      const r = s[idx], g = s[idx+1], b = s[idx+2], a = s[idx+3]
+      const L = LUM(r,g,b)
+      // постеризация по яркости
+      const qL = clamp(quant(L), 0, 255)
+      // индекс палитры: тёмные → верхние индексы
+      const pi = clamp(Math.round((1 - qL/255)*(pals.length-1)), 0, pals.length-1)
+      let base = pals[pi]
+
+      // полутоновая точка (эмуляция «screen print»)
+      const rx = x*cosA + y*sinA
+      const ry = -x*sinA + y*cosA
+      const cx = Math.floor(rx/cell)*cell + cell/2
+      const cy = Math.floor(ry/cell)*cell + cell/2
+      const dist = Math.hypot(rx-cx, ry-cy)
+      const radius = (1 - L/255) * (cell*0.5)
+      const inside = dist <= radius
+
+      // затемнение точкой (добавочный контраст)
+      if (inside) base = mix(base, {r:0,g:0,b:0}, dot)
+
+      d[idx]   = base.r
+      d[idx+1] = base.g
+      d[idx+2] = base.b
+      d[idx+3] = a
+    }
+  }
+  dctx.putImageData(dst,0,0)
+  return out
+}
+
+// ==== КОМПОНЕНТ ====
 export default function EditorCanvas() {
   const {
     side, set, tool, brushColor, brushSize, shapeKind,
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
+  // мобилки → кисть
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
-  useEffect(() => { ensureScreenPrintFilter() }, [])
 
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  const stageRef        = useRef<Konva.Stage>(null)
-  const bgLayerRef      = useRef<Konva.Layer>(null)
-  const artLayerRef     = useRef<Konva.Layer>(null)
-  const uiLayerRef      = useRef<Konva.Layer>(null)
-  const trRef           = useRef<Konva.Transformer>(null)
-  const frontBgRef      = useRef<Konva.Image>(null)
-  const backBgRef       = useRef<Konva.Image>(null)
-  const frontArtRef     = useRef<Konva.Group>(null)
-  const backArtRef      = useRef<Konva.Group>(null)
+  // refs
+  const stageRef    = useRef<Konva.Stage>(null)
+  const bgLayerRef  = useRef<Konva.Layer>(null)     // мокап
+  const artLayerRef = useRef<Konva.Layer>(null)     // живой арт
+  const fxLayerRef  = useRef<Konva.Layer>(null)     // превью эффекта (сломает лаги, не влияет на хиты)
+  const uiLayerRef  = useRef<Konva.Layer>(null)     // рамка
+  const trRef       = useRef<Konva.Transformer>(null)
 
+  const frontBgRef  = useRef<Konva.Image>(null)
+  const backBgRef   = useRef<Konva.Image>(null)
+  const frontArtRef = useRef<Konva.Group>(null)
+  const backArtRef  = useRef<Konva.Group>(null)
+
+  // FX-прокси картинки (не слушают события)
+  const fxFrontRef  = useRef<Konva.Image>(null)
+  const fxBackRef   = useRef<Konva.Image>(null)
+
+  // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // эффекты
-  const [effectBySide, setEffectBySide] = useState<Record<Side, Effect>>({ front: "none", back: "none" })
-  const [screenParams, setScreenParams] = useState({ cell: 8, levels: 5, contrast: 0.7, angle: 45 })
+  // эффекты по сторонам
+  const [fxBySide, setFxBySide] = useState<Record<Side, FxParams>>({
+    front: { ...defaultFx },
+    back:  { ...defaultFx },
+  })
+  const fx = fxBySide[side]
 
+  // сессии кисти/стерки
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
+
+  // трансформ
   const isTransformingRef = useRef(false)
 
   // ===== Вёрстка/масштаб =====
@@ -155,13 +196,14 @@ export default function EditorCanvas() {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + 8
-    const padBottom = isMobile ? 120 : 72
+    const padBottom = isMobile ? 140 : 110 // места под док
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
+  // фикс скролла
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -179,46 +221,102 @@ export default function EditorCanvas() {
   }
 
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
-  const currentArt = () => artGroup(side)
+  const fxImage  = (s: Side) => (s === "front" ? fxFrontRef.current!  : fxBackRef.current!)
 
-  // показываем только активную сторону (фон не скрываем никогда)
+  // показываем только активную сторону (мокап — всегда есть, но видимость сторон переключаем)
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     frontBgRef.current?.visible(side === "front")
     backBgRef.current?.visible(side === "back")
     frontArtRef.current?.visible(side === "front")
     backArtRef.current?.visible(side === "back")
+    fxFrontRef.current?.visible(side === "front" && fxBySide.front.enabled)
+    fxBackRef.current?.visible(side === "back"  && fxBySide.back.enabled)
+
     bgLayerRef.current?.batchDraw()
     artLayerRef.current?.batchDraw()
+    fxLayerRef.current?.batchDraw()
     attachTransformer()
-    syncEffect(side)
-  }, [side, layers])
+  }, [side, layers, fxBySide])
 
-  // ===== ЭФФЕКТЫ (только на арт-группу) =====
-  const applyEffectToSide = (s: Side, eff: Effect) => {
-    const g = artGroup(s)
-    if (!g) return
-    g.clearCache()
-    g.filters([])
+  // ====== FX PIPELINE (offscreen) ======
 
-    if (eff === "none") { g.getLayer()?.batchDraw(); return }
-
-    g.setAttr("screenCellSize", screenParams.cell)
-    g.setAttr("screenLevels", screenParams.levels)
-    g.setAttr("screenContrast", screenParams.contrast)
-    g.setAttr("screenAngle", (screenParams.angle * Math.PI) / 180)
-
-    const pr = Math.min(1.5, Math.max(0.75, 1 / Math.max(scale, 0.5)))
-    g.cache({ pixelRatio: pr })
-    g.filters([(Konva as any).Filters.ScreenPrint])
-    g.getLayer()?.batchDraw()
+  // дебаунс отрисовки эффекта (чтобы не лагало)
+  const fxTimer = useRef<any>(null)
+  const queueFxRender = (s: Side, delay=120) => {
+    if (!fxBySide[s].enabled) return
+    if (fxTimer.current) clearTimeout(fxTimer.current)
+    fxTimer.current = setTimeout(() => { renderFxSnapshot(s) }, delay)
   }
-  const syncEffect = (s: Side) => applyEffectToSide(s, effectBySide[s])
-  useEffect(() => { syncEffect(side) }, [screenParams, scale])
 
-  const markArtDirty = () => { if (effectBySide[side] !== "none") requestAnimationFrame(() => syncEffect(side)) }
+  const setFxEnabled = (s: Side, enabled: boolean) => {
+    setFxBySide(p => ({ ...p, [s]: { ...p[s], enabled } }))
+    const g = artGroup(s)
+    const img = fxImage(s)
+    if (enabled) {
+      // во время предпросмотра: живой арт — невидим (opacity=0), но кликается
+      g.opacity(0)
+      renderFxSnapshot(s)
+      img.visible(true)
+    } else {
+      g.opacity(1)
+      img.visible(false)
+    }
+    g.getLayer()?.batchDraw()
+    fxLayerRef.current?.batchDraw()
+  }
 
-  // ===== Transformer =====
+  function renderFxSnapshot(s: Side) {
+    const g = artGroup(s)
+    const img = fxImage(s)
+    if (!g || !img) return
+
+    // если ничего нет — просто скрыть
+    const rect = g.getClientRect({ skipStroke: true })
+    if (rect.width <= 2 || rect.height <= 2) {
+      img.visible(false)
+      fxLayerRef.current?.batchDraw()
+      return
+    }
+
+    // рендерим только слой арта, вырезка по bbox группы
+    const pr = Math.min(1.5, Math.max(1, 1/Math.max(scale, 0.6)))
+    const cnv = artLayerRef.current!.toCanvas({
+      x: rect.x, y: rect.y, width: rect.width, height: rect.height, pixelRatio: pr
+    })
+
+    // прогон через наш шейдер
+    const params = fxBySide[s]
+    const out = renderScreenPrintPlus(cnv, params)
+
+    // накидываем как прокси-картинку (не слушает события)
+    img.image(out as any)
+    img.x(rect.x)
+    img.y(rect.y)
+    img.width(rect.width)
+    img.height(rect.height)
+    img.listening(false)
+    img.visible(params.enabled)
+
+    fxLayerRef.current?.batchDraw()
+  }
+
+  // при изменении параметров — или лайв, или отложенно
+  useEffect(() => {
+    const p = fxBySide[side]
+    if (!p.enabled) return
+    if (p.live) renderFxSnapshot(side)
+    else queueFxRender(side, 120)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fxBySide[side].cell, fxBySide[side].levels, fxBySide[side].angle, fxBySide[side].dot, fxBySide[side].palette.join("|")])
+
+  // при масштабировании — просто перерендер (только если включено)
+  useEffect(() => {
+    if (fxBySide[side].enabled) queueFxRender(side, 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale, side])
+
+  // ===== Transformer (плавный текст) =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
 
@@ -230,9 +328,6 @@ export default function EditorCanvas() {
     anchor: "middle-left" | "middle-right" | "corner" | null
   }
   const textStart = useRef<TStart | null>(null)
-
-  const clamp = (v:number,min:number,max:number)=> Math.max(min, Math.min(max, v))
-  const roundPx = (v:number)=> Math.round(v)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -253,20 +348,30 @@ export default function EditorCanvas() {
     tr.nodes([n])
     tr.rotateEnabled(true)
 
-    // guard на время трансформации
-    const onStart = () => { isTransformingRef.current = true }
-    const onEndT  = () => { isTransformingRef.current = false; markArtDirty() }
+    const onStart = () => {
+      isTransformingRef.current = true
+      // во время трансформации — показываем живой арт (эффект скрываем)
+      if (fxBySide[side].enabled) {
+        artGroup(side).opacity(1)
+        fxImage(side).visible(false)
+        artLayerRef.current?.batchDraw()
+        fxLayerRef.current?.batchDraw()
+      }
+    }
+    const onEndT  = () => {
+      isTransformingRef.current = false
+      if (fxBySide[side].enabled) {
+        artGroup(side).opacity(0)
+        queueFxRender(side, 50)
+      }
+    }
     n.on("transformstart.guard", onStart)
     n.on("transformend.guard", onEndT)
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
       tr.keepRatio(false)
-      tr.enabledAnchors([
-        "top-left","top-right","bottom-left","bottom-right",
-        "middle-left","middle-right"
-      ])
-
+      tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right"])
       const t = n as Konva.Text
 
       const onStartText = () => {
@@ -281,19 +386,15 @@ export default function EditorCanvas() {
         t.scaleX(1); t.scaleY(1)
       }
 
-      // ---- Главное: для боковых ручек фиксируем только Y (верх), не height
       tr.boundBoxFunc((oldB, newB) => {
         const snap = textStart.current
         if (!snap) return newB
-        newB.y = oldB.y // не даём «прыгать» вверх-вниз
+        newB.y = oldB.y
         if (snap.anchor === "middle-left" || snap.anchor === "middle-right") {
           const targetW = clamp(newB.width, TEXT_MIN_W, TEXT_MAX_W)
           newB.width = roundPx(targetW)
-          if (snap.anchor === "middle-left") {
-            newB.x = roundPx(oldB.x + (oldB.width - targetW)) // держим правый край
-          } else {
-            newB.x = roundPx(oldB.x) // держим левый край
-          }
+          if (snap.anchor === "middle-left") newB.x = roundPx(oldB.x + (oldB.width - targetW))
+          else newB.x = roundPx(oldB.x)
         }
         return newB
       })
@@ -333,10 +434,8 @@ export default function EditorCanvas() {
         t.scaleX(1); t.scaleY(1)
         textStart.current = null
         t.getLayer()?.batchDraw()
-        if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
-        markArtDirty()
       }
 
       n.on("transformstart.textfix", onStartText)
@@ -345,38 +444,25 @@ export default function EditorCanvas() {
       detachTextFix.current = () => { n.off(".textfix") }
     } else {
       tr.boundBoxFunc((oldB, newB) => newB)
-
       tr.keepRatio(false)
-      tr.enabledAnchors([
-        "top-left","top-right","bottom-left","bottom-right",
-        "middle-left","middle-right","top-center","bottom-center"
-      ])
+      tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right","top-center","bottom-center"])
 
       const onTransform = () => {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         let sx = (n as any).scaleX?.() ?? 1
         let sy = (n as any).scaleY?.() ?? 1
 
-        const isCorner = active && (
-          active === "top-left" || active === "top-right" ||
-          active === "bottom-left" || active === "bottom-right"
-        )
-        if (isCorner) {
-          const s = Math.max(Math.abs(sx), Math.abs(sy))
-          sx = s; sy = s
-        }
+        const isCorner = active && (active==="top-left"||active==="top-right"||active==="bottom-left"||active==="bottom-right")
+        if (isCorner) { const s = Math.max(Math.abs(sx), Math.abs(sy)); sx = s; sy = s }
 
         if (isImgOrRect(n)) {
           const w = (n as any).width?.() ?? 0
           const h = (n as any).height?.() ?? 0
           ;(n as any).width(Math.max(1, w * sx))
           ;(n as any).height(Math.max(1, h * sy))
-        } else if (n instanceof Konva.Circle) {
-          const r = n.radius()
-          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
-        } else if (n instanceof Konva.RegularPolygon) {
-          const r = n.radius()
-          n.radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
+        } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
+          const r = (n as any).radius()
+          ;(n as any).radius(Math.max(1, r * Math.max(Math.abs(sx), Math.abs(sy))))
         }
 
         ;(n as any).scaleX(1); (n as any).scaleY(1)
@@ -385,7 +471,7 @@ export default function EditorCanvas() {
         uiLayerRef.current?.batchDraw()
       }
 
-      const onEnd = () => { onTransform(); markArtDirty() }
+      const onEnd = () => onTransform()
       n.on("transform.fix", onTransform)
       n.on("transformend.fix", onEnd)
       detachTextFix.current = () => { n.off(".fix") }
@@ -396,7 +482,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // во время brush/erase — отключаем драг
+  // при смене инструмента — «живой» арт, FX обратно после
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -405,12 +491,9 @@ export default function EditorCanvas() {
       ;(l.node as any).draggable(enable && !l.meta.locked)
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
-
-    if (tool !== "brush") currentStrokeId.current[side] = null
-    if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
-  // хоткеи
+  // ===== хоткеи (Duplicate/Delete/стрелки) =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
@@ -430,14 +513,14 @@ export default function EditorCanvas() {
       if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
       if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
       n.getLayer()?.batchDraw()
-      markArtDirty()
+      if (fxBySide[side].enabled) queueFxRender(side, 80)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId, tool])
+  }, [selectedId, tool, fxBySide, side])
 
-  // ===== сессии кисти/стирания =====
-  const nextTopZ = () => (currentArt().children?.length ?? 0)
+  // ===== кисть/стерка =====
+  const nextTopZ = () => (artGroup(side).children?.length ?? 0)
 
   const createStrokeGroup = (): AnyLayer => {
     const g = new Konva.Group({ x: 0, y: 0 })
@@ -445,7 +528,7 @@ export default function EditorCanvas() {
     g.id(uid())
     const id = g.id()
     const meta = baseMeta(`strokes ${seqs.strokes}`)
-    currentArt().add(g)
+    artGroup(side).add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
@@ -460,7 +543,7 @@ export default function EditorCanvas() {
     g.id(uid())
     const id = g.id()
     const meta = baseMeta(`erase ${seqs.erase}`)
-    currentArt().add(g)
+    artGroup(side).add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
     setLayers(p => [...p, newLay])
@@ -469,92 +552,15 @@ export default function EditorCanvas() {
     return newLay
   }
 
-  // утилита: шрифт сайта
-  const siteFont = () =>
-    (typeof window !== "undefined"
-      ? window.getComputedStyle(document.body).fontFamily
-      : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
-
-  // ===== Добавление: Image =====
-  const attachCommonHandlers = (k: AnyNode, id: string) => {
-    ;(k as any).on("click tap", () => select(id))
-    if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
-  }
-
-  const onUploadImage = (file: File) => {
-    const r = new FileReader()
-    r.onload = () => {
-      const img = new window.Image()
-      img.crossOrigin = "anonymous"
-      img.onload = () => {
-        const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
-        const w = img.width * ratio, h = img.height * ratio
-        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
-        ;(kimg as any).setAttr("src", r.result as string)
-        kimg.id(uid())
-        const id = kimg.id()
-        const meta = baseMeta(`image ${seqs.image}`)
-        currentArt().add(kimg)
-        attachCommonHandlers(kimg, id)
-        setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
-        setSeqs(s => ({ ...s, image: s.image + 1 }))
-        select(id)
-        artLayerRef.current?.batchDraw()
-        set({ tool: "move" })
-        markArtDirty()
-      }
-      img.src = r.result as string
-    }
-    r.readAsDataURL(file)
-  }
-
-  // ===== Добавление: Text =====
-  const onAddText = () => {
-    const t = new Konva.Text({
-      text: "GMORKL",
-      x: BASE_W/2-300, y: BASE_H/2-60,
-      fontSize: 96,
-      fontFamily: siteFont(),
-      fontStyle: "bold",
-      fill: brushColor, width: 600, align: "center",
-      draggable: false,
-    })
-    t.id(uid())
-    const id = t.id()
-    const meta = baseMeta(`text ${seqs.text}`)
-    currentArt().add(t)
-    attachCommonHandlers(t, id)
-    setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
-    setSeqs(s => ({ ...s, text: s.text + 1 }))
-    select(id)
-    artLayerRef.current?.batchDraw()
-    set({ tool: "move" })
-    markArtDirty()
-  }
-
-  // ===== Добавление: Shape =====
-  const onAddShape = (kind: ShapeKind) => {
-    let n: AnyNode
-    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
-    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
-    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
-    else if (kind === "cross")    { const g=new Konva.Group({x:BASE_W/2-160,y:BASE_H/2-160}); g.add(new Konva.Rect({width:320,height:60,y:130,fill:brushColor})); g.add(new Konva.Rect({width:60,height:320,x:130,fill:brushColor})); n=g }
-    else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
-    ;(n as any).id(uid())
-    const id = (n as any).id?.() ?? uid()
-    const meta = baseMeta(`shape ${seqs.shape}`)
-    currentArt().add(n as any)
-    attachCommonHandlers(n, id)
-    setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
-    setSeqs(s => ({ ...s, shape: s.shape + 1 }))
-    select(id)
-    artLayerRef.current?.batchDraw()
-    set({ tool: "move" })
-    markArtDirty()
-  }
-
-  // ===== Рисование: Brush / Erase =====
   const startStroke = (x: number, y: number) => {
+    // при рисовании — скрываем FX превью, показываем живой арт
+    if (fxBySide[side].enabled) {
+      artGroup(side).opacity(1)
+      fxImage(side).visible(false)
+      artLayerRef.current?.batchDraw()
+      fxLayerRef.current?.batchDraw()
+    }
+
     if (tool === "brush") {
       let gid = currentStrokeId.current[side]
       if (!gid) gid = createStrokeGroup().id
@@ -606,7 +612,14 @@ export default function EditorCanvas() {
     }
   }
 
-  const finishStroke = () => { setIsDrawing(false); markArtDirty() }
+  const finishStroke = () => {
+    setIsDrawing(false)
+    if (fxBySide[side].enabled) {
+      // после рисования — возвращаем превью и обновляем offscreen
+      artGroup(side).opacity(0)
+      queueFxRender(side, 60)
+    }
+  }
 
   // ===== Overlay-редактор текста =====
   const editingRef = useRef<{
@@ -621,18 +634,13 @@ export default function EditorCanvas() {
     const stage = stageRef.current!
     const stContainer = stage.container()
 
-    if (editingRef.current) {
-      editingRef.current.cleanup()
-      editingRef.current = null
-    }
+    if (editingRef.current) { editingRef.current.cleanup(); editingRef.current = null }
 
     const prevOpacity = t.opacity()
-    t.opacity(0.001)
-    t.getLayer()?.batchDraw()
+    t.opacity(0.001); t.getLayer()?.batchDraw()
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
-
     Object.assign(ta.style, {
       position: "absolute",
       padding: "0",
@@ -678,7 +686,7 @@ export default function EditorCanvas() {
       trRef.current?.forceUpdate()
       uiLayerRef.current?.batchDraw()
       requestAnimationFrame(sync)
-      markArtDirty()
+      if (fxBySide[side].enabled && fxBySide[side].live) queueFxRender(side, 120)
     }
 
     const onT = () => requestAnimationFrame(sync)
@@ -698,7 +706,7 @@ export default function EditorCanvas() {
         const tr = trRef.current
         if (tr) { tr.nodes([t]); tr.forceUpdate() }
         uiLayerRef.current?.batchDraw()
-        markArtDirty()
+        if (fxBySide[side].enabled) queueFxRender(side, 80)
       })
       editingRef.current = null
     }
@@ -718,26 +726,16 @@ export default function EditorCanvas() {
 
     t.on("dragmove.edit transform.edit transformend.edit", onT)
 
-    editingRef.current = {
-      ta,
-      nodeId: t.id(),
-      prevOpacity,
-      cleanup,
-      sync,
-    }
+    editingRef.current = { ta, nodeId: t.id(), prevOpacity, cleanup, sync }
   }
 
-  // ===== Жесты/указатель =====
+  // ===== Указатель =====
   const isTransformerChild = (t: Konva.Node | null) => {
     let p: Konva.Node | null | undefined = t
     const tr = trRef.current as unknown as Konva.Node | null
-    while (p) {
-      if (tr && p === tr) return true
-      p = p.getParent?.()
-    }
+    while (p) { if (tr && p === tr) return true; p = p.getParent?.() }
     return false
   }
-
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
@@ -754,20 +752,17 @@ export default function EditorCanvas() {
 
     const st = stageRef.current!
     const tgt = e.target as Konva.Node
-
     if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
       select(null)
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
       return
     }
-
     if (tgt && tgt !== st && tgt.getParent()) {
       const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
       if (found && found.side === side) select(found.id)
     }
   }
-
   const onMove = (e: any) => {
     if (isTransformingRef.current) return
     if (isTransformerChild(e.target)) return
@@ -775,7 +770,6 @@ export default function EditorCanvas() {
     const p = toCanvas(getStagePointer())
     appendStroke(p.x, p.y)
   }
-
   const onUp = () => { if (isDrawing) finishStroke() }
 
   // ===== Данные для панелей/toolbar =====
@@ -792,18 +786,14 @@ export default function EditorCanvas() {
   }, [layers, side])
 
   const deleteLayer = (id: string) => {
-    if (editingRef.current?.nodeId === id) {
-      editingRef.current.cleanup(false)
-      editingRef.current = null
-    }
+    if (editingRef.current?.nodeId === id) { editingRef.current.cleanup(false); editingRef.current = null }
     setLayers(p => {
-      const l = p.find(x => x.id===id)
-      l?.node.destroy()
+      const l = p.find(x => x.id===id); l?.node.destroy()
       return p.filter(x => x.id!==id)
     })
     if (selectedId === id) select(null)
     artLayerRef.current?.batchDraw()
-    markArtDirty()
+    if (fxBySide[side].enabled) queueFxRender(side, 60)
   }
 
   const duplicateLayer = (id: string) => {
@@ -812,13 +802,12 @@ export default function EditorCanvas() {
     ;(clone as any).x((src.node as any).x?.() + 20)
     ;(clone as any).y((src.node as any).y?.() + 20)
     ;(clone as any).id(uid())
-    currentArt().add(clone as any)
+    artGroup(side).add(clone as any)
     const newLay: AnyLayer = { id: (clone as any).id?.() ?? uid(), node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
-    attachCommonHandlers(clone, newLay.id)
+    ;(clone as any).zIndex(nextTopZ())
     setLayers(p => [...p, newLay]); select(newLay.id)
-    clone.zIndex(nextTopZ())
     artLayerRef.current?.batchDraw()
-    markArtDirty()
+    if (fxBySide[side].enabled) queueFxRender(side, 60)
   }
 
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
@@ -826,24 +815,20 @@ export default function EditorCanvas() {
       const current = prev.filter(l => l.side === side)
       const others  = prev.filter(l => l.side !== side)
       const orderTopToBottom = current.slice().sort((a,b)=> a.node.zIndex() - b.node.zIndex()).reverse()
-
       const srcIdx = orderTopToBottom.findIndex(l=>l.id===srcId)
       const dstIdx = orderTopToBottom.findIndex(l=>l.id===destId)
       if (srcIdx === -1 || dstIdx === -1) return prev
       const src = orderTopToBottom.splice(srcIdx,1)[0]
       const insertAt = place==="before" ? dstIdx : dstIdx+1
       orderTopToBottom.splice(Math.min(insertAt, orderTopToBottom.length), 0, src)
-
       const bottomToTop = [...orderTopToBottom].reverse()
       bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
       artLayerRef.current?.batchDraw()
-
-      const sortedCurrent = [...bottomToTop]
-      return [...others, ...sortedCurrent]
+      if (fxBySide[side].enabled) queueFxRender(side, 60)
+      return [...others, ...bottomToTop]
     })
     select(srcId)
     requestAnimationFrame(attachTransformer)
-    markArtDirty()
   }
 
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
@@ -855,7 +840,7 @@ export default function EditorCanvas() {
       return { ...l, meta }
     }))
     artLayerRef.current?.batchDraw()
-    markArtDirty()
+    if (fxBySide[side].enabled) queueFxRender(side, 60)
   }
 
   const onLayerSelect = (id: string) => {
@@ -863,7 +848,7 @@ export default function EditorCanvas() {
     if (tool !== "move") set({ tool: "move" })
   }
 
-  // ===== Снимки свойств выбранного узла для Toolbar =====
+  // ===== Свойства выбранного узла для Toolbar =====
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -880,57 +865,45 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); markArtDirty() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); markArtDirty() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); markArtDirty() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); markArtDirty() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw(); markArtDirty() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); markArtDirty() }
-
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); if (fxBySide[side].enabled) queueFxRender(side, 60) }
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
     const n = sel.node as any
-    if (sel.type === "text") {
-      (n as Konva.Text).fill(hex)
-    } else if (sel.type === "shape") {
+    if (sel.type === "text") (n as Konva.Text).fill(hex)
+    else if (sel.type === "shape") {
       if (n instanceof Konva.Group) {
         n.find((child: any) =>
-          child instanceof Konva.Rect ||
-          child instanceof Konva.Circle ||
-          child instanceof Konva.RegularPolygon ||
-          child instanceof Konva.Line
+          child instanceof Konva.Rect || child instanceof Konva.Circle || child instanceof Konva.RegularPolygon || child instanceof Konva.Line
         ).forEach((child: any) => {
           if (child instanceof Konva.Line) child.stroke(hex)
           if (typeof child.fill === "function") child.fill(hex)
         })
-      } else if (n instanceof Konva.Line) {
-        n.stroke(hex)
-      } else if (typeof n.fill === "function") {
-        n.fill(hex)
-      }
+      } else if (n instanceof Konva.Line) n.stroke(hex)
+      else if (typeof n.fill === "function") n.fill(hex)
     }
     artLayerRef.current?.batchDraw()
-    markArtDirty()
+    if (fxBySide[side].enabled) queueFxRender(side, 60)
   }
 
-  // ===== Clear (только арт текущей стороны) =====
+  // ===== Очистка текущей стороны =====
   const clearArt = () => {
-    if (editingRef.current) {
-      editingRef.current.cleanup(false)
-      editingRef.current = null
-    }
-    const g = currentArt()
-    if (!g) return
+    if (editingRef.current) { editingRef.current.cleanup(false); editingRef.current = null }
+    const g = artGroup(side); if (!g) return
     g.removeChildren()
     setLayers(prev => prev.filter(l => l.side !== side))
     currentStrokeId.current[side] = null
     currentEraseId.current[side]  = null
     select(null)
     artLayerRef.current?.batchDraw()
-    markArtDirty()
+    if (fxBySide[side].enabled) queueFxRender(side, 60)
   }
 
-  // ===== Скачивание =====
+  // ===== Загрузка =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -941,6 +914,8 @@ export default function EditorCanvas() {
     backBgRef.current?.visible(!showFront ? true : false)
     frontArtRef.current?.visible(showFront)
     backArtRef.current?.visible(!showFront)
+    fxFrontRef.current?.visible(showFront && fxBySide.front.enabled)
+    fxBackRef.current?.visible(!showFront ? fxBySide.back.enabled : false)
 
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
@@ -949,21 +924,22 @@ export default function EditorCanvas() {
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
     bgLayerRef.current?.visible(true)
 
+    // вернуть состояние
     frontBgRef.current?.visible(side === "front")
     backBgRef.current?.visible(side === "back")
     frontArtRef.current?.visible(side === "front")
     backArtRef.current?.visible(side === "back")
+    fxFrontRef.current?.visible(side === "front" && fxBySide.front.enabled)
+    fxBackRef.current?.visible(side === "back"  && fxBySide.back.enabled)
     uiLayerRef.current?.visible(true)
     st.draw()
 
     const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
-    await new Promise(r => setTimeout(r, 250))
+    await new Promise(r => setTimeout(r, 200))
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ===== Render =====
-  const effect = effectBySide[side]
-
+  // ===== Рендер =====
   return (
     <div
       className="fixed inset-0 bg-white"
@@ -975,7 +951,7 @@ export default function EditorCanvas() {
         userSelect: "none",
       }}
     >
-      {/* Desktop-панель слоёв */}
+      {/* Слои (десктоп) */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -1000,7 +976,7 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* 1. ТОЛЬКО мокап */}
+            {/* 1. Мокап */}
             <Layer ref={bgLayerRef} listening={true}>
               {frontMock && (
                 <KImage
@@ -1024,13 +1000,19 @@ export default function EditorCanvas() {
               )}
             </Layer>
 
-            {/* 2. АРТ */}
+            {/* 2. Живой арт */}
             <Layer ref={artLayerRef} listening={true}>
               <KGroup ref={frontArtRef} visible={side==="front"} />
               <KGroup ref={backArtRef}  visible={side==="back"}  />
             </Layer>
 
-            {/* 3. UI */}
+            {/* 3. FX-превью (картинка-прокси, не перехватывает хиты) */}
+            <Layer ref={fxLayerRef} listening={false}>
+              <KImage ref={fxFrontRef} visible={false} listening={false}/>
+              <KImage ref={fxBackRef}  visible={false} listening={false}/>
+            </Layer>
+
+            {/* 4. UI-рамка */}
             <Layer ref={uiLayerRef}>
               <Transformer
                 ref={trRef}
@@ -1045,16 +1027,16 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* Toolbar */}
+      {/* Toolbar (как был) */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
         brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
         brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
         shapeKind={shapeKind} setShapeKind={()=>{}}
-        onUploadImage={onUploadImage}
-        onAddText={onAddText}
-        onAddShape={onAddShape}
+        onUploadImage={(f)=>{ onUploadImage(f) }}
+        onAddText={()=>{ onAddText() }}
+        onAddShape={(k)=>{ onAddShape(k) }}
         onDownloadFront={()=>downloadBoth("front")}
         onDownloadBack={()=>downloadBoth("back")}
         onClear={clearArt}
@@ -1085,97 +1067,139 @@ export default function EditorCanvas() {
         }}
       />
 
-      {/* ==== ПАНЕЛЬ ЭФФЕКТОВ (без кнопки FX) ==== */}
+      {/* ==== FX-DOCK: отдельная панель в нашей стилистике ==== */}
       <style
-        // лёгкая стилизация слайдеров — круглые, нейтральные
-        dangerouslySetInnerHTML={{
-          __html: `
-          .fx-panel { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif }
-          .fx-range { -webkit-appearance: none; width: 120px; height: 28px; background: transparent; }
-          .fx-range:focus { outline: none; }
-          .fx-range::-webkit-slider-runnable-track { height: 8px; background: #E9ECEF; border-radius: 999px; border: 1px solid #DDD; }
-          .fx-range::-webkit-slider-thumb { -webkit-appearance: none; margin-top: -10px; width: 28px; height: 28px; border-radius: 50%; background: #FFF; border: 1px solid #D0D5DD; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
-          .fx-range::-moz-range-track { height: 8px; background: #E9ECEF; border-radius: 999px; border: 1px solid #DDD; }
-          .fx-range::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: #FFF; border: 1px solid #D0D5DD; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+        dangerouslySetInnerHTML={{__html:`
+          .fxdock { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif }
+          .fxcard { background: rgba(255,255,255,.98); border:1px solid #E5E7EB; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.15) }
+          .fxtitle { font-weight:600; font-size:12px; letter-spacing:.02em; color:#111; }
+          .fxsub { font-size:11px; color:#71717A }
+          .fxrow { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+          .fxbtn { background:#111; color:#fff; border:none; border-radius:10px; padding:8px 12px; font-size:12px; cursor:pointer }
+          .fxbtn.outline { background:#fff; color:#111; border:1px solid #D1D5DB }
+          .fxswitch { width:38px; height:22px; background:#E5E7EB; border-radius:999px; position:relative; cursor:pointer }
+          .fxswitch.on { background:#111 }
+          .fxswitch .dot { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; transition: transform .15s ease }
+          .fxswitch.on .dot { transform: translateX(16px) }
+          .fxrange { -webkit-appearance:none; width:140px; height:28px; background:transparent }
+          .fxrange:focus{ outline:none }
+          .fxrange::-webkit-slider-runnable-track{ height:8px; background:#E9ECEF; border-radius:999px; border:1px solid #DDD }
+          .fxrange::-webkit-slider-thumb{ -webkit-appearance:none; margin-top:-10px; width:28px; height:28px; border-radius:50%; background:#FFF; border:1px solid #D0D5DD; box-shadow:0 2px 8px rgba(0,0,0,.12) }
+          .swatch { width:26px; height:26px; border-radius:8px; border:1px solid #E5E7EB; overflow:hidden; position:relative }
+          .swatch input{ position:absolute; inset:0; opacity:0; cursor:pointer }
         `}}
       />
       <div
-        className="fx-panel"
+        className="fxdock"
         style={{
           position: "fixed",
           left: "50%",
           bottom: 8,
           transform: "translateX(-50%)",
-          background: "rgba(255,255,255,0.98)",
-          borderRadius: 12,
-          boxShadow: "0 6px 18px rgba(0,0,0,.18)",
-          padding: 10,
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
           zIndex: 2147483647,
-          pointerEvents: "auto"
+          pointerEvents: "auto",
+          display: "flex",
+          justifyContent: "center",
         }}
       >
-        <span style={{ fontSize: 12, opacity: .7 }}>Эффект:</span>
-        <select
-          value={effect}
-          onChange={(e) => {
-            const eff = e.target.value as Effect
-            setEffectBySide(prev => ({ ...prev, [side]: eff }))
-            requestAnimationFrame(() => syncEffect(side))
-          }}
-          style={{
-            fontSize: 12, padding: "6px 10px", borderRadius: 10,
-            border: "1px solid #DDD", background: "#FFF"
-          }}
-        >
-          <option value="none">Нет</option>
-          <option value="screenprint">ScreenPrint</option>
-        </select>
+        <div className="fxcard" style={{ padding: 12, minWidth: 360 }}>
+          <div className="fxrow" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="fxtitle">Effects</div>
+            <div className={`fxswitch ${fx.enabled ? "on":""}`} onClick={()=> setFxEnabled(side, !fx.enabled)}>
+              <div className="dot" />
+            </div>
+          </div>
 
-        {effect === "screenprint" && (
-          <>
-            <label style={{ fontSize: 12, opacity: .7 }}>cell</label>
-            <input
-              className="fx-range"
-              type="range" min={4} max={24} step={1}
-              value={screenParams.cell}
-              onChange={(e)=> setScreenParams(s => ({ ...s, cell: Number(e.target.value) }))}
-            />
-            <label style={{ fontSize: 12, opacity: .7 }}>levels</label>
-            <input
-              className="fx-range"
-              type="range" min={3} max={8} step={1}
-              value={screenParams.levels}
-              onChange={(e)=> setScreenParams(s => ({ ...s, levels: Number(e.target.value) }))}
-            />
-            <label style={{ fontSize: 12, opacity: .7 }}>contrast</label>
-            <input
-              className="fx-range"
-              type="range" min={0} max={1} step={0.05}
-              value={screenParams.contrast}
-              onChange={(e)=> setScreenParams(s => ({ ...s, contrast: Number(e.target.value) }))}
-            />
-            <label style={{ fontSize: 12, opacity: .7 }}>angle</label>
-            <input
-              className="fx-range"
-              type="range" min={0} max={90} step={1}
-              value={screenParams.angle}
-              onChange={(e)=> setScreenParams(s => ({ ...s, angle: Number(e.target.value) }))}
-            />
-            <button
-              onClick={() => {
-                setEffectBySide(prev => ({ ...prev, [side]: "none" }))
-                requestAnimationFrame(()=> syncEffect(side))
-              }}
-              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 10, border: "1px solid #ddd", background: "#fff" }}
+          {/* селектор эффекта (пока один) */}
+          <div className="fxrow" style={{ marginBottom: 8 }}>
+            <div className="fxsub" style={{ width: 72 }}>Тип</div>
+            <select
+              value={"screenprintPlus"}
+              onChange={()=>{}}
+              style={{ fontSize:12, padding:"6px 10px", borderRadius:10, border:"1px solid #DDD", background:"#FFF" }}
             >
-              Сбросить
-            </button>
-          </>
-        )}
+              <option value="screenprintPlus">ScreenPrint+</option>
+            </select>
+            <div className="fxrow" style={{ marginLeft: "auto" }}>
+              <div className="fxsub">Live</div>
+              <div
+                className={`fxswitch ${fx.live ? "on":""}`}
+                onClick={()=> setFxBySide(p => ({ ...p, [side]: { ...p[side], live: !p[side].live } }))}
+              >
+                <div className="dot" />
+              </div>
+              {!fx.live && (
+                <button className="fxbtn outline" style={{ marginLeft: 8 }} onClick={()=> renderFxSnapshot(side)}>Update</button>
+              )}
+            </div>
+          </div>
+
+          {/* параметры */}
+          <div className="fxrow" style={{ marginBottom: 6 }}>
+            <div className="fxsub" style={{ width:72 }}>Cell</div>
+            <input className="fxrange" type="range" min={4} max={28} step={1} value={fx.cell}
+              onChange={e=> setFxBySide(p=>({ ...p, [side]: { ...p[side], cell: Number(e.target.value) } }))} />
+            <div className="fxsub" style={{ width:72, textAlign:"right" }}>{fx.cell}px</div>
+          </div>
+          <div className="fxrow" style={{ marginBottom: 6 }}>
+            <div className="fxsub" style={{ width:72 }}>Levels</div>
+            <input className="fxrange" type="range" min={2} max={6} step={1} value={fx.levels}
+              onChange={e=> setFxBySide(p=>({ ...p, [side]: { ...p[side], levels: Number(e.target.value) } }))} />
+            <div className="fxsub" style={{ width:72, textAlign:"right" }}>{fx.levels}</div>
+          </div>
+          <div className="fxrow" style={{ marginBottom: 6 }}>
+            <div className="fxsub" style={{ width:72 }}>Angle</div>
+            <input className="fxrange" type="range" min={0} max={90} step={1} value={fx.angle}
+              onChange={e=> setFxBySide(p=>({ ...p, [side]: { ...p[side], angle: Number(e.target.value) } }))} />
+            <div className="fxsub" style={{ width:72, textAlign:"right" }}>{fx.angle}°</div>
+          </div>
+          <div className="fxrow" style={{ marginBottom: 10 }}>
+            <div className="fxsub" style={{ width:72 }}>Dot</div>
+            <input className="fxrange" type="range" min={0} max={1} step={0.05} value={fx.dot}
+              onChange={e=> setFxBySide(p=>({ ...p, [side]: { ...p[side], dot: Number(e.target.value) } }))} />
+            <div className="fxsub" style={{ width:72, textAlign:"right" }}>{Math.round(fx.dot*100)}%</div>
+          </div>
+
+          {/* палитра */}
+          <div className="fxrow" style={{ justifyContent:"space-between" }}>
+            <div className="fxsub">Palette</div>
+            <div className="fxrow">
+              {fx.palette.map((c, i)=>(
+                <div key={i} className="swatch" style={{ background:c }}>
+                  <input type="color" value={c}
+                    onChange={(e)=>{
+                      const pal = [...fx.palette]; pal[i] = e.target.value
+                      setFxBySide(p => ({ ...p, [side]: { ...p[side], palette: pal } }))
+                    }}
+                  />
+                </div>
+              ))}
+              <button
+                className="fxbtn outline"
+                onClick={()=>{
+                  setFxBySide(p => ({ ...p, [side]: { ...p[side], palette: ["#ff005d","#ffe500","#00e0ff","#111111"] } }))
+                }}
+                style={{ marginLeft: 8 }}
+              >Reset</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
+}
+
+// ==== Добавление: Image/Text/Shape (ниже — без изменений по логике, но с подстройкой FX) ====
+function useAdders(
+  artLayerRef: React.RefObject<Konva.Layer>,
+  frontArtRef: React.RefObject<Konva.Group>,
+  backArtRef: React.RefObject<Konva.Group>,
+  side: Side,
+  setLayers: React.Dispatch<React.SetStateAction<AnyLayer[]>>,
+  setSeqs: React.Dispatch<React.SetStateAction<{image:number,shape:number,text:number,strokes:number,erase:number}>>,
+  select: (id: string | null)=>void,
+  set: (patch:any)=>void,
+  brushColor: string,
+) {
+  return {}
 }
