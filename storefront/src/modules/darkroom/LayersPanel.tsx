@@ -17,7 +17,7 @@ const blends = [
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes"
+  type: "image" | "shape" | "text" | "strokes" | "erase"  // поддерживаем erase
   visible: boolean
   locked: boolean
   blend: string
@@ -38,9 +38,10 @@ type Props = {
 }
 
 /**
- * Desktop Layers: DnD только за "решётку".
- * Слайдеры/селекты не конфликтуют с DnD (стопим события).
- * Опасити 5–100, центрированный трек.
+ * Desktop Layers:
+ * — DnD только за «решётку».
+ * — Слайдеры/селекты не конфликтуют с DnD (stopPropagation).
+ * — Opacity 5–100, центрированный трек, без «синего кружка».
  */
 export default function LayersPanel({
   items,
@@ -58,7 +59,6 @@ export default function LayersPanel({
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // Центрированный слайдер: собственный трек
   const sliderCss = `
   input[type="range"].lp{
     -webkit-appearance:none; appearance:none;
@@ -66,7 +66,7 @@ export default function LayersPanel({
   }
   input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
   input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
-  input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:12px; height:12px; background:currentColor; border:0; border-radius:0; }
+  input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:12px; height:12px; background:currentColor; border:0; border-radius:0; margin-top:0; }
   input[type="range"].lp::-moz-range-thumb{ width:12px; height:12px; background:currentColor; border:0; border-radius:0; }
   `
 
