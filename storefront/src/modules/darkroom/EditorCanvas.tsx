@@ -51,11 +51,6 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
-  // ——— ЭФФЕКТЫ (dot-screen / halftone)
-  const [fxOn, setFxOn] = useState(false)
-  const fxOnRef = useRef(false)
-  useEffect(() => { fxOnRef.current = fxOn }, [fxOn])
-
   // мобильная кисть по умолчанию
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
 
@@ -76,14 +71,6 @@ export default function EditorCanvas() {
   const backBgRef       = useRef<Konva.Image>(null)
   const frontArtRef     = useRef<Konva.Group>(null)    // контент (front)
   const backArtRef      = useRef<Konva.Group>(null)    // контент (back)
-
-  // экранный `<canvas>` под шейдер
-  const fxRef           = useRef<HTMLCanvasElement | null>(null)
-  const glRef           = useRef<WebGLRenderingContext | null>(null)
-  const progRef         = useRef<WebGLProgram | null>(null)
-  const texRef          = useRef<WebGLTexture | null>(null)
-  const quadRef         = useRef<WebGLBuffer | null>(null)
-  const locRef          = useRef<{[k:string]: WebGLUniformLocation | null}>({})
 
   // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
@@ -135,13 +122,6 @@ export default function EditorCanvas() {
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
-  // ———— единая перерисовка арта + (при необходимости) эффекта
-  const drawArt = () => {
-    artLayerRef.current?.batchDraw()
-    if (fxOnRef.current) requestAnimationFrame(renderScreenPrint)
-  }
-  const drawUI = () => { uiLayerRef.current?.batchDraw() }
-
   // показываем только активную сторону
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
@@ -150,7 +130,7 @@ export default function EditorCanvas() {
     frontArtRef.current?.visible(side === "front")
     backArtRef.current?.visible(side === "back")
     bgLayerRef.current?.batchDraw()
-    drawArt()
+    artLayerRef.current?.batchDraw()
     attachTransformer()
   }, [side, layers])
 
@@ -177,7 +157,7 @@ export default function EditorCanvas() {
 
     if (disabled) {
       trRef.current?.nodes([])
-      drawUI()
+      uiLayerRef.current?.batchDraw()
       return
     }
 
@@ -220,7 +200,6 @@ export default function EditorCanvas() {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
         if (active === "middle-left" || active === "middle-right" || snap.anchor === "middle-left" || snap.anchor === "middle-right") {
-          // ширина
           const sx = Math.max(0.01, t.scaleX())
           const targetW = Math.max(TEXT_MIN_W, Math.min(snap.width * sx, TEXT_MAX_W))
           const curW = t.width() || snap.width
@@ -235,23 +214,20 @@ export default function EditorCanvas() {
           }
           t.scaleX(1); t.scaleY(1)
         } else {
-          // кегль
           const s = Math.max(t.scaleX(), t.scaleY())
           const targetFS = Math.max(TEXT_MIN_FS, Math.min(snap.fontSize * s, TEXT_MAX_FS))
           if (Math.abs(targetFS - t.fontSize()) > EPS) t.fontSize(targetFS)
           t.scaleX(1); t.scaleY(1)
         }
 
-        drawArt()
-        trRef.current?.forceUpdate()
-        if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
+        t.getLayer()?.batchDraw()
       }
 
       const onEnd = () => {
         t.scaleX(1); t.scaleY(1)
         textStart.current = null
-        drawArt()
-        trRef.current?.forceUpdate()
+        t.getLayer()?.batchDraw()
+        // если открыт редактор — синхронизируем textarea с новым bbox
         if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
       }
 
@@ -295,8 +271,7 @@ export default function EditorCanvas() {
         }
 
         ;(n as any).scaleX(1); (n as any).scaleY(1)
-        drawArt()
-        trRef.current?.forceUpdate()
+        n.getLayer()?.batchDraw()
       }
 
       const onEnd = () => onTransform()
@@ -305,7 +280,7 @@ export default function EditorCanvas() {
       detachTextFix.current = () => { n.off(".fix") }
     }
 
-    drawUI()
+    tr.getLayer()?.batchDraw()
   }
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
@@ -318,33 +293,18 @@ export default function EditorCanvas() {
       if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
       ;(l.node as any).draggable(enable && !l.meta.locked)
     })
-    if (!enable) { trRef.current?.nodes([]); drawUI() }
+    if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
 
     // закрытие сессий при смене инструмента
     if (tool !== "brush") currentStrokeId.current[side] = null
     if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
-  // ===== хоткеи =====
+  // ===== хоткеи (без Undo/Redo) =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
-      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) {
-        // Ctrl/Cmd+E разрешим даже в режиме ввода — это просто эффект
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
-          e.preventDefault()
-          setFxOn(v => !v)
-          return
-        }
-        return
-      }
-
-      // toggle эффект
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
-        e.preventDefault()
-        setFxOn(v => !v)
-        return
-      }
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
 
       const n = node(selectedId)
       if (!n || tool !== "move") return
@@ -359,8 +319,7 @@ export default function EditorCanvas() {
       if (e.key === "ArrowRight") { (n as any).x((n as any).x()+step) }
       if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
       if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
-      drawArt()
-      trRef.current?.forceUpdate()
+      n.getLayer()?.batchDraw()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -429,7 +388,7 @@ export default function EditorCanvas() {
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
         setSeqs(s => ({ ...s, image: s.image + 1 }))
         select(id)
-        drawArt()
+        artLayerRef.current?.batchDraw()
         set({ tool: "move" })
       }
       img.src = r.result as string
@@ -456,7 +415,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
     setSeqs(s => ({ ...s, text: s.text + 1 }))
     select(id)
-    drawArt()
+    artLayerRef.current?.batchDraw()
     set({ tool: "move" })
   }
 
@@ -476,7 +435,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
     setSeqs(s => ({ ...s, shape: s.shape + 1 }))
     select(id)
-    drawArt()
+    artLayerRef.current?.batchDraw()
     set({ tool: "move" })
   }
 
@@ -523,42 +482,31 @@ export default function EditorCanvas() {
       const line = last instanceof Konva.Line ? last : (last as Konva.Group)?.getChildren().at(-1)
       if (!(line instanceof Konva.Line)) return
       line.points(line.points().concat([x, y]))
-      drawArt()
+      artLayerRef.current?.batchDraw()
     } else if (tool === "erase") {
       const gid = currentEraseId.current[side]
       const g = gid ? (find(gid)?.node as Konva.Group) : null
       const last = g?.getChildren().at(-1) as Konva.Line | undefined
       if (!(last instanceof Konva.Line)) return
       last.points(last.points().concat([x, y]))
-      drawArt()
+      artLayerRef.current?.batchDraw()
     }
   }
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста — полностью синхронизирован с bbox и трансформером =====
+  // ===== Overlay-редактор текста — СИНХРОНИЗИРОВАН С BBOX И ТРАНСФОРМЕРОМ =====
   const editingRef = useRef<{
     ta: HTMLTextAreaElement
     nodeId: string
-    cleanup: (apply?: boolean) => void
+    prevOpacity: number
+    cleanup: () => void
     sync: () => void
   } | null>(null)
 
-  // матрица узла -> CSS matrix с учётом Stage.scale и позиции контейнера
-  const computeCssMatrix = (t: Konva.Text) => {
-    const st = stageRef.current!
-    const m = t.getAbsoluteTransform().getMatrix() // [a,b,c,d,e,f]
-    const a = m[0] * scale
-    const b = m[1] * scale
-    const c = m[2] * scale
-    const d = m[3] * scale
-    const e = m[4] * scale + st.container().getBoundingClientRect().left
-    const f = m[5] * scale + st.container().getBoundingClientRect().top
-    return { a, b, c, d, e, f }
-  }
-
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
+    const stContainer = stage.container()
 
     // если уже что-то редактируем — завершим
     if (editingRef.current) {
@@ -566,10 +514,18 @@ export default function EditorCanvas() {
       editingRef.current = null
     }
 
+    // делаем текст практически прозрачным, чтобы не было «двойного» текста,
+    // но трансформер остаётся активным и видимым
+    const prevOpacity = t.opacity()
+    t.opacity(0.001)
+    t.getLayer()?.batchDraw()
+
     const ta = document.createElement("textarea")
     ta.value = t.text()
+
+    // визуал textarea
     Object.assign(ta.style, {
-      position: "fixed",
+      position: "absolute",
       padding: "0",
       margin: "0",
       border: "none",
@@ -591,80 +547,78 @@ export default function EditorCanvas() {
       caretColor: String(t.fill() || "#000"),
       textAlign: (t.align?.() as any) || "left",
     } as CSSStyleDeclaration)
-    document.body.appendChild(ta)
 
-    // не скрываем ноду: делаем почти прозрачной, чтобы рамка/ручки оставались
-    const prevOpacity = t.opacity()
-    const prevListening = t.listening()
-    t.opacity(0.001)
-    t.listening(false)
-    drawArt()
-    trRef.current?.nodes([t])
-    trRef.current?.forceUpdate()
-    drawUI()
-
+    // функция позиционирования — ВСЕГДА пересчитываем rect заново
     const sync = () => {
-      // размеры берём из клиентского прямоугольника ноды (без Stoke), ширину — исходную t.width()
-      const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true }) as {width:number;height:number}
-      ta.style.width  = `${Math.max(2, (t.width() || r.width) * scale)}px`
+      const b = stContainer.getBoundingClientRect()
+      const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
+      ta.style.left   = `${b.left + r.x * scale}px`
+      ta.style.top    = `${b.top  + r.y * scale}px`
+      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
       ta.style.height = `${Math.max(2, r.height * scale)}px`
-
-      const { a,b,c,d,e,f } = computeCssMatrix(t)
-      // полная матрица: позиция+поворот+масштаб узла + смещение контейнера Stage
-      ta.style.transform = `matrix(${a},${b},${c},${d},${e},${f})`
     }
 
+    // монтируем textarea
+    document.body.appendChild(ta)
+    sync()
+    ta.focus()
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+
+    // на вводе синхронизируем сам текст, слой, рамку и DOM
     const onInput = () => {
       t.text(ta.value)
-      drawArt()
+      t.getLayer()?.batchDraw()
       trRef.current?.forceUpdate()
-      drawUI()
+      uiLayerRef.current?.batchDraw()
+      // чуть сгладим частоту — на кадр
       requestAnimationFrame(sync)
     }
 
-    // во время любых трансформаций/перетаскиваний узла — двигаем textarea
+    // во время любых трансформаций/перетаскиваний узла — подвинем textarea
     const onT = () => requestAnimationFrame(sync)
 
+    // закрытие
     const cleanup = (apply = true) => {
-      window.removeEventListener("scroll", onViewport, true)
-      window.removeEventListener("resize", onViewport)
+      window.removeEventListener("scroll", onScroll, true)
+      window.removeEventListener("resize", onResize)
       t.off(".edit")
       ta.removeEventListener("input", onInput)
       ta.removeEventListener("keydown", onKey)
       if (apply) t.text(ta.value)
       ta.remove()
       t.opacity(prevOpacity)
-      t.listening(prevListening)
-      drawArt()
-      // держим выделение и моментально «зажигаем» рамку — без лишнего клика
-      select(t.id())
+      t.getLayer()?.batchDraw()
+      // принудительно держим выделение и «зажигаем» рамку
+      select(find(selectedId)?.id ?? (t.id() as string))
       requestAnimationFrame(() => {
-        trRef.current?.nodes([t])
-        trRef.current?.forceUpdate()
-        drawUI()
+        attachTransformer()
+        uiLayerRef.current?.batchDraw()
       })
     }
 
     const onKey = (ev: KeyboardEvent) => {
       ev.stopPropagation()
-      // Enter без Shift — коммит; Esc — отмена
       if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); cleanup(true) }
       if (ev.key === "Escape") { ev.preventDefault(); cleanup(false) }
     }
-    const onViewport = () => sync()
+    const onResize = () => sync()
+    const onScroll = () => sync()
 
     ta.addEventListener("input", onInput)
     ta.addEventListener("keydown", onKey as any)
-    window.addEventListener("resize", onViewport)
-    window.addEventListener("scroll", onViewport, true)
+    window.addEventListener("resize", onResize)
+    window.addEventListener("scroll", onScroll, true)
+
+    // слушаем движения/трансформации узла, чтобы textarea ехала вместе с ним
     t.on("dragmove.edit transform.edit transformend.edit", onT)
 
-    // первичная фокусировка/выставление
-    sync()
-    ta.focus()
-    ta.setSelectionRange(ta.value.length, ta.value.length)
-
-    editingRef.current = { ta, nodeId: t.id(), cleanup, sync }
+    editingRef.current = {
+      ta,
+      nodeId: t.id(),
+      prevOpacity,
+      cleanup: (apply?: boolean) => cleanup(apply),
+      sync,
+    }
   }
 
   // ===== Жесты/указатель =====
@@ -702,7 +656,7 @@ export default function EditorCanvas() {
     if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
       select(null)
       trRef.current?.nodes([])
-      drawUI()
+      uiLayerRef.current?.batchDraw()
       return
     }
 
@@ -748,7 +702,7 @@ export default function EditorCanvas() {
       return p.filter(x => x.id!==id)
     })
     if (selectedId === id) select(null)
-    drawArt()
+    artLayerRef.current?.batchDraw()
   }
 
   const duplicateLayer = (id: string) => {
@@ -762,7 +716,7 @@ export default function EditorCanvas() {
     attachCommonHandlers(clone, newLay.id)
     setLayers(p => [...p, newLay]); select(newLay.id)
     clone.zIndex(nextTopZ())
-    drawArt()
+    artLayerRef.current?.batchDraw()
   }
 
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
@@ -780,7 +734,7 @@ export default function EditorCanvas() {
 
       const bottomToTop = [...orderTopToBottom].reverse()
       bottomToTop.forEach((l, i) => { (l.node as any).zIndex(i) })
-      drawArt()
+      artLayerRef.current?.batchDraw()
 
       const sortedCurrent = [...bottomToTop]
       return [...others, ...sortedCurrent]
@@ -797,7 +751,7 @@ export default function EditorCanvas() {
       if (patch.visible !== undefined) l.node.visible(meta.visible && l.side === side)
       return { ...l, meta }
     }))
-    drawArt()
+    artLayerRef.current?.batchDraw()
   }
 
   const onLayerSelect = (id: string) => {
@@ -822,12 +776,12 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); drawArt(); trRef.current?.forceUpdate() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); drawArt(); trRef.current?.forceUpdate() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); drawArt(); trRef.current?.forceUpdate() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); drawArt(); trRef.current?.forceUpdate() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); drawArt(); trRef.current?.forceUpdate() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); drawArt(); trRef.current?.forceUpdate() }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
 
   // === FIX: универсальная перекраска (включая CREST / Group и Line) ===
   const setSelectedColor      = (hex:string)  => {
@@ -852,11 +806,12 @@ export default function EditorCanvas() {
         n.fill(hex)
       }
     }
-    drawArt()
+    artLayerRef.current?.batchDraw()
   }
 
   // ===== Clear (только арт текущей стороны) =====
   const clearArt = () => {
+    // закрыть возможное редактирование
     if (editingRef.current) {
       editingRef.current.cleanup(false)
       editingRef.current = null
@@ -868,7 +823,7 @@ export default function EditorCanvas() {
     currentStrokeId.current[side] = null
     currentEraseId.current[side]  = null
     select(null)
-    drawArt()
+    artLayerRef.current?.batchDraw()
   }
 
   // ===== Скачивание (mockup + art) =====
@@ -876,6 +831,7 @@ export default function EditorCanvas() {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
 
+    // скрываем UI и противоположную сторону
     uiLayerRef.current?.visible(false)
     const showFront = s === "front"
     frontBgRef.current?.visible(showFront)
@@ -883,13 +839,16 @@ export default function EditorCanvas() {
     frontArtRef.current?.visible(showFront)
     backArtRef.current?.visible(!showFront)
 
+    // 1) с мокапом
     const withMock = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
 
+    // 2) только арт (прячем мокаповый слой)
     bgLayerRef.current?.visible(false)
     st.draw()
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
     bgLayerRef.current?.visible(true)
 
+    // вернуть UI/видимость текущей стороны
     frontBgRef.current?.visible(side === "front")
     backBgRef.current?.visible(side === "back")
     frontArtRef.current?.visible(side === "front")
@@ -901,154 +860,6 @@ export default function EditorCanvas() {
     await new Promise(r => setTimeout(r, 250))
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
-
-  // ======= DOT-SCREEN / SCREENPRINT FX =======
-  // простой фрагментный шейдер dot-screen (полутоновая сетка)
-  const frag = `
-  precision mediump float;
-  varying vec2 vUV;
-  uniform sampler2D uTex;
-  uniform vec2 uRes;     // размер целевого canvas (экрана)
-  uniform float uAngle;  // угол сетки (рад)
-  uniform float uScale;  // плотность сетки (чем больше — крупнее точки)
-  uniform float uMix;    // 0..1 сила эффекта
-
-  // поворот UV
-  vec2 rot(vec2 p, float a){
-    float s = sin(a), c = cos(a);
-    mat2 m = mat2(c,-s,s,c);
-    return m * (p - 0.5) + 0.5;
-  }
-
-  void main(){
-    vec4 col = texture2D(uTex, vUV);
-    // luminance (perceptual)
-    float l = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-
-    // частота сетки в пикселях экрана
-    vec2 uv = rot(vUV, uAngle);
-    vec2 p = uv * uRes / uScale;
-
-    // узор точек: синусные полосы по двум осям
-    float dots = (sin(p.x) * sin(p.y)) * 0.5 + 0.5;
-
-    // контрастная печать: тени/света
-    float halftone = smoothstep(0.0, 1.0, dots);
-
-    // смешивание: цветные заливки + «печать»
-    vec3 screenprint = mix(col.rgb, vec3(halftone), 0.85);
-    vec3 outCol = mix(col.rgb, screenprint, uMix);
-
-    gl_FragColor = vec4(outCol, 1.0);
-  }`
-
-  const vert = `
-  attribute vec2 p;
-  varying vec2 vUV;
-  void main(){
-    vUV = (p + 1.0) * 0.5;
-    gl_Position = vec4(p, 0.0, 1.0);
-  }`
-
-  const initGL = () => {
-    if (!fxRef.current) return
-    const gl = fxRef.current.getContext("webgl", { premultipliedAlpha: false })
-    if (!gl) return
-    glRef.current = gl
-
-    const compile = (type: number, src: string) => {
-      const sh = gl.createShader(type)!
-      gl.shaderSource(sh, src)
-      gl.compileShader(sh)
-      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-        console.warn("Shader error:", gl.getShaderInfoLog(sh))
-      }
-      return sh
-    }
-    const pr = gl.createProgram()!
-    gl.attachShader(pr, compile(gl.VERTEX_SHADER, vert))
-    gl.attachShader(pr, compile(gl.FRAGMENT_SHADER, frag))
-    gl.linkProgram(pr)
-    progRef.current = pr
-
-    // fullscreen quad
-    const quad = gl.createBuffer()!
-    gl.bindBuffer(gl.ARRAY_BUFFER, quad)
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -1,-1,  1,-1,  -1,1,
-      -1, 1,  1,-1,   1,1
-    ]), gl.STATIC_DRAW)
-    quadRef.current = quad
-
-    // texture
-    const tex = gl.createTexture()!
-    gl.bindTexture(gl.TEXTURE_2D, tex)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    texRef.current = tex
-
-    gl.useProgram(pr)
-    const pLoc = gl.getAttribLocation(pr, "p")
-    gl.enableVertexAttribArray(pLoc)
-    gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0)
-
-    locRef.current.uTex   = gl.getUniformLocation(pr, "uTex")
-    locRef.current.uRes   = gl.getUniformLocation(pr, "uRes")
-    locRef.current.uAngle = gl.getUniformLocation(pr, "uAngle")
-    locRef.current.uScale = gl.getUniformLocation(pr, "uScale")
-    locRef.current.uMix   = gl.getUniformLocation(pr, "uMix")
-  }
-
-  // снимаем bitmap только с арта (без мокапа) через Layer.toCanvas
-  const makeArtBitmap = () => {
-    const art = artLayerRef.current
-    if (!stageRef.current || !art) return null
-    // bitmap в базовом размере
-    const cnv = (art as any).toCanvas({ pixelRatio: 1 }) as HTMLCanvasElement
-    return cnv
-  }
-
-  const renderScreenPrint = () => {
-    if (!fxRef.current || !glRef.current || !progRef.current) return
-    const gl = glRef.current
-    const fx = fxRef.current
-
-    // подгоняем размер fx-canvas под текущее окно
-    if (fx.width !== Math.round(viewW) || fx.height !== Math.round(viewH)) {
-      fx.width  = Math.round(viewW)
-      fx.height = Math.round(viewH)
-      gl.viewport(0, 0, fx.width, fx.height)
-    }
-
-    const src = makeArtBitmap()
-    if (!src) { gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); return }
-
-    // заливка текстуры
-    gl.bindTexture(gl.TEXTURE_2D, texRef.current)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
-
-    gl.useProgram(progRef.current)
-    gl.uniform1i(locRef.current.uTex, 0)
-    gl.uniform2f(locRef.current.uRes, fx.width, fx.height)
-    gl.uniform1f(locRef.current.uAngle, 0.15) // ~8.6° — «от печати»
-    gl.uniform1f(locRef.current.uScale, 8.0)  // плотность точек
-    gl.uniform1f(locRef.current.uMix, fxOnRef.current ? 1.0 : 0.0)
-
-    gl.drawArrays(gl.TRIANGLES, 0, 6)
-  }
-
-  // инициализация GL один раз
-  useEffect(() => {
-    initGL()
-    // первичный рендер
-    requestAnimationFrame(renderScreenPrint)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // при включении/выключении эффекта и при изменении размеров — перерендер
-  useEffect(() => { requestAnimationFrame(renderScreenPrint) }, [fxOn, viewW, viewH, scale, side])
 
   // ===== Render =====
   return (
@@ -1079,21 +890,7 @@ export default function EditorCanvas() {
       )}
 
       {/* Сцена */}
-      <div className="w-full h-full flex items-start justify-center relative">
-        {/* FX-канвас (поверх арта, под трансформером) */}
-        <canvas
-          ref={fxRef}
-          style={{
-            position: "absolute",
-            left: `calc(50% - ${viewW/2}px)`,
-            top:  `${padTop}px`,
-            width: `${viewW}px`,
-            height:`${viewH}px`,
-            pointerEvents: "none",
-            opacity: fxOn ? 1 : 0,
-            transition: "opacity 120ms ease"
-          }}
-        />
+      <div className="w-full h-full flex items-start justify-center">
         <div style={{ touchAction: "none" }}>
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
@@ -1149,20 +946,29 @@ export default function EditorCanvas() {
       {/* Toolbar */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
+
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
+
         brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
+
         brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
+
         shapeKind={shapeKind} setShapeKind={()=>{}}
+
         onUploadImage={onUploadImage}
         onAddText={onAddText}
         onAddShape={onAddShape}
+
         onDownloadFront={()=>downloadBoth("front")}
         onDownloadBack={()=>downloadBoth("back")}
+
         onClear={clearArt}
         toggleLayers={toggleLayers}
         layersOpen={showLayers}
+
         selectedKind={selectedKind}
         selectedProps={selectedProps}
+
         setSelectedFill={setSelectedFill}
         setSelectedStroke={setSelectedStroke}
         setSelectedStrokeW={setSelectedStrokeW}
@@ -1170,15 +976,6 @@ export default function EditorCanvas() {
         setSelectedFontSize={setSelectedFontSize}
         setSelectedFontFamily={setSelectedFontFamily}
         setSelectedColor={setSelectedColor}
-
-        // ↓ пример как подружить эффект с вашим тулбаром:
-        extraControls={{
-          screenPrint: {
-            enabled: fxOn,
-            toggle: () => setFxOn(v => !v),
-            // можно добавить ползунки для плотности/угла — uScale/uAngle
-          }
-        }}
 
         mobileTopOffset={padTop}
         mobileLayers={{
@@ -1198,3 +995,5 @@ export default function EditorCanvas() {
     </div>
   )
 }
+
+Для начала поправь текст, то что сейчас твой предыдущий, то что ты прислал, вообще работает супер плохо. Этот хотя бы съезжал и дрожал, но твой вообще вылетает прямо в поле в воду. Поэтому нужно вот в этот базис вставить чистые правки по механике работы с текстом. Ну, если ты не можешь там, ну, я не знаю. Ну и покажи мне прототип, как шейдер будет работать просто. Эффект, который можно выбрать куда-нибудь внизу в поле. Список эффектов, которые доступны в канве и вот этот шейдер. Или один этот шейдер. Интересно, что можно его включать, выключать. Прямо на весь канвас. Без мокапа.
