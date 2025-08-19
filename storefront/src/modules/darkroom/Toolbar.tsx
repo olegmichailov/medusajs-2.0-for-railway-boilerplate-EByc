@@ -92,6 +92,8 @@ const btn  =
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 
 const activeBtn = "bg-black text-white"
+
+// глушим DnD / прокидываем только в инпут
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -121,6 +123,47 @@ const sliderCss = `
 input[type="range"].square::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: #000; }
 input[type="range"].square::-moz-range-thumb { width: 14px; height: 14px; background: #000; border: none; }
 `
+
+/** Единый фейдер с тонкой полоской-«треком» под ним, отвязанный от DnD. */
+function Fader(props: {
+  value: number
+  min: number
+  max: number
+  step?: number
+  onChange: (v: number) => void
+  className?: string
+  disabled?: boolean
+  // опционально — отрисовать рядом число
+  renderValueRight?: (v: number) => React.ReactNode
+}) {
+  const { value, min, max, step = 1, onChange, className, disabled, renderValueRight } = props
+  return (
+    <div
+      className={clx("relative w-full flex items-center gap-2 select-none", className)}
+      {...inputStop}
+    >
+      {/* трек под ползунком */}
+      <div
+        aria-hidden
+        className="absolute left-0 right-0 top-1/2 -translate-y-1/2"
+        style={{ height: 2, background: "rgba(0,0,0,.25)", pointerEvents: "none" }}
+      />
+      <input
+        type="range"
+        className="w-full square"
+        style={sliderStyle}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        value={Math.round(value)}
+        onChange={(e) => onChange(Math.round(Number(e.target.value)))}
+        {...inputStop}
+      />
+      {renderValueRight ? <div className="text-xs w-10 text-right">{renderValueRight(Math.round(value))}</div> : null}
+    </div>
+  )
+}
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -226,24 +269,13 @@ export default function Toolbar(props: ToolbarProps) {
                 disabled={tool==="erase"}
               />
               <div className="flex-1">
-                <input
-                  type="range"
+                <Fader
                   min={1}
                   max={tool==="text" ? 800 : 200}
-                  step={1}
                   value={tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
-                  onChange={(e)=>{
-                    const v = parseInt(e.target.value)
-                    if (tool==="text") setSelectedFontSize(v)
-                    else setBrushSize(v)
-                  }}
-                  className="w-full square"
-                  style={sliderStyle}
-                  {...inputStop}
+                  onChange={(v)=>{ if (tool==="text") setSelectedFontSize(v); else setBrushSize(v) }}
+                  renderValueRight={(v)=>v}
                 />
-              </div>
-              <div className="text-xs w-10 text-right">
-                {tool==="text" ? (selectedProps.fontSize ?? 96) : brushSize}
               </div>
             </div>
 
@@ -284,15 +316,13 @@ export default function Toolbar(props: ToolbarProps) {
                 />
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Font size</div>
-                  <input
-                    type="range" min={8} max={800} step={1}
+                  <Fader
+                    min={8}
+                    max={800}
                     value={selectedProps.fontSize ?? 96}
-                    onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-                    className="flex-1 square"
-                    style={sliderStyle}
-                    {...inputStop}
+                    onChange={(v)=>setSelectedFontSize(v)}
+                    renderValueRight={(v)=>v}
                   />
-                  <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
                 </div>
               </div>
             )}
@@ -306,16 +336,14 @@ export default function Toolbar(props: ToolbarProps) {
                   <div className="text-[10px] w-12">Stroke</div>
                   <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black" {...inputStop}/>
                   <div className="flex-1">
-                    <input
-                      type="range" min={0} max={64} step={1}
+                    <Fader
+                      min={0}
+                      max={64}
                       value={selectedProps.strokeWidth ?? 0}
-                      onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value))}
-                      className="w-full square"
-                      style={sliderStyle}
-                      {...inputStop}
+                      onChange={(v)=>props.setSelectedStrokeW(v)}
+                      renderValueRight={(v)=>v}
                     />
                   </div>
-                  <div className="text-xs w-8 text-right">{selectedProps.strokeWidth ?? 0}</div>
                 </div>
               </div>
             )}
@@ -364,7 +392,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input type="color" value={selectedProps.fill ?? "#000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
           <input type="color" value={selectedProps.stroke ?? "#000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-8 h-8 border border-black" {...inputStop}/>
           <div className="flex-1">
-            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value))} className="w-full square" style={sliderStyle} {...inputStop}/>
+            <Fader min={0} max={64} value={selectedProps.strokeWidth ?? 0} onChange={(v)=>props.setSelectedStrokeW(v)} />
           </div>
         </div>
       )
@@ -380,15 +408,8 @@ export default function Toolbar(props: ToolbarProps) {
             className="flex-1 h-10 border border-black px-2 text-sm"
             {...inputStop}
           />
-          <div className="w-32 flex items-center gap-2">
-            <input
-              type="range" min={8} max={800} step={1}
-              value={selectedProps.fontSize ?? 96}
-              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-              className="w-full square"
-              style={sliderStyle}
-              {...inputStop}
-            />
+          <div className="w-32">
+            <Fader min={8} max={800} value={selectedProps.fontSize ?? 96} onChange={(v)=>setSelectedFontSize(v)} />
           </div>
         </div>
       )
@@ -409,19 +430,8 @@ export default function Toolbar(props: ToolbarProps) {
           />
         </div>
         <div className="flex-1">
-          <input
-            type="range"
-            min={1}
-            max={200}
-            step={1}
-            value={brushSize}
-            onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-            className="w-full square"
-            style={sliderStyle}
-            {...inputStop}
-          />
+          <Fader min={1} max={200} value={brushSize} onChange={(v)=>setBrushSize(v)} />
         </div>
-        <div className="text-xs w-10 text-right">{brushSize}</div>
       </div>
     )
   }
@@ -487,7 +497,7 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <button className={clx("flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2")} onClick={onDownloadFront}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
           </div>
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
