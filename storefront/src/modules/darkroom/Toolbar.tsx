@@ -1,3 +1,4 @@
+// Toolbar.tsx
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
@@ -19,10 +20,8 @@ type MobileLayersItem = {
   blend: string
   opacity: number
 }
-
 type MobileLayersProps = {
-  items: MobileLayersItem[]
-  selectedId?: string
+  items: MobileLayersItem[]; selectedId?: string
   onSelect: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -89,7 +88,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// центрированные слайды с собственным треком
+// КВАДРАТНЫЕ ползунки + трек по центру
 const sliderCss = `
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
@@ -97,8 +96,13 @@ input[type="range"].ui{
 }
 input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
 input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].ui::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:0; }
-input[type="range"].ui::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
+input[type="range"].ui::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:0;
+}
+input[type="range"].ui::-moz-range-thumb{
+  width:14px; height:14px; background:currentColor; border:0; border-radius:0;
+}
 `
 
 export default function Toolbar(props: ToolbarProps) {
@@ -134,7 +138,6 @@ export default function Toolbar(props: ToolbarProps) {
       window.removeEventListener("mouseup", onDragEnd)
     }
 
-    // upload
     const fileRef = useRef<HTMLInputElement>(null)
     const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       e.stopPropagation()
@@ -143,7 +146,6 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // локальный текст state
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
@@ -153,8 +155,6 @@ export default function Toolbar(props: ToolbarProps) {
     return (
       <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} onMouseDown={(e)=>e.stopPropagation()}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-
-        {/* header */}
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
@@ -168,7 +168,6 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* tools */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -191,7 +190,6 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...stop}/>
             </div>
 
-            {/* color + brush size */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <input
@@ -215,7 +213,6 @@ export default function Toolbar(props: ToolbarProps) {
               <div className="text-xs w-10 text-right">{brushSize}</div>
             </div>
 
-            {/* palette */}
             <div className="grid grid-cols-12 gap-1" {...stop}>
               {PALETTE.map((c)=>(
                 <button
@@ -227,7 +224,6 @@ export default function Toolbar(props: ToolbarProps) {
               ))}
             </div>
 
-            {/* SHAPES */}
             <div className="pt-1">
               <div className="text-[10px] mb-1">Shapes</div>
               <div className="flex">
@@ -239,7 +235,6 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* SELECTED */}
             {selectedKind === "text" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
@@ -289,7 +284,6 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             )}
 
-            {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
               <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
               <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
@@ -372,7 +366,6 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* LAYERS шторка */}
       {layersOpenM && (
         <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
@@ -404,7 +397,6 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
