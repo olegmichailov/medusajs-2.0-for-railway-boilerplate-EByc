@@ -40,6 +40,7 @@ type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: L
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
+const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
 export default function EditorCanvas() {
   const {
@@ -102,7 +103,7 @@ export default function EditorCanvas() {
   const node = (id: string | null) => find(id)?.node || null
 
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
-    // Erase-группы всегда destination-out, не переписываем им blend
+    // Не переписываем blend у erase-группы — линии у неё сами "destination-out"
     if (!isEraseGroup(n)) (n as any).globalCompositeOperation = meta.blend
     ;(n as any).opacity?.(meta.opacity)
   }
@@ -129,6 +130,7 @@ export default function EditorCanvas() {
   type TextSnap = {
     width: number
     centerX: number
+    topY: number
     centerY: number
     fontSize: number
   }
@@ -159,11 +161,9 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ---- ТЕКСТ: бока = width, углы = fontSize (центр удерживаем) ----
       tr.keepRatio(false)
       tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right"])
-      // boundBox: пропускаем трансформацию (никаких блокировок)
-      tr.boundBoxFunc((oldB, newB) => newB)
+      tr.boundBoxFunc((_, nb) => nb)
 
       const t = n as Konva.Text
 
@@ -173,6 +173,7 @@ export default function EditorCanvas() {
         textSnap.current = {
           width: t.width() || r.width || 1,
           centerX: r.x + r.width / 2,
+          topY: r.y,
           centerY: r.y + r.height / 2,
           fontSize: t.fontSize(),
         }
@@ -185,17 +186,17 @@ export default function EditorCanvas() {
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
         if (active === "middle-left" || active === "middle-right") {
-          // ширина через боковые, центр фиксируем
+          // Меняем ширину, держим горизонтальный центр, вертикаль фиксируем по top (без подпрыгиваний)
           const sx = Math.max(0.01, t.scaleX())
           const nextW = Math.max(TEXT_MIN_W, Math.min(snap.width * sx, TEXT_MAX_W))
           t.width(nextW)
           const stage = stageRef.current!
           const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
           t.x(snap.centerX - r.width / 2)
-          t.y(snap.centerY - r.height / 2)
+          t.y(snap.topY) // фиксируем верх — не "пляшет"
           t.scaleX(1); t.scaleY(1)
         } else {
-          // кегль через углы, центр фиксируем
+          // Меняем кегль, центр по X/Y держим
           const sxy = Math.max(t.scaleX(), t.scaleY())
           const nextFS = Math.max(TEXT_MIN_FS, Math.min(snap.fontSize * sxy, TEXT_MAX_FS))
           t.fontSize(nextFS)
@@ -222,8 +223,7 @@ export default function EditorCanvas() {
       n.on("transformend.textfix", onEnd)
       detachTextFix.current = () => { n.off(".textfix") }
     } else {
-      // ---- КАРТИНКИ/ФИГУРЫ: классические трансформы Konva (без наших правок) ----
-      // никаких .on("transform") — пусть Konva скейлит ноду сам
+      // Картинки/фигуры — классика Konva (без наших onTransform)
     }
 
     tr.getLayer()?.batchDraw()
@@ -273,7 +273,7 @@ export default function EditorCanvas() {
   // ===== сессии кисти/стирания =====
   const nextTopZ = () => (currentArt().children?.length ?? 0)
 
-  // ВОЗВРАЩАЕМ ГРУППУ СИНХРОННО — чтобы рисовать сразу
+  // Всегда возвращаем созданную группу синхронно
   const createStrokeGroup = (): { id: string; group: Konva.Group; layer: AnyLayer } => {
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isStrokes = true
     g.id(uid()); const id = g.id()
@@ -291,7 +291,6 @@ export default function EditorCanvas() {
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isErase = true
     g.id(uid()); const id = g.id()
     const meta = baseMeta(`erase ${seqs.erase}`)
-    ;(g as any).globalCompositeOperation = "destination-out"
     currentArt().add(g)
     g.zIndex(nextTopZ()); g.moveToTop()
     const layer: AnyLayer = { id, side, node: g, meta, type: "erase" }
@@ -392,7 +391,7 @@ export default function EditorCanvas() {
       if (!g) g = (find(gid!)?.node as Konva.Group) || null
       if (!g) return
       const line = new Konva.Line({
-        points: [x, y, x + 0.001, y + 0.001], // сразу видим «точку»
+        points: [x, y, x + 0.001, y + 0.001],
         stroke: brushColor,
         strokeWidth: brushSize,
         lineCap: "round",
@@ -439,7 +438,30 @@ export default function EditorCanvas() {
     artLayerRef.current?.batchDraw()
   }
 
-  const finishStroke = () => setIsDrawing(false)
+  const finishStroke = () => {
+    if (!isDrawing) return
+    setIsDrawing(false)
+    // закрываем сессию: следующая рисовалка создаст новую группу поверх
+    currentStrokeId.current[side] = null
+    currentEraseId.current[side]  = null
+  }
+
+  // global "up/cancel" — чтобы сессия точно завершалась
+  useEffect(() => {
+    const endAll = () => finishStroke()
+    window.addEventListener("mouseup", endAll)
+    window.addEventListener("touchend", endAll)
+    window.addEventListener("pointerup", endAll)
+    window.addEventListener("mouseleave", endAll)
+    window.addEventListener("contextmenu", endAll)
+    return () => {
+      window.removeEventListener("mouseup", endAll)
+      window.removeEventListener("touchend", endAll)
+      window.removeEventListener("pointerup", endAll)
+      window.removeEventListener("mouseleave", endAll)
+      window.removeEventListener("contextmenu", endAll)
+    }
+  }, [side])
 
   // ===== Overlay-редактор текста — хэндлы видны, textarea не обрезается =====
   const editingRef = useRef<{
@@ -451,13 +473,11 @@ export default function EditorCanvas() {
   } | null>(null)
 
   const startTextOverlayEdit = (t: Konva.Text) => {
-    // если уже редактируем — закрыть предыдущий
     if (editingRef.current) { editingRef.current.cleanup(true); editingRef.current = null }
 
     const stage = stageRef.current!
     const containerBox = stage.container().getBoundingClientRect()
 
-    // не скрываем трансформер; делаем текст почти прозрачным, чтобы не двоился
     const prevOpacity = t.opacity()
     t.opacity(0.001)
     t.getLayer()?.batchDraw()
