@@ -60,14 +60,14 @@ export default function EditorCanvas() {
 
   // refs
   const stageRef        = useRef<Konva.Stage>(null)
-  const bgLayerRef      = useRef<Konva.Layer>(null)
-  const artLayerRef     = useRef<Konva.Layer>(null)
-  const uiLayerRef      = useRef<Konva.Layer>(null)
+  const bgLayerRef      = useRef<Konva.Layer>(null)    // ТОЛЬКО мокап
+  const artLayerRef     = useRef<Konva.Layer>(null)    // ТОЛЬКО пользовательский контент + erase
+  const uiLayerRef      = useRef<Konva.Layer>(null)    // трансформер
   const trRef           = useRef<Konva.Transformer>(null)
   const frontBgRef      = useRef<Konva.Image>(null)
   const backBgRef       = useRef<Konva.Image>(null)
-  const frontArtRef     = useRef<Konva.Group>(null)
-  const backArtRef      = useRef<Konva.Group>(null)
+  const frontArtRef     = useRef<Konva.Group>(null)    // контент (front)
+  const backArtRef      = useRef<Konva.Group>(null)    // контент (back)
 
   // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
@@ -136,13 +136,7 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
 
   // снимок исходных размеров для плавного ресайза текста
-  const textStart = useRef<{
-    width: number
-    left: number
-    right: number
-    fontSize: number
-    anchor: string | null
-  } | null>(null)
+  const textStart = useRef<{ width: number; left: number; right: number; fontSize: number; anchor: string | null } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -170,8 +164,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ---- ТЕКСТ ----
-      // боковые = ширина (живьём), углы = кегль; без промежуточного скейла.
+      // ---- ТЕКСТ: боковые = ширина, углы = кегль (инкрементно, без дрожи) ----
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -189,7 +182,6 @@ export default function EditorCanvas() {
           fontSize: t.fontSize(),
           anchor: a ?? null,
         }
-        // нормализуем скейлы перед серией кадров
         t.scaleX(1); t.scaleY(1)
       }
 
@@ -198,30 +190,24 @@ export default function EditorCanvas() {
         const anchor = textStart.current!.anchor
 
         if (anchor === "middle-left" || anchor === "middle-right") {
-          // === Горизонтальные хэндлы: ширина растёт «инкрементно» ===
           const prevW = textStart.current!.width
-          const sx = Math.max(0.01, t.scaleX())        // дельта текущего кадра
+          const sx = Math.max(0.01, t.scaleX())
           const nextW = Math.max(TEXT_MIN_W, Math.min(prevW * sx, TEXT_MAX_W))
 
           if (anchor === "middle-left") {
-            const right = textStart.current!.right     // правую кромку держим
+            const right = textStart.current!.right
             t.width(nextW)
             t.x(right - nextW)
           } else {
-            // правая тянется, левая остаётся
             t.x(textStart.current!.left)
             t.width(nextW)
           }
 
-          // сброс скейла, чтобы не было нелепых искажений
           t.scaleX(1); t.scaleY(1)
-
-          // обновляем базу для следующего кадра (инкремент!)
           textStart.current!.width = nextW
           textStart.current!.left  = t.x()
           textStart.current!.right = t.x() + nextW
         } else {
-          // === Углы: меняем кегль «инкрементно» ===
           const prevFS = textStart.current!.fontSize
           const s = Math.max(t.scaleX(), t.scaleY())
           const nextFS = Math.max(TEXT_MIN_FS, Math.min(prevFS * s, TEXT_MAX_FS))
@@ -234,12 +220,7 @@ export default function EditorCanvas() {
       }
 
       const onEnd = () => {
-        // финальная нормализация
-        if (textStart.current?.anchor === "middle-left" || textStart.current?.anchor === "middle-right") {
-          t.scaleX(1); t.scaleY(1)
-        } else {
-          t.scaleX(1); t.scaleY(1)
-        }
+        t.scaleX(1); t.scaleY(1)
         textStart.current = null
         t.getLayer()?.batchDraw()
       }
@@ -308,9 +289,6 @@ export default function EditorCanvas() {
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
 
-    // закрываем сессии при переключении инструмента
-    if (tool !== "brush") currentStrokeId.current[side] = null
-    if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
   // ===== хоткеи (без Undo/Redo) =====
@@ -469,6 +447,7 @@ export default function EditorCanvas() {
       g.add(line)
       setIsDrawing(true)
     } else if (tool === "erase") {
+      // глобальный ерейс — поверх арта
       let gid = currentEraseId.current[side]
       if (!gid) gid = createEraseGroup().id
       const g = find(gid)!.node as Konva.Group
@@ -507,46 +486,70 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста =====
+  // ===== Overlay-редактор текста (обновлён под «внутри рамки») =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
-    const abs = t.getAbsolutePosition()
-    const x = stBox.left + abs.x * scale
-    const y = stBox.top  + abs.y * scale
 
+    // абсолютные координаты, вращение, масштаб
+    const absPos = t.getAbsolutePosition()
+    const absRot = t.getAbsoluteRotation() || t.rotation()
+
+    const x = stBox.left + absPos.x * scale
+    const y = stBox.top  + absPos.y * scale
+    const w = (t.width()  || 0) * scale
+    const h = (t.height() || t.fontSize()) * scale
+
+    // прячем канвас-текст, рамку — тоже, чтобы не мешала выделению
     t.visible(false)
     trRef.current?.nodes([])
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
+
+    // ——— визуал
     ta.style.position = "absolute"
     ta.style.left = `${x}px`
-    ta.style.top = `${y}px`
-    ta.style.padding = "4px 6px"
-    ta.style.border = "1px solid #000"
-    ta.style.background = "#fff"
+    ta.style.top  = `${y}px`
+    ta.style.width  = `${Math.max(4, w)}px`
+    ta.style.height = `${Math.max(4, h)}px`
+    ta.style.padding = "0"
+    ta.style.margin = "0"
+    ta.style.border = "none"
+    ta.style.background = "transparent"
     ta.style.color = String(t.fill() || "#000")
     ta.style.fontFamily = t.fontFamily()
     ta.style.fontWeight = t.fontStyle()?.includes("bold") ? "700" : "400"
+    ta.style.fontStyle  = t.fontStyle()?.includes("italic") ? "italic" : "normal"
     ta.style.fontSize = `${t.fontSize() * scale}px`
     ta.style.lineHeight = String(t.lineHeight())
-    ta.style.transformOrigin = "left top"
-    ta.style.zIndex = "9999"
-    ta.style.minWidth = `${Math.max(160, (t.width() || 0) * scale)}px`
+    ta.style.letterSpacing = `${(t.letterSpacing?.() ?? 0) * scale}px`
+    ta.style.whiteSpace = "pre-wrap"
+    ta.style.overflow = "hidden"
     ta.style.outline = "none"
     ta.style.resize = "none"
-    ta.style.boxShadow = "0 2px 8px rgba(0,0,0,.12)"
+    ta.style.transformOrigin = "left top"
+    ta.style.transform = `rotate(${absRot}deg)`
+    ta.style.zIndex = "9999"
+    ta.style.userSelect = "text"
+    ta.style.caretColor = String(t.fill() || "#000")
+
+    // выравнивание
+    ta.style.textAlign = (t.align?.() as any) || "left"
+
     document.body.appendChild(ta)
     ta.focus()
-    ta.select()
+    // выделять весь текст не будем — оставим курсор в конце, как в Adobe
+    ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    const autoGrow = () => {
-      ta.style.height = "auto"
-      const cap = parseFloat(ta.style.fontSize) || 16
-      ta.style.height = Math.min(ta.scrollHeight, cap * 3) + "px"
+    // следим за изменением текста — обновляем высоту в рамках bbox
+    const clampHeight = () => {
+      // ограничиваемся рамкой текста
+      ta.style.height = `${Math.max(4, h)}px`
+      // а ширина фиксирована рамкой
+      ta.style.width  = `${Math.max(4, w)}px`
     }
-    autoGrow()
+    clampHeight()
 
     const commit = (apply: boolean) => {
       if (apply) t.text(ta.value)
@@ -556,13 +559,22 @@ export default function EditorCanvas() {
       attachTransformer()
     }
 
-    ta.addEventListener("input", autoGrow)
+    ta.addEventListener("input", clampHeight)
     ta.addEventListener("keydown", (ev) => {
       ev.stopPropagation()
       if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(true) }
       if (ev.key === "Escape") { ev.preventDefault(); commit(false) }
     })
     ta.addEventListener("blur", () => commit(true))
+
+    // если пользователь прокрутил страницу — подвинем textarea вместе с bbox
+    const onScroll = () => {
+      const b = stage.container().getBoundingClientRect()
+      ta.style.left = `${b.left + absPos.x * scale}px`
+      ta.style.top  = `${b.top  + absPos.y * scale}px`
+    }
+    window.addEventListener("scroll", onScroll, { passive: true })
+    ta.addEventListener("remove", () => window.removeEventListener("scroll", onScroll))
   }
 
   // ===== Жесты/указатель =====
@@ -596,7 +608,7 @@ export default function EditorCanvas() {
     const st = stageRef.current!
     const tgt = e.target as Konva.Node
 
-    // клик по пустому месту или по мокапу — снять выделение
+    // клик по пустому или по мокапу — снять выделение
     if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
       select(null)
       trRef.current?.nodes([])
@@ -730,7 +742,6 @@ export default function EditorCanvas() {
       (n as Konva.Text).fill(hex)
     } else if (sel.type === "shape") {
       if (n instanceof Konva.Group) {
-        // перекрашиваем все дочерние фигуры
         n.find((child: any) =>
           child instanceof Konva.Rect ||
           child instanceof Konva.Circle ||
@@ -833,7 +844,7 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* 1. ТОЛЬКО мокап */}
+            {/* 1. ТОЛЬКО мокап (в отдельном canvas-слое) */}
             <Layer ref={bgLayerRef} listening={true}>
               {frontMock && (
                 <KImage
@@ -857,13 +868,13 @@ export default function EditorCanvas() {
               )}
             </Layer>
 
-            {/* 2. АРТ */}
+            {/* 2. АРТ (контент + erase в этом же canvas-слое) */}
             <Layer ref={artLayerRef} listening={true}>
               <KGroup ref={frontArtRef} visible={side==="front"} />
               <KGroup ref={backArtRef}  visible={side==="back"}  />
             </Layer>
 
-            {/* 3. UI */}
+            {/* 3. UI-слой для рамки трансформера */}
             <Layer ref={uiLayerRef}>
               <Transformer
                 ref={trRef}
