@@ -5,7 +5,8 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Layers, X as ClearIcon, GripHorizontal, ArrowUp, ArrowDown, Copy, Trash2, Lock, Unlock, Eye, EyeOff
+  Layers, X as ClearIcon, GripHorizontal, ArrowUp, ArrowDown, Copy, Trash2,
+  Lock, Unlock, Eye, EyeOff
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -35,43 +36,21 @@ type MobileLayersProps = {
 }
 
 type ToolbarProps = {
-  side: Side
-  setSide: (s: Side) => void
-
-  tool: Tool
-  setTool: (t: Tool) => void
-
-  brushColor: string
-  setBrushColor: (hex: string) => void
-
-  brushSize: number
-  setBrushSize: (n: number) => void
-
-  shapeKind: ShapeKind
-  setShapeKind: (k: ShapeKind) => void
-
+  side: Side; setSide: (s: Side) => void
+  tool: Tool; setTool: (t: Tool) => void
+  brushColor: string; setBrushColor: (hex: string) => void
+  brushSize: number; setBrushSize: (n: number) => void
+  shapeKind: ShapeKind; setShapeKind: (k: ShapeKind) => void
   onUploadImage: (file: File) => void
   onAddText: () => void
   onAddShape: (k: ShapeKind) => void
-
   onDownloadFront: () => void
   onDownloadBack: () => void
-
   onClear: () => void
-
   toggleLayers: () => void
   layersOpen: boolean
-
   selectedKind: "image" | "shape" | "text" | "strokes" | "erase" | null
-  selectedProps: {
-    text?: string
-    fontSize?: number
-    fontFamily?: string
-    fill?: string
-    stroke?: string
-    strokeWidth?: number
-  }
-
+  selectedProps: { text?: string; fontSize?: number; fontFamily?: string; fill?: string; stroke?: string; strokeWidth?: number }
   setSelectedFill: (hex: string) => void
   setSelectedStroke: (hex: string) => void
   setSelectedStrokeW: (n: number) => void
@@ -79,7 +58,6 @@ type ToolbarProps = {
   setSelectedFontSize: (n: number) => void
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
-
   mobileTopOffset: number
   mobileLayers: MobileLayersProps
 }
@@ -91,7 +69,7 @@ const btn  =
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-/** стопим любые события, чтобы не дергать Canvas/Layers DnD */
+/** стопим всплытие, чтобы DnD слоёв/канваса не мешал фейдерам */
 const stop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -115,20 +93,29 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// квадратный слайдер + контрастный трек
-const sliderStyle: React.CSSProperties = { accentColor: "currentColor", WebkitAppearance: "none", appearance: "none" }
+/* унифицированный слайдер: input по центру, трек 3px, квадратный/круглый thumb от текущего цвета */
 const sliderCss = `
-input[type="range"].square{width:100%;}
-input[type="range"].square::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: currentColor; }
-input[type="range"].square::-moz-range-thumb { width: 14px; height: 14px; background: currentColor; border: none; }
-input[type="range"].square::-webkit-slider-runnable-track { height: 3px; background: currentColor; }
-input[type="range"].square::-moz-range-track { height: 3px; background: currentColor; }
+/* базовые: обязательно выключаем нативный виджет, чтобы не было синего круга */
+input[type="range"].ui {
+  -webkit-appearance: none; appearance: none;
+  height: 18px; line-height: 18px;
+  width: 100%;
+  background: transparent;
+  color: currentColor;
+  margin: 0; padding: 0; display: block; vertical-align: middle;
+}
+/* трек */
+input[type="range"].ui::-webkit-slider-runnable-track { height: 3px; background: currentColor; }
+input[type="range"].ui::-moz-range-track              { height: 3px; background: currentColor; }
+/* квадратный ползунок */
+input[type="range"].square::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: currentColor; border-radius: 0; }
+input[type="range"].square::-moz-range-thumb     { width: 14px; height: 14px; background: currentColor; border: none; border-radius: 0; }
+/* (если нужен круглый — можно добавить класс .round) */
 `
 
 export default function Toolbar(props: ToolbarProps) {
   const {
-    side, setSide,
-    tool, setTool,
+    side, setSide, tool, setTool,
     brushColor, setBrushColor,
     brushSize, setBrushSize,
     onUploadImage, onAddText, onAddShape,
@@ -170,7 +157,7 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // локальный текст state
+    // локальный текст state для textarea
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
@@ -226,19 +213,19 @@ export default function Toolbar(props: ToolbarProps) {
                 {...stop}
                 disabled={tool==="erase"}
               />
-              <div className="flex-1 text-black">
+              <div className="flex-1 text-black flex items-center">
                 <input
+                  aria-label="Brush size"
                   type="range"
                   min={1}
                   max={200}
                   step={1}
                   value={brushSize}
-                  onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
-                  className="square"
-                  style={sliderStyle}
+                  onChange={(e)=>setBrushSize(e.currentTarget.valueAsNumber)}
+                  className="ui square"
                   {...stop}
+                  style={{}}
                 />
-                <div className="h-[1px] bg-black/20 mt-1" />
               </div>
               <div className="text-xs w-10 text-right">{brushSize}</div>
             </div>
@@ -280,16 +267,15 @@ export default function Toolbar(props: ToolbarProps) {
                 />
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Font size</div>
-                  <div className="flex-1 text-black">
+                  <div className="flex-1 text-black flex items-center">
                     <input
+                      aria-label="Font size"
                       type="range" min={8} max={800} step={1}
                       value={selectedProps.fontSize ?? 96}
-                      onChange={(e)=>setSelectedFontSize(parseInt(e.target.value, 10))}
-                      className="square"
-                      style={sliderStyle}
+                      onChange={(e)=>setSelectedFontSize(e.currentTarget.valueAsNumber)}
+                      className="ui square"
                       {...stop}
                     />
-                    <div className="h-[1px] bg-black/20 mt-1" />
                   </div>
                   <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
                 </div>
@@ -304,16 +290,15 @@ export default function Toolbar(props: ToolbarProps) {
                   <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>setSelectedFill(e.target.value)} className="w-6 h-6 border border-black" {...stop}/>
                   <div className="text-[10px] w-12">Stroke</div>
                   <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black" {...stop}/>
-                  <div className="flex-1 text-black">
+                  <div className="flex-1 text-black flex items-center">
                     <input
+                      aria-label="Stroke width"
                       type="range" min={0} max={64} step={1}
                       value={selectedProps.strokeWidth ?? 0}
-                      onChange={(e)=>setSelectedStrokeW(parseInt(e.target.value, 10))}
-                      className="square"
-                      style={sliderStyle}
+                      onChange={(e)=>setSelectedStrokeW(e.currentTarget.valueAsNumber)}
+                      className="ui square"
                       {...stop}
                     />
-                    <div className="h-[1px] bg-black/20 mt-1" />
                   </div>
                 </div>
               </div>
@@ -355,16 +340,14 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
-  /** Динамическая 2-я строка: shape/text/brush */
   const SecondRow = () => {
     if (props.selectedKind === "shape") {
       return (
         <div className="px-2 py-1 flex items-center gap-2">
           <input type="color" value={selectedProps.fill ?? "#000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-8 h-8 border border-black" {...stop}/>
           <input type="color" value={selectedProps.stroke ?? "#000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-8 h-8 border border-black" {...stop}/>
-          <div className="flex-1 text-black">
-            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))} className="square" style={sliderStyle} {...stop}/>
-            <div className="h-[1px] bg-black/20 mt-1" />
+          <div className="flex-1 text-black flex items-center">
+            <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(e.currentTarget.valueAsNumber)} className="ui square" {...stop}/>
           </div>
         </div>
       )
@@ -380,16 +363,14 @@ export default function Toolbar(props: ToolbarProps) {
             className="flex-1 h-10 border border-black px-2 text-sm"
             {...stop}
           />
-          <div className="w-40 text-black">
+          <div className="w-40 text-black flex items-center">
             <input
               type="range" min={8} max={800} step={1}
               value={selectedProps.fontSize ?? 96}
-              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value, 10))}
-              className="square"
-              style={sliderStyle}
+              onChange={(e)=>setSelectedFontSize(e.currentTarget.valueAsNumber)}
+              className="ui square"
               {...stop}
             />
-            <div className="h-[1px] bg-black/20 mt-1" />
           </div>
         </div>
       )
@@ -409,19 +390,18 @@ export default function Toolbar(props: ToolbarProps) {
             disabled={tool==="erase"}
           />
         </div>
-        <div className="flex-1 text-black">
+        <div className="flex-1 text-black flex items-center">
           <input
+            aria-label="Brush size"
             type="range"
             min={1}
             max={200}
             step={1}
             value={brushSize}
-            onChange={(e)=>setBrushSize(parseInt(e.target.value))}
-            className="square"
-            style={sliderStyle}
+            onChange={(e)=>setBrushSize(e.currentTarget.valueAsNumber)}
+            className="ui square"
             {...stop}
           />
-          <div className="h-[1px] bg-black/20 mt-1" />
         </div>
         <div className="text-xs w-10 text-right">{brushSize}</div>
       </div>
@@ -462,7 +442,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* Нижняя панель — инструменты / динамическая строка / навигация */}
+      {/* нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         {/* row 1 */}
         <div className="px-2 py-1 flex items-center gap-1">
