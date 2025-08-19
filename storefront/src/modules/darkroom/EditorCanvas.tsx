@@ -40,10 +40,94 @@ type AnyNode =
   | Konva.RegularPolygon
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
+// эффекты
+type Effect = "none" | "screenprint"
+
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
+
+// ====== Кастомный фильтр ScreenPrint (постеризация + растровая точка) ======
+// Делается через cache() группы арта, применяется к целому арт-группу.
+// Параметры читаются из node.getAttr(...)
+function ensureScreenPrintFilter() {
+  const K: any = Konva as any
+  if (K.Filters.ScreenPrint) return
+
+  K.Filters.ScreenPrint = function (imageData: ImageData) {
+    const data = imageData.data
+    const w = imageData.width
+    const h = imageData.height
+
+    const cell = this.getAttr("screenCellSize") ?? 8        // размер клетки точек
+    const levels = Math.max(2, this.getAttr("screenLevels") ?? 5) // ступени для постеризации
+    const angle = this.getAttr("screenAngle") ?? Math.PI / 4 // угол растра
+    const strength = this.getAttr("screenContrast") ?? 0.7   // сила затемнения в точке (0..1)
+
+    const cosA = Math.cos(angle)
+    const sinA = Math.sin(angle)
+    const step = 255 / (levels - 1)
+
+    // быстрый лут для округления
+    const quant = (v: number) => Math.max(0, Math.min(255, Math.round(v / step) * step))
+
+    for (let y = 0; y < h; y++) {
+      // вращаем систему координат
+      const ycos = y * cosA
+      const ysin = y * sinA
+
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4
+
+        // --- постеризация
+        let r = quant(data[idx])
+        let g = quant(data[idx + 1])
+        let b = quant(data[idx + 2])
+        const a = data[idx + 3]
+
+        // --- лума
+        const L = 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        // --- координаты в повернутой системе
+        const rx = x * cosA + ysin
+        const ry = -x * sinA + ycos
+
+        // центр клетки
+        const cx = Math.floor(rx / cell) * cell + cell / 2
+        const cy = Math.floor(ry / cell) * cell + cell / 2
+
+        const dx = rx - cx
+        const dy = ry - cy
+        const dist = Math.hypot(dx, dy)
+
+        // радиус точки зависит от яркости (темнее — крупнее точка)
+        const radius = (1 - L / 255) * (cell * 0.5)
+
+        // плавный край точки (сглаживаем дрожь и лесенки)
+        const edge = radius
+        let k = 1
+        if (edge > 0) {
+          const t = (dist - (radius - 1)) // небольшой «перегиб» для мягкости
+          if (t <= 0) k = 1
+          else if (t >= 2) k = 0
+          else k = 1 - t / 2
+        }
+
+        // затемняем под точкой
+        const darken = 1 - strength * k
+        r = r * darken
+        g = g * darken
+        b = b * darken
+
+        data[idx] = r
+        data[idx + 1] = g
+        data[idx + 2] = b
+        data[idx + 3] = a
+      }
+    }
+  }
+}
 
 export default function EditorCanvas() {
   const {
@@ -56,6 +140,9 @@ export default function EditorCanvas() {
 
   // точнее хиты на драг
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
+
+  // гарантируем регистрацию фильтра один раз
+  useEffect(() => { ensureScreenPrintFilter() }, [])
 
   // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
@@ -76,6 +163,10 @@ export default function EditorCanvas() {
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
+
+  // эффекты по сторонам
+  const [effectBySide, setEffectBySide] = useState<Record<Side, Effect>>({ front: "none", back: "none" })
+  const [screenParams, setScreenParams] = useState({ cell: 8, levels: 5, contrast: 0.7, angle: 45 })
 
   // активные сессии кисти/стирания
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
@@ -132,7 +223,46 @@ export default function EditorCanvas() {
     bgLayerRef.current?.batchDraw()
     artLayerRef.current?.batchDraw()
     attachTransformer()
+    // синхронизируем эффект и видимость мокапа при смене стороны
+    syncEffect(side)
   }, [side, layers])
+
+  // ===== ЭФФЕКТЫ =====
+  const syncEffect = (s: Side) => {
+    const eff = effectBySide[s]
+    // мокап скрываем, когда эффект включён (по просьбе — «на весь канвас без мокапа»)
+    const showBg = eff === "none"
+    bgLayerRef.current?.visible(showBg)
+    applyEffectToSide(s, eff)
+    stageRef.current?.draw()
+  }
+
+  const applyEffectToSide = (s: Side, eff: Effect) => {
+    const g = artGroup(s)
+    if (!g) return
+    g.clearCache()
+    g.filters([])
+    if (eff === "none") {
+      g.getLayer()?.batchDraw()
+      return
+    }
+    // параметры
+    g.setAttr("screenCellSize", screenParams.cell)
+    g.setAttr("screenLevels", screenParams.levels)
+    g.setAttr("screenContrast", screenParams.contrast)
+    g.setAttr("screenAngle", (screenParams.angle * Math.PI) / 180)
+
+    // разумный pixelRatio, чтобы не фризило на 2400x3200
+    const pr = Math.min(1.5, Math.max(0.5, 1 / Math.max(scale, 0.5)))
+    g.cache({ pixelRatio: pr })
+    g.filters([(Konva as any).Filters.ScreenPrint])
+    g.getLayer()?.batchDraw()
+  }
+
+  // пересчёт эффекта при изменении параметров/масштаба
+  useEffect(() => { syncEffect(side) }, [screenParams, scale])
+  // пересчёт после завершения действий пользователя
+  const markArtDirty = () => { if (effectBySide[side] !== "none") requestAnimationFrame(() => syncEffect(side)) }
 
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
@@ -167,7 +297,7 @@ export default function EditorCanvas() {
 
     // guard на время трансформации
     const onStart = () => { isTransformingRef.current = true }
-    const onEndT  = () => { isTransformingRef.current = false }
+    const onEndT  = () => { isTransformingRef.current = false; markArtDirty() }
     n.on("transformstart.guard", onStart)
     n.on("transformend.guard", onEndT)
     detachGuard.current = () => n.off(".guard")
@@ -221,6 +351,8 @@ export default function EditorCanvas() {
         }
 
         t.getLayer()?.batchDraw()
+        trRef.current?.forceUpdate()
+        uiLayerRef.current?.batchDraw()
       }
 
       const onEnd = () => {
@@ -229,6 +361,9 @@ export default function EditorCanvas() {
         t.getLayer()?.batchDraw()
         // если открыт редактор — синхронизируем textarea с новым bbox
         if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
+        trRef.current?.forceUpdate()
+        uiLayerRef.current?.batchDraw()
+        markArtDirty()
       }
 
       n.on("transformstart.textfix", onStartText)
@@ -272,9 +407,11 @@ export default function EditorCanvas() {
 
         ;(n as any).scaleX(1); (n as any).scaleY(1)
         n.getLayer()?.batchDraw()
+        trRef.current?.forceUpdate()
+        uiLayerRef.current?.batchDraw()
       }
 
-      const onEnd = () => onTransform()
+      const onEnd = () => { onTransform(); markArtDirty() }
       n.on("transform.fix", onTransform)
       n.on("transformend.fix", onEnd)
       detachTextFix.current = () => { n.off(".fix") }
@@ -320,6 +457,7 @@ export default function EditorCanvas() {
       if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
       if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
       n.getLayer()?.batchDraw()
+      markArtDirty()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -333,7 +471,7 @@ export default function EditorCanvas() {
     ;(g as any)._isStrokes = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(strokes ${seqs.strokes})
+    const meta = baseMeta(`strokes ${seqs.strokes}`)
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
@@ -348,7 +486,7 @@ export default function EditorCanvas() {
     ;(g as any)._isErase = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(erase ${seqs.erase})
+    const meta = baseMeta(`erase ${seqs.erase}`)
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
@@ -382,7 +520,7 @@ export default function EditorCanvas() {
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid())
         const id = kimg.id()
-        const meta = baseMeta(image ${seqs.image})
+        const meta = baseMeta(`image ${seqs.image}`)
         currentArt().add(kimg)
         attachCommonHandlers(kimg, id)
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
@@ -390,6 +528,7 @@ export default function EditorCanvas() {
         select(id)
         artLayerRef.current?.batchDraw()
         set({ tool: "move" })
+        markArtDirty()
       }
       img.src = r.result as string
     }
@@ -409,7 +548,7 @@ export default function EditorCanvas() {
     })
     t.id(uid())
     const id = t.id()
-    const meta = baseMeta(text ${seqs.text})
+    const meta = baseMeta(`text ${seqs.text}`)
     currentArt().add(t)
     attachCommonHandlers(t, id)
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
@@ -417,6 +556,7 @@ export default function EditorCanvas() {
     select(id)
     artLayerRef.current?.batchDraw()
     set({ tool: "move" })
+    markArtDirty()
   }
 
   // ===== Добавление: Shape =====
@@ -429,7 +569,7 @@ export default function EditorCanvas() {
     else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
     ;(n as any).id(uid())
     const id = (n as any).id?.() ?? uid()
-    const meta = baseMeta(shape ${seqs.shape})
+    const meta = baseMeta(`shape ${seqs.shape}`)
     currentArt().add(n as any)
     attachCommonHandlers(n, id)
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
@@ -437,6 +577,7 @@ export default function EditorCanvas() {
     select(id)
     artLayerRef.current?.batchDraw()
     set({ tool: "move" })
+    markArtDirty()
   }
 
   // ===== Рисование: Brush / Erase =====
@@ -493,14 +634,14 @@ export default function EditorCanvas() {
     }
   }
 
-  const finishStroke = () => setIsDrawing(false)
+  const finishStroke = () => { setIsDrawing(false); markArtDirty() }
 
-  // ===== Overlay-редактор текста — СИНХРОНИЗИРОВАН С BBOX И ТРАНСФОРМЕРОМ =====
+  // ===== Overlay-редактор текста — синхронен с bbox и трансформером =====
   const editingRef = useRef<{
     ta: HTMLTextAreaElement
     nodeId: string
     prevOpacity: number
-    cleanup: () => void
+    cleanup: (apply?: boolean) => void
     sync: () => void
   } | null>(null)
 
@@ -508,14 +649,13 @@ export default function EditorCanvas() {
     const stage = stageRef.current!
     const stContainer = stage.container()
 
-    // если уже что-то редактируем — завершим
+    // если редактируем — завершим
     if (editingRef.current) {
       editingRef.current.cleanup()
       editingRef.current = null
     }
 
-    // делаем текст практически прозрачным, чтобы не было «двойного» текста,
-    // но трансформер остаётся активным и видимым
+    // делаем текст почти прозрачным, чтобы не было «двойного»
     const prevOpacity = t.opacity()
     t.opacity(0.001)
     t.getLayer()?.batchDraw()
@@ -534,9 +674,9 @@ export default function EditorCanvas() {
       fontFamily: t.fontFamily(),
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
       fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      fontSize: ${t.fontSize() * scale}px,
+      fontSize: `${t.fontSize() * scale}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: ${(t.letterSpacing?.() ?? 0) * scale}px,
+      letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
       whiteSpace: "pre-wrap",
       overflow: "hidden",
       outline: "none",
@@ -546,38 +686,34 @@ export default function EditorCanvas() {
       userSelect: "text",
       caretColor: String(t.fill() || "#000"),
       textAlign: (t.align?.() as any) || "left",
+      pointerEvents: "auto",
     } as CSSStyleDeclaration)
 
-    // функция позиционирования — ВСЕГДА пересчитываем rect заново
     const sync = () => {
       const b = stContainer.getBoundingClientRect()
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      ta.style.left   = ${b.left + r.x * scale}px
-      ta.style.top    = ${b.top  + r.y * scale}px
-      ta.style.width  = ${Math.max(2, r.width  * scale)}px
-      ta.style.height = ${Math.max(2, r.height * scale)}px
+      ta.style.left   = `${b.left + r.x * scale}px`
+      ta.style.top    = `${b.top  + r.y * scale}px`
+      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
+      ta.style.height = `${Math.max(2, r.height * scale)}px`
     }
 
-    // монтируем textarea
     document.body.appendChild(ta)
     sync()
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    // на вводе синхронизируем сам текст, слой, рамку и DOM
     const onInput = () => {
       t.text(ta.value)
       t.getLayer()?.batchDraw()
       trRef.current?.forceUpdate()
       uiLayerRef.current?.batchDraw()
-      // чуть сгладим частоту — на кадр
       requestAnimationFrame(sync)
+      markArtDirty()
     }
 
-    // во время любых трансформаций/перетаскиваний узла — подвинем textarea
     const onT = () => requestAnimationFrame(sync)
 
-    // закрытие
     const cleanup = (apply = true) => {
       window.removeEventListener("scroll", onScroll, true)
       window.removeEventListener("resize", onResize)
@@ -588,12 +724,15 @@ export default function EditorCanvas() {
       ta.remove()
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
-      // принудительно держим выделение и «зажигаем» рамку
-      select(find(selectedId)?.id ?? (t.id() as string))
+      // держим выделение и сразу оживляем трансформер
+      select(t.id())
       requestAnimationFrame(() => {
-        attachTransformer()
+        const tr = trRef.current
+        if (tr) { tr.nodes([t]); tr.forceUpdate() }
         uiLayerRef.current?.batchDraw()
+        markArtDirty()
       })
+      editingRef.current = null
     }
 
     const onKey = (ev: KeyboardEvent) => {
@@ -609,14 +748,14 @@ export default function EditorCanvas() {
     window.addEventListener("resize", onResize)
     window.addEventListener("scroll", onScroll, true)
 
-    // слушаем движения/трансформации узла, чтобы textarea ехала вместе с ним
+    // синхронно двигаем textarea вместе с узлом
     t.on("dragmove.edit transform.edit transformend.edit", onT)
 
     editingRef.current = {
       ta,
       nodeId: t.id(),
       prevOpacity,
-      cleanup: (apply?: boolean) => cleanup(apply),
+      cleanup,
       sync,
     }
   }
@@ -703,6 +842,7 @@ export default function EditorCanvas() {
     })
     if (selectedId === id) select(null)
     artLayerRef.current?.batchDraw()
+    markArtDirty()
   }
 
   const duplicateLayer = (id: string) => {
@@ -717,6 +857,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay]); select(newLay.id)
     clone.zIndex(nextTopZ())
     artLayerRef.current?.batchDraw()
+    markArtDirty()
   }
 
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
@@ -741,6 +882,7 @@ export default function EditorCanvas() {
     })
     select(srcId)
     requestAnimationFrame(attachTransformer)
+    markArtDirty()
   }
 
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
@@ -752,6 +894,7 @@ export default function EditorCanvas() {
       return { ...l, meta }
     }))
     artLayerRef.current?.batchDraw()
+    markArtDirty()
   }
 
   const onLayerSelect = (id: string) => {
@@ -776,14 +919,13 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); markArtDirty() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); markArtDirty() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); markArtDirty() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); markArtDirty() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw(); markArtDirty() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); markArtDirty() }
 
-  // === FIX: универсальная перекраска (включая CREST / Group и Line) ===
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
     const n = sel.node as any
@@ -807,6 +949,7 @@ export default function EditorCanvas() {
       }
     }
     artLayerRef.current?.batchDraw()
+    markArtDirty()
   }
 
   // ===== Clear (только арт текущей стороны) =====
@@ -824,6 +967,7 @@ export default function EditorCanvas() {
     currentEraseId.current[side]  = null
     select(null)
     artLayerRef.current?.batchDraw()
+    markArtDirty()
   }
 
   // ===== Скачивание (mockup + art) =====
@@ -856,12 +1000,14 @@ export default function EditorCanvas() {
     uiLayerRef.current?.visible(true)
     st.draw()
 
-    const a1 = document.createElement("a"); a1.href = withMock; a1.download = darkroom-${s}_mockup.png; a1.click()
+    const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
     await new Promise(r => setTimeout(r, 250))
-    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = darkroom-${s}_art.png; a2.click()
+    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
   // ===== Render =====
+  const effect = effectBySide[side]
+
   return (
     <div
       className="fixed inset-0 bg-white"
@@ -898,7 +1044,7 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* 1. ТОЛЬКО мокап (в отдельном canvas-слое) */}
+            {/* 1. ТОЛЬКО мокап (в отдельном canvas-слое). Скрывается при эффекте */}
             <Layer ref={bgLayerRef} listening={true}>
               {frontMock && (
                 <KImage
@@ -992,6 +1138,78 @@ export default function EditorCanvas() {
           onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
         }}
       />
+
+      {/* ==== ПАНЕЛЬ ЭФФЕКТОВ (прототип) ==== */}
+      <div
+        style={{
+          position: "fixed",
+          left: "50%",
+          bottom: 8,
+          transform: "translateX(-50%)",
+          background: "rgba(255,255,255,0.92)",
+          borderRadius: 12,
+          boxShadow: "0 6px 18px rgba(0,0,0,.12)",
+          padding: 8,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          zIndex: 50,
+        }}
+      >
+        <span style={{ fontSize: 12, opacity: .7 }}>Эффект:</span>
+        <select
+          value={effect}
+          onChange={(e) => {
+            const eff = e.target.value as Effect
+            setEffectBySide(prev => ({ ...prev, [side]: eff }))
+            requestAnimationFrame(() => syncEffect(side))
+          }}
+          style={{ fontSize: 12, padding: "2px 6px" }}
+        >
+          <option value="none">Нет</option>
+          <option value="screenprint">ScreenPrint (прототип)</option>
+        </select>
+
+        {effect === "screenprint" && (
+          <>
+            <label style={{ fontSize: 12, opacity: .7 }}>cell</label>
+            <input
+              type="range" min={4} max={24} step={1}
+              value={screenParams.cell}
+              onChange={(e)=> setScreenParams(s => ({ ...s, cell: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>levels</label>
+            <input
+              type="range" min={3} max={8} step={1}
+              value={screenParams.levels}
+              onChange={(e)=> setScreenParams(s => ({ ...s, levels: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>contrast</label>
+            <input
+              type="range" min={0} max={1} step={0.05}
+              value={screenParams.contrast}
+              onChange={(e)=> setScreenParams(s => ({ ...s, contrast: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>angle</label>
+            <input
+              type="range" min={0} max={90} step={1}
+              value={screenParams.angle}
+              onChange={(e)=> setScreenParams(s => ({ ...s, angle: Number(e.target.value) }))}
+            />
+          </>
+        )}
+        {effect !== "none" && (
+          <button
+            onClick={() => {
+              setEffectBySide(prev => ({ ...prev, [side]: "none" }))
+              requestAnimationFrame(()=> syncEffect(side))
+            }}
+            style={{ fontSize: 12, padding: "2px 8px", borderRadius: 8, border: "1px solid #ddd", background: "#fff" }}
+          >
+            Сбросить
+          </button>
+        )}
+      </div>
     </div>
   )
 }
