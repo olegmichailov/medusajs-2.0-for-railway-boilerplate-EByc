@@ -54,7 +54,7 @@ export default function EditorCanvas() {
   // мобильная кисть по умолчанию
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
 
-  // точнее хиты на драг
+  // hit test во время драга
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
   // мокапы
@@ -142,10 +142,36 @@ export default function EditorCanvas() {
     width: number
     left: number
     right: number
+    top: number
     fontSize: number
     anchor: "middle-left" | "middle-right" | "corner" | null
   }
   const textStart = useRef<TStart | null>(null)
+
+  // helper: синхронизировать textarea с матрицей абсолютного трансформа узла
+  const syncTextareaToNode = (ta: HTMLTextAreaElement, t: Konva.Text) => {
+    const stage = stageRef.current!
+    const rect = stage.container().getBoundingClientRect()
+    const m = t.getAbsoluteTransform().getMatrix() as number[] // [a,b,c,d,e,f]
+    // домножаем на масштаб Stage
+    const a = m[0] * scale
+    const b = m[1] * scale
+    const c = m[2] * scale
+    const d = m[3] * scale
+    const e = m[4] * scale + rect.left
+    const f = m[5] * scale + rect.top
+
+    // ширина/высота берутся из локальных размеров узла (до трансформаций)
+    const w = Math.max(2, (t.width() || 0) * scale)
+    const h = Math.max(2, (t.height() || 0) * scale)
+
+    ta.style.width  = `${w}px`
+    ta.style.height = `${h}px`
+    ta.style.left = "0px"
+    ta.style.top  = "0px"
+    ta.style.transformOrigin = "0 0"
+    ta.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${e}, ${f})`
+  }
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -173,7 +199,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ---- ТЕКСТ: бока = ширина, углы = кегль ----
+      // ---- ТЕКСТ: бока = ширина, углы = кегль (без дрожи) ----
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -188,6 +214,7 @@ export default function EditorCanvas() {
           width:    Math.max(1, t.width() || 1),
           left:     t.x(),
           right:    t.x() + (t.width() || 0),
+          top:      t.y(),
           fontSize: t.fontSize(),
           anchor:   a === "middle-left" || a === "middle-right" ? (a as TStart["anchor"]) : "corner"
         }
@@ -204,11 +231,13 @@ export default function EditorCanvas() {
           const targetW = Math.max(TEXT_MIN_W, Math.min(snap.width * sx, TEXT_MAX_W))
           const curW = t.width() || snap.width
           if (Math.abs(targetW - curW) > EPS) {
+            // держим верхнюю кромку стабильно
+            t.y(snap.top)
             if (active === "middle-left" || snap.anchor === "middle-left") {
               t.width(targetW)
-              t.x(snap.right - targetW) // держим правый край
+              t.x(snap.right - targetW) // фиксируем правый край
             } else {
-              t.x(snap.left)            // держим левый край
+              t.x(snap.left)            // фиксируем левый край
               t.width(targetW)
             }
           }
@@ -218,16 +247,23 @@ export default function EditorCanvas() {
           const targetFS = Math.max(TEXT_MIN_FS, Math.min(snap.fontSize * s, TEXT_MAX_FS))
           if (Math.abs(targetFS - t.fontSize()) > EPS) t.fontSize(targetFS)
           t.scaleX(1); t.scaleY(1)
+          // при изменении кегля сохраняем верх
+          t.y(snap.top)
         }
 
         t.getLayer()?.batchDraw()
+        // если сейчас открыт textarea — синхронизируем его матрицей (поворот/масштаб)
+        if (editingRef.current?.nodeId === t.id()) {
+          editingRef.current.sync()
+        }
+        trRef.current?.forceUpdate()
       }
 
       const onEnd = () => {
         t.scaleX(1); t.scaleY(1)
         textStart.current = null
         t.getLayer()?.batchDraw()
-        // если открыт редактор — синхронизируем textarea с новым bbox
+        trRef.current?.forceUpdate()
         if (editingRef.current?.nodeId === t.id()) editingRef.current.sync()
       }
 
@@ -272,6 +308,7 @@ export default function EditorCanvas() {
 
         ;(n as any).scaleX(1); (n as any).scaleY(1)
         n.getLayer()?.batchDraw()
+        trRef.current?.forceUpdate()
       }
 
       const onEnd = () => onTransform()
@@ -300,6 +337,11 @@ export default function EditorCanvas() {
     if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
+  // если меняется масштаб/сторона — подтянуть textarea
+  useEffect(() => {
+    if (editingRef.current) editingRef.current.sync()
+  }, [scale, side])
+
   // ===== хоткеи (без Undo/Redo) =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -320,6 +362,8 @@ export default function EditorCanvas() {
       if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
       if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
       n.getLayer()?.batchDraw()
+      trRef.current?.forceUpdate()
+      if (editingRef.current && isTextNode(n)) editingRef.current.sync()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -495,33 +539,31 @@ export default function EditorCanvas() {
 
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста — СИНХРОНИЗИРОВАН С BBOX И ТРАНСФОРМЕРОМ =====
+  // ===== Overlay-редактор текста — СИНХРОНИЗИРОВАН С ПОВОРОТОМ/МАСШТАБОМ И BBOX =====
   const editingRef = useRef<{
     ta: HTMLTextAreaElement
     nodeId: string
-    prevOpacity: number
-    cleanup: () => void
+    cleanup: (apply?: boolean) => void
     sync: () => void
   } | null>(null)
 
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
-    const stContainer = stage.container()
 
     // если уже что-то редактируем — завершим
     if (editingRef.current) {
-      editingRef.current.cleanup()
+      editingRef.current.cleanup(false)
       editingRef.current = null
     }
 
-    // делаем текст практически прозрачным, чтобы не было «двойного» текста,
-    // но трансформер остаётся активным и видимым
+    // текст оставляем видимым для трансформера, но почти прозрачным
     const prevOpacity = t.opacity()
     t.opacity(0.001)
     t.getLayer()?.batchDraw()
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
+    ta.setAttribute("spellcheck", "false")
 
     // визуал textarea
     Object.assign(ta.style, {
@@ -541,59 +583,51 @@ export default function EditorCanvas() {
       overflow: "hidden",
       outline: "none",
       resize: "none",
-      transformOrigin: "left top",
       zIndex: "9999",
       userSelect: "text",
       caretColor: String(t.fill() || "#000"),
       textAlign: (t.align?.() as any) || "left",
+      transformOrigin: "0 0",
+      left: "0px",
+      top: "0px",
     } as CSSStyleDeclaration)
 
-    // функция позиционирования — ВСЕГДА пересчитываем rect заново
-    const sync = () => {
-      const b = stContainer.getBoundingClientRect()
-      const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      ta.style.left   = `${b.left + r.x * scale}px`
-      ta.style.top    = `${b.top  + r.y * scale}px`
-      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
-      ta.style.height = `${Math.max(2, r.height * scale)}px`
-    }
-
-    // монтируем textarea
+    // mount + первичная синхронизация по абсолютной матрице
     document.body.appendChild(ta)
+    const sync = () => syncTextareaToNode(ta, t)
     sync()
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    // на вводе синхронизируем сам текст, слой, рамку и DOM
+    // на вводе — обновляем текст и рамку/оверлей
     const onInput = () => {
       t.text(ta.value)
       t.getLayer()?.batchDraw()
       trRef.current?.forceUpdate()
       uiLayerRef.current?.batchDraw()
-      // чуть сгладим частоту — на кадр
       requestAnimationFrame(sync)
     }
 
-    // во время любых трансформаций/перетаскиваний узла — подвинем textarea
+    // любые перемещения/трансформации узла — едем вместе
     const onT = () => requestAnimationFrame(sync)
 
     // закрытие
     const cleanup = (apply = true) => {
-      window.removeEventListener("scroll", onScroll, true)
-      window.removeEventListener("resize", onResize)
+      window.removeEventListener("scroll", sync, true)
+      window.removeEventListener("resize", sync)
       t.off(".edit")
       ta.removeEventListener("input", onInput)
-      ta.removeEventListener("keydown", onKey)
+      ta.removeEventListener("keydown", onKey as any)
       if (apply) t.text(ta.value)
       ta.remove()
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
-      // принудительно держим выделение и «зажигаем» рамку
-      select(find(selectedId)?.id ?? (t.id() as string))
-      requestAnimationFrame(() => {
-        attachTransformer()
-        uiLayerRef.current?.batchDraw()
-      })
+      // держим выделение и сразу включаем рамку без лишних кликов
+      select(t.id())
+      trRef.current?.nodes([t])
+      trRef.current?.forceUpdate()
+      uiLayerRef.current?.batchDraw()
+      attachTransformer()
     }
 
     const onKey = (ev: KeyboardEvent) => {
@@ -601,24 +635,15 @@ export default function EditorCanvas() {
       if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); cleanup(true) }
       if (ev.key === "Escape") { ev.preventDefault(); cleanup(false) }
     }
-    const onResize = () => sync()
-    const onScroll = () => sync()
 
     ta.addEventListener("input", onInput)
     ta.addEventListener("keydown", onKey as any)
-    window.addEventListener("resize", onResize)
-    window.addEventListener("scroll", onScroll, true)
-
-    // слушаем движения/трансформации узла, чтобы textarea ехала вместе с ним
+    window.addEventListener("resize", sync)
+    window.addEventListener("scroll", sync, true)
+    // слушаем перемещения/трансформации самого узла
     t.on("dragmove.edit transform.edit transformend.edit", onT)
 
-    editingRef.current = {
-      ta,
-      nodeId: t.id(),
-      prevOpacity,
-      cleanup: (apply?: boolean) => cleanup(apply),
-      sync,
-    }
+    editingRef.current = { ta, nodeId: t.id(), cleanup, sync }
   }
 
   // ===== Жесты/указатель =====
@@ -776,42 +801,33 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw() }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(nsize); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); trRef.current?.forceUpdate() }
 
   // === FIX: универсальная перекраска (включая CREST / Group и Line) ===
   const setSelectedColor      = (hex:string)  => {
     if (!sel) return
     const n = sel.node as any
+    const paint = (child: any) => {
+      if (child instanceof Konva.Line) child.stroke(hex)
+      if (typeof child.fill === "function") child.fill(hex)
+    }
     if (sel.type === "text") {
       (n as Konva.Text).fill(hex)
     } else if (sel.type === "shape") {
-      if (n instanceof Konva.Group) {
-        n.find((child: any) =>
-          child instanceof Konva.Rect ||
-          child instanceof Konva.Circle ||
-          child instanceof Konva.RegularPolygon ||
-          child instanceof Konva.Line
-        ).forEach((child: any) => {
-          if (child instanceof Konva.Line) child.stroke(hex)
-          if (typeof child.fill === "function") child.fill(hex)
-        })
-      } else if (n instanceof Konva.Line) {
-        n.stroke(hex)
-      } else if (typeof n.fill === "function") {
-        n.fill(hex)
-      }
+      if (n instanceof Konva.Group) n.getChildren().each((c: any) => paint(c))
+      else paint(n)
     }
     artLayerRef.current?.batchDraw()
+    trRef.current?.forceUpdate()
   }
 
   // ===== Clear (только арт текущей стороны) =====
   const clearArt = () => {
-    // закрыть возможное редактирование
     if (editingRef.current) {
       editingRef.current.cleanup(false)
       editingRef.current = null
