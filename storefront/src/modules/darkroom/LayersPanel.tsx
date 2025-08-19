@@ -1,3 +1,4 @@
+// LayersPanel.tsx
 "use client"
 
 import React, { useRef, useState } from "react"
@@ -17,7 +18,7 @@ const blends = [
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes" | "erase"  // поддерживаем erase
+  type: "image" | "shape" | "text" | "strokes" | "erase"
   visible: boolean
   locked: boolean
   blend: string
@@ -37,11 +38,10 @@ type Props = {
   onChangeOpacity: (id: string, opacity: number) => void
 }
 
-/**
- * Desktop Layers:
- * — DnD только за «решётку».
- * — Слайдеры/селекты не конфликтуют с DnD (stopPropagation).
- * — Opacity 5–100, центрированный трек, без «синего кружка».
+/** Desktop Layers — dnd только за «решётку», при перетаскивании:
+ *  1) drag-image = вся строка с тенью (понятно, что переносим)
+ *  2) подсветка места вставки синей линией (как было)
+ *  3) слайдер opacity 0–100, квадратный, трек по центру
  */
 export default function LayersPanel({
   items,
@@ -58,6 +58,7 @@ export default function LayersPanel({
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const ghostRef = useRef<HTMLDivElement | null>(null)
 
   const sliderCss = `
   input[type="range"].lp{
@@ -66,7 +67,7 @@ export default function LayersPanel({
   }
   input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
   input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
-  input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:12px; height:12px; background:currentColor; border:0; border-radius:0; margin-top:0; }
+  input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:12px; height:12px; background:currentColor; border:0; border-radius:0; }
   input[type="range"].lp::-moz-range-thumb{ width:12px; height:12px; background:currentColor; border:0; border-radius:0; }
   `
 
@@ -82,10 +83,41 @@ export default function LayersPanel({
     onMouseUp:     (e: any) => e.stopPropagation(),
   }
 
+  const makeGhost = (row: HTMLDivElement) => {
+    const rect = row.getBoundingClientRect()
+    const ghost = row.cloneNode(true) as HTMLDivElement
+    ghost.style.position = "fixed"
+    ghost.style.left = "0px"
+    ghost.style.top = "-9999px"
+    ghost.style.width = `${rect.width}px`
+    ghost.style.height = `${rect.height}px`
+    ghost.style.pointerEvents = "none"
+    ghost.style.opacity = "0.9"
+    ghost.style.boxShadow = "0 10px 28px rgba(0,0,0,.35)"
+    ghost.style.background = getComputedStyle(row).backgroundColor || "white"
+    document.body.appendChild(ghost)
+    ghostRef.current = ghost
+    return { ghost, rect }
+  }
+
+  const cleanupGhost = () => {
+    if (ghostRef.current) {
+      ghostRef.current.remove()
+      ghostRef.current = null
+    }
+  }
+
   const handleDragStart = (id: string, e: React.DragEvent) => {
     setDragId(id)
     e.dataTransfer.setData("text/plain", id)
     e.dataTransfer.effectAllowed = "move"
+
+    const row = rowRefs.current[id]
+    if (row) {
+      const { ghost, rect } = makeGhost(row)
+      // drag image — вся строка
+      e.dataTransfer.setDragImage(ghost, Math.min(40, e.clientX - rect.left), Math.min(rect.height / 2, e.clientY - rect.top))
+    }
   }
 
   const handleDragOver = (id: string, e: React.DragEvent) => {
@@ -99,22 +131,18 @@ export default function LayersPanel({
   const handleDrop = (destId: string, e: React.DragEvent) => {
     e.preventDefault()
     const src = dragId || e.dataTransfer.getData("text/plain")
-    if (!src || src === destId) {
-      setDragId(null)
-      setDragOver(null)
-      return
-    }
+    if (!src || src === destId) { setDragId(null); setDragOver(null); cleanupGhost(); return }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
     const place: "before" | "after" =
       rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
-    setDragId(null)
-    setDragOver(null)
+    setDragId(null); setDragOver(null); cleanupGhost()
   }
 
   const handleDragEnd = () => {
     setDragId(null)
     setDragOver(null)
+    cleanupGhost()
   }
 
   return (
@@ -149,7 +177,7 @@ export default function LayersPanel({
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* drag handle — только он draggable */}
+              {/* ТОЛЬКО «решётка» draggable, но ghost — вся строка */}
               <div
                 className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
                 draggable
@@ -179,12 +207,12 @@ export default function LayersPanel({
                 ))}
               </select>
 
-              {/* Opacity (5–100) */}
+              {/* Opacity 0–100, квадратный */}
               <div className="relative w-24" onMouseDown={(e)=>e.stopPropagation()}>
                 <input
-                  type="range" min={5} max={100} step={1}
+                  type="range" min={0} max={100} step={1}
                   value={Math.round(it.opacity * 100)}
-                  onChange={(e)=> onChangeOpacity(it.id, Math.max(5, parseInt(e.target.value,10))/100)}
+                  onChange={(e)=> onChangeOpacity(it.id, Math.max(0, parseInt(e.target.value,10))/100)}
                   className="lp"
                 />
                 <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", isActive ? "bg-white" : "bg-black")} />
