@@ -69,7 +69,7 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // тик UI, чтобы панели/ползунки синхронно обновлялись, когда меняем канву
+  // тик UI для синхры
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
@@ -107,7 +107,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // [FIX] Не меняем gCO для кисти/ластика. Только opacity.
+  // BLEND не меняем для кисти/ластика, только opacity
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -134,7 +134,7 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
-  // [FIX] снапшот текста на время трансформации — чтобы убрать дрожь
+  // снапшот для текста — убирает «дрожь» и сбросы к 62px
   const textSnap = useRef<{
     box:{x:number;y:number;width:number;height:number}
     fs:number
@@ -175,7 +175,6 @@ export default function EditorCanvas() {
         "middle-left","middle-right"
       ])
 
-      // [FIX] фиксируем исходные параметры на transformstart
       const onStartText = () => {
         const t = n as Konva.Text
         const r = (t as any).getSelfRect?.() || { x: t.x(), y: t.y(), width: t.width() || 1, height: t.height() || 1 }
@@ -188,7 +187,6 @@ export default function EditorCanvas() {
       n.on("transformstart.textsnap", onStartText)
       n.on("transformend.textsnap", onEndText)
 
-      // [FIX] управляем размером относительно снапшота, bump() → синхро UI
       ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
         const t = n as Konva.Text
         const snap = textSnap.current
@@ -198,6 +196,7 @@ export default function EditorCanvas() {
         const ratioW = newBox.width  / snap.box.width
         const ratioH = newBox.height / snap.box.height
 
+        // боковые — только ширина, симметрия относительно центра
         if (active === "middle-left" || active === "middle-right") {
           const nextW = clamp(Math.round(snap.w * ratioW), TEXT_MIN_W, TEXT_MAX_W)
           if (Math.abs((t.width()||0) - nextW) > EPS) {
@@ -210,7 +209,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // углы — масштабируем fontSize, удерживая центр из снапшота
+        // углы — только кегль, с удержанием центра
         const s = Math.max(ratioW, ratioH)
         const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
@@ -233,7 +232,6 @@ export default function EditorCanvas() {
         requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
       }
       n.on("transformend.textfix", onEnd)
-      // [FIX] снимаем оба хэндлера
       detachTextFix.current = () => { n.off(".textfix"); n.off(".textsnap") }
     } else {
       tr.keepRatio(false)
@@ -326,9 +324,9 @@ export default function EditorCanvas() {
   // ===== Brush / Erase =====
   const ensureStrokeGroup = (): AnyLayer => {
     let gid = currentStrokeId.current[side]
-    // [FIX] если слой кисти скрыт opacity≈0 — вернём на 1, чтобы мазок был виден
     if (gid) {
       const ex = find(gid)!
+      // если слой кисти полностью погашен — оживим для нового мазка
       if (ex && ex.node.opacity() < 0.02) {
         ex.node.opacity(1)
         ex.meta.opacity = 1
@@ -604,7 +602,7 @@ export default function EditorCanvas() {
 
   // ===== Данные для панелей =====
   const layerItems: LayerItem[] = useMemo(() => {
-    void uiTick // чтобы пересчитывать значения в панели на каждый bump()
+    void uiTick
     return layers
       .filter(l => l.side === side)
       .sort((a,b) => a.node.zIndex() - b.node.zIndex())
