@@ -333,7 +333,7 @@ export default function EditorCanvas() {
     ;(g as any)._isStrokes = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(`strokes ${seqs.strokes}`)
+    const meta = baseMeta(strokes ${seqs.strokes})
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
@@ -348,7 +348,7 @@ export default function EditorCanvas() {
     ;(g as any)._isErase = true
     g.id(uid())
     const id = g.id()
-    const meta = baseMeta(`erase ${seqs.erase}`)
+    const meta = baseMeta(erase ${seqs.erase})
     currentArt().add(g)
     g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
@@ -382,7 +382,7 @@ export default function EditorCanvas() {
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid())
         const id = kimg.id()
-        const meta = baseMeta(`image ${seqs.image}`)
+        const meta = baseMeta(image ${seqs.image})
         currentArt().add(kimg)
         attachCommonHandlers(kimg, id)
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
@@ -409,7 +409,7 @@ export default function EditorCanvas() {
     })
     t.id(uid())
     const id = t.id()
-    const meta = baseMeta(`text ${seqs.text}`)
+    const meta = baseMeta(text ${seqs.text})
     currentArt().add(t)
     attachCommonHandlers(t, id)
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
@@ -429,7 +429,7 @@ export default function EditorCanvas() {
     else                          n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
     ;(n as any).id(uid())
     const id = (n as any).id?.() ?? uid()
-    const meta = baseMeta(`shape ${seqs.shape}`)
+    const meta = baseMeta(shape ${seqs.shape})
     currentArt().add(n as any)
     attachCommonHandlers(n, id)
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
@@ -534,9 +534,9 @@ export default function EditorCanvas() {
       fontFamily: t.fontFamily(),
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
       fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      fontSize: `${t.fontSize() * scale}px`,
+      fontSize: ${t.fontSize() * scale}px,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
+      letterSpacing: ${(t.letterSpacing?.() ?? 0) * scale}px,
       whiteSpace: "pre-wrap",
       overflow: "hidden",
       outline: "none",
@@ -552,10 +552,10 @@ export default function EditorCanvas() {
     const sync = () => {
       const b = stContainer.getBoundingClientRect()
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      ta.style.left   = `${b.left + r.x * scale}px`
-      ta.style.top    = `${b.top  + r.y * scale}px`
-      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
-      ta.style.height = `${Math.max(2, r.height * scale)}px`
+      ta.style.left   = ${b.left + r.x * scale}px
+      ta.style.top    = ${b.top  + r.y * scale}px
+      ta.style.width  = ${Math.max(2, r.width  * scale)}px
+      ta.style.height = ${Math.max(2, r.height * scale)}px
     }
 
     // монтируем textarea
@@ -856,9 +856,9 @@ export default function EditorCanvas() {
     uiLayerRef.current?.visible(true)
     st.draw()
 
-    const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
+    const a1 = document.createElement("a"); a1.href = withMock; a1.download = darkroom-${s}_mockup.png; a1.click()
     await new Promise(r => setTimeout(r, 250))
-    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
+    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = darkroom-${s}_art.png; a2.click()
   }
 
   // ===== Render =====
@@ -995,5 +995,3 @@ export default function EditorCanvas() {
     </div>
   )
 }
-
-Для начала поправь текст, то что сейчас твой предыдущий, то что ты прислал, вообще работает супер плохо. Этот хотя бы съезжал и дрожал, но твой вообще вылетает прямо в поле в воду. Поэтому нужно вот в этот базис вставить чистые правки по механике работы с текстом. Ну, если ты не можешь там, ну, я не знаю. Ну и покажи мне прототип, как шейдер будет работать просто. Эффект, который можно выбрать куда-нибудь внизу в поле. Список эффектов, которые доступны в канве и вот этот шейдер. Или один этот шейдер. Интересно, что можно его включать, выключать. Прямо на весь канвас. Без мокапа.
