@@ -22,7 +22,7 @@ const TEXT_MIN_W  = 60
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // анти-джиттер
-const EPS = 0.25
+const EPS = 0.0005
 
 // id-helper
 const uid = () => "n_" + Math.random().toString(36).slice(2)
@@ -108,7 +108,6 @@ export default function EditorCanvas() {
   const node = (id: string | null) => find(id)?.node || null
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
-    // blend применяем ко всем, кроме erase-группы (у неё линии с destination-out)
     if (!isEraseGroup(n)) (n as any).globalCompositeOperation = meta.blend
   }
 
@@ -131,6 +130,15 @@ export default function EditorCanvas() {
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
+
+  // состояние для «мягкого» текста
+  const textStateRef = useRef<{
+    centerStage: { x: number; y: number }
+    startWidth: number
+    startLeft: number
+    startRight: number
+    startFont: number
+  } | null>(null)
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -158,9 +166,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ТЕКСТ:
-      // - боковые ручки => меняем width без scale
-      // - углы => пропорциональный SCALE (кегль ползунком)
+      // --- ТЕКСТ: боковые = ширина симметрично; углы = пропорциональный скейл вокруг центра ---
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -168,33 +174,34 @@ export default function EditorCanvas() {
       ])
 
       const t = n as Konva.Text
-      let start = { width: 0, right: 0, left: 0 }
 
       const onStartText = () => {
-        const w = Math.max(1, t.width() || 1)
-        start.width = w
-        start.left  = t.x()
-        start.right = t.x() + w
+        const r = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
+        textStateRef.current = {
+          centerStage: { x: r.x + r.width/2, y: r.y + r.height/2 },
+          startWidth: Math.max(1, t.width() || 1),
+          startLeft: t.x(),
+          startRight: t.x() + (t.width() || 0),
+          startFont: t.fontSize(),
+        }
       }
 
       const onTransform = () => {
+        const st = textStateRef.current; if (!st) return
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
         if (!active) return
 
+        // БОКОВЫЕ — меняем width, центр фиксируем
         if (active === "middle-left" || active === "middle-right") {
-          // ширина без джиттера
-          const sx = Math.max(0.01, t.scaleX())
-          const nextW = Math.max(TEXT_MIN_W, Math.min(start.width * sx, TEXT_MAX_W))
+          const sx = Math.max(0.01, Math.abs(t.scaleX()))
+          const nextW = Math.max(TEXT_MIN_W, Math.min(st.startWidth * sx, TEXT_MAX_W))
+          const cx = st.startLeft + st.startWidth / 2
+          // симметрия относительно центра
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
-            if (active === "middle-left") {
-              t.width(nextW)
-              t.x(start.right - nextW) // держим правый край
-            } else {
-              t.x(start.left)          // держим левый край
-              t.width(nextW)
-            }
+            t.width(nextW)
+            t.x(cx - nextW / 2)
           }
-          // нормализуем scale, чтобы не накапливался
+          // важный момент: не накапливаем scale
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           trRef.current?.forceUpdate()
@@ -202,29 +209,69 @@ export default function EditorCanvas() {
           return
         }
 
-        // УГЛЫ — пропорциональный SCALE
+        // УГЛЫ — строго пропорционально и вокруг исходного центра
         const sx = Math.abs(t.scaleX())
         const sy = Math.abs(t.scaleY())
-        const s = Math.max(sx, sy)
-        // делаем одинаковый масштаб по осям, без тряски
-        if (Math.abs(t.scaleX() - s) > 1e-3 || Math.abs(t.scaleY() - s) > 1e-3) {
-          t.scaleX(t.scaleX() < 0 ? -s : s)
-          t.scaleY(t.scaleY() < 0 ? -s : s)
+        const s  = Math.max(sx, sy)
+        // выравниваем scaleX/scaleY, сохраняя знак (на всякий)
+        t.scaleX((t.scaleX() < 0 ? -1 : 1) * s)
+        t.scaleY((t.scaleY() < 0 ? -1 : 1) * s)
+
+        // держим центр: считаем текущий bbox и подвигаем позицию
+        const r = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
+        const dx = st.centerStage.x - (r.x + r.width/2)
+        const dy = st.centerStage.y - (r.y + r.height/2)
+        if (Math.abs(dx) > EPS || Math.abs(dy) > EPS) {
+          t.x(t.x() + dx)
+          t.y(t.y() + dy)
         }
+
         t.getLayer()?.batchDraw()
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
       }
 
+      const onEndText = () => {
+        const st = textStateRef.current; if (!st) return
+        // «Запекаем» масштаб в fontSize и width; сбрасываем scale к 1; центр сохраняем
+        const s = Math.max(Math.abs(t.scaleX()), Math.abs(t.scaleY()))
+        // Тонкий порог — если масштаб почти 1, просто нормализуем scale
+        if (Math.abs(s - 1) <= 1e-4) {
+          t.scaleX(1); t.scaleY(1)
+          t.getLayer()?.batchDraw()
+          textStateRef.current = null
+          return
+        }
+
+        const cx = st.centerStage.x
+        const cy = st.centerStage.y
+
+        // новые параметры
+        const newFont = Math.max(TEXT_MIN_FS, Math.min(TEXT_MAX_FS, Math.round(st.startFont * s)))
+        const newW    = Math.max(TEXT_MIN_W,  Math.min(TEXT_MAX_W,  st.startWidth * s))
+
+        // применяем
+        t.scaleX(1); t.scaleY(1)
+        t.fontSize(newFont)
+        t.width(newW)
+
+        // вернуть центр
+        const r2 = (t as any).getClientRect({ relativeTo: stageRef.current!, skipStroke: true })
+        const dx = cx - (r2.x + r2.width/2)
+        const dy = cy - (r2.y + r2.height/2)
+        t.x(t.x() + dx)
+        t.y(t.y() + dy)
+
+        t.getLayer()?.batchDraw()
+        textStateRef.current = null
+      }
+
       n.on("transformstart.textfix", onStartText)
       n.on("transform.textfix", onTransform)
-      n.on("transformend.textfix", () => {
-        // ничего не сбрасываем — оставляем scale (это и есть визуальный размер)
-        t.getLayer()?.batchDraw()
-      })
+      n.on("transformend.textfix", onEndText)
       detachTextFix.current = () => { n.off(".textfix") }
     } else {
-      // ИЗОБРАЖЕНИЯ/ФИГУРЫ: углы — пропорционально, боковые — свободно
+      // ИЗОБРАЖЕНИЯ/ФИГУРЫ: углы — пропорционально, боковые — свободно; bake масштаба в геометрию
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -253,10 +300,9 @@ export default function EditorCanvas() {
         } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
           const r = (n as any).radius?.() ?? 0
           const s = Math.max(Math.abs(sx), Math.abs(sy))
-          ;(n as any).radius(Math.max(1, r * (isCorner ? s : s)))
+          ;(n as any).radius(Math.max(1, r * s))
         }
 
-        // нормализуем: переносим масштаб в геометрию и обнуляем scale
         ;(n as any).scaleX(1); (n as any).scaleY(1)
         n.getLayer()?.batchDraw()
         trRef.current?.forceUpdate()
@@ -313,7 +359,7 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  // ===== Brush / Erase — сессионная логика (как в базе) =====
+  // ===== Brush / Erase — сессионная логика =====
   const ensureStrokeGroup = (): AnyLayer => {
     let gid = currentStrokeId.current[side]
     if (gid) return find(gid)!
@@ -325,7 +371,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
     currentStrokeId.current[side] = id
-    select(id) // подсветка слоя
+    select(id)
     return newLay
   }
 
@@ -340,7 +386,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, erase: s.erase + 1 }))
     currentEraseId.current[side] = id
-    select(id) // подсветка слоя
+    select(id)
     return newLay
   }
 
@@ -508,7 +554,8 @@ export default function EditorCanvas() {
       fontFamily: t.fontFamily(),
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
       fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      fontSize: `${t.fontSize() * scale}px`,
+      // учитываем scaleY при оверлее
+      fontSize: `${t.fontSize() * (Math.abs(t.scaleY()) || 1) * scale}px`,
       lineHeight: String(t.lineHeight()),
       letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
       whiteSpace: "pre-wrap",
@@ -574,9 +621,7 @@ export default function EditorCanvas() {
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
   const onDown = (e: any) => {
-    // НЕ делаем preventDefault — иначе Konva ломает трансформ
     if (isTransformerChild(e.target)) return
-
     if (tool === "brush" || tool === "erase") {
       const sp = getStagePointer(); const p = toCanvas(sp)
       startStroke(p.x, p.y); return
@@ -685,8 +730,6 @@ export default function EditorCanvas() {
   const selectedProps =
     sel && isTextNode(sel.node) ? {
       text: sel.node.text(),
-      // ВАЖНО: визуальный размер теперь зависит от scale,
-      // но ползунок управляет именно fontSize (целые значения)
       fontSize: Math.round(sel.node.fontSize()),
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
