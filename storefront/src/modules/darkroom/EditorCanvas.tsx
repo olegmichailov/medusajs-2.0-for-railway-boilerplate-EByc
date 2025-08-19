@@ -16,9 +16,9 @@ const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
 // ТЕКСТ: клампы
-const TEXT_MIN_FS = 8
+const TEXT_MIN_FS = 2
 const TEXT_MAX_FS = 800
-const TEXT_MIN_W  = 60
+const TEXT_MIN_W  = 20
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // анти-джиттер
@@ -136,10 +136,9 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // эффекты и видимость панели
+  // эффекты
   const [effectBySide, setEffectBySide] = useState<Record<Side, Effect>>({ front: "none", back: "none" })
   const [screenParams, setScreenParams] = useState({ cell: 8, levels: 5, contrast: 0.7, angle: 45 })
-  const [showFx, setShowFx] = useState(true)
 
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
@@ -182,7 +181,7 @@ export default function EditorCanvas() {
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
-  // показываем только активную сторону
+  // показываем только активную сторону (фон не скрываем никогда)
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     frontBgRef.current?.visible(side === "front")
@@ -195,20 +194,13 @@ export default function EditorCanvas() {
     syncEffect(side)
   }, [side, layers])
 
-  // ===== ЭФФЕКТЫ =====
-  const syncEffect = (s: Side) => {
-    const eff = effectBySide[s]
-    const showBg = eff === "none"
-    bgLayerRef.current?.visible(showBg)
-    applyEffectToSide(s, eff)
-    stageRef.current?.draw()
-  }
-
+  // ===== ЭФФЕКТЫ (только на арт-группу) =====
   const applyEffectToSide = (s: Side, eff: Effect) => {
     const g = artGroup(s)
     if (!g) return
     g.clearCache()
     g.filters([])
+
     if (eff === "none") { g.getLayer()?.batchDraw(); return }
 
     g.setAttr("screenCellSize", screenParams.cell)
@@ -216,13 +208,14 @@ export default function EditorCanvas() {
     g.setAttr("screenContrast", screenParams.contrast)
     g.setAttr("screenAngle", (screenParams.angle * Math.PI) / 180)
 
-    const pr = Math.min(1.5, Math.max(0.5, 1 / Math.max(scale, 0.5)))
+    const pr = Math.min(1.5, Math.max(0.75, 1 / Math.max(scale, 0.5)))
     g.cache({ pixelRatio: pr })
     g.filters([(Konva as any).Filters.ScreenPrint])
     g.getLayer()?.batchDraw()
   }
-
+  const syncEffect = (s: Side) => applyEffectToSide(s, effectBySide[s])
   useEffect(() => { syncEffect(side) }, [screenParams, scale])
+
   const markArtDirty = () => { if (effectBySide[side] !== "none") requestAnimationFrame(() => syncEffect(side)) }
 
   // ===== Transformer =====
@@ -288,25 +281,18 @@ export default function EditorCanvas() {
         t.scaleX(1); t.scaleY(1)
       }
 
-      // ---- ГЛАВНОЕ: boundBoxFunc для текстов — гасим вертикальный дрожь ----
+      // ---- Главное: для боковых ручек фиксируем только Y (верх), не height
       tr.boundBoxFunc((oldB, newB) => {
         const snap = textStart.current
         if (!snap) return newB
-
-        // фиксируем Y/Height, чтобы не прыгало по вертикали
-        newB.y = oldB.y
-        newB.height = oldB.height
-
-        // боковые ручки → меняем только width/x
+        newB.y = oldB.y // не даём «прыгать» вверх-вниз
         if (snap.anchor === "middle-left" || snap.anchor === "middle-right") {
           const targetW = clamp(newB.width, TEXT_MIN_W, TEXT_MAX_W)
           newB.width = roundPx(targetW)
           if (snap.anchor === "middle-left") {
-            // держим правый край
-            newB.x = roundPx(oldB.x + (oldB.width - targetW))
+            newB.x = roundPx(oldB.x + (oldB.width - targetW)) // держим правый край
           } else {
-            // держим левый край
-            newB.x = roundPx(oldB.x)
+            newB.x = roundPx(oldB.x) // держим левый край
           }
         }
         return newB
@@ -324,9 +310,9 @@ export default function EditorCanvas() {
           if (Math.abs(targetW - curW) > EPS) {
             if (active === "middle-left" || snap.anchor === "middle-left") {
               t.width(roundPx(targetW))
-              t.x(roundPx(snap.right - targetW)) // держим правый край
+              t.x(roundPx(snap.right - targetW))
             } else {
-              t.x(roundPx(snap.left))            // держим левый край
+              t.x(roundPx(snap.left))
               t.width(roundPx(targetW))
             }
           }
@@ -358,7 +344,6 @@ export default function EditorCanvas() {
       n.on("transformend.textfix", onEnd)
       detachTextFix.current = () => { n.off(".textfix") }
     } else {
-      // сбрасываем ограничитель, чтобы не мешать остальным
       tr.boundBoxFunc((oldB, newB) => newB)
 
       tr.keepRatio(false)
@@ -432,7 +417,6 @@ export default function EditorCanvas() {
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
 
       const n = node(selectedId)
-      if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey) { setShowFx(v => !v); return }
       if (!n || tool !== "move") return
 
       if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(selectedId!) ; return }
@@ -1101,101 +1085,97 @@ export default function EditorCanvas() {
         }}
       />
 
-      {/* Кнопка вызова эффектов */}
-      <button
-        onClick={()=>setShowFx(v=>!v)}
+      {/* ==== ПАНЕЛЬ ЭФФЕКТОВ (без кнопки FX) ==== */}
+      <style
+        // лёгкая стилизация слайдеров — круглые, нейтральные
+        dangerouslySetInnerHTML={{
+          __html: `
+          .fx-panel { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif }
+          .fx-range { -webkit-appearance: none; width: 120px; height: 28px; background: transparent; }
+          .fx-range:focus { outline: none; }
+          .fx-range::-webkit-slider-runnable-track { height: 8px; background: #E9ECEF; border-radius: 999px; border: 1px solid #DDD; }
+          .fx-range::-webkit-slider-thumb { -webkit-appearance: none; margin-top: -10px; width: 28px; height: 28px; border-radius: 50%; background: #FFF; border: 1px solid #D0D5DD; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+          .fx-range::-moz-range-track { height: 8px; background: #E9ECEF; border-radius: 999px; border: 1px solid #DDD; }
+          .fx-range::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: #FFF; border: 1px solid #D0D5DD; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+        `}}
+      />
+      <div
+        className="fx-panel"
         style={{
           position: "fixed",
-          right: 12,
-          bottom: 12,
+          left: "50%",
+          bottom: 8,
+          transform: "translateX(-50%)",
+          background: "rgba(255,255,255,0.98)",
+          borderRadius: 12,
+          boxShadow: "0 6px 18px rgba(0,0,0,.18)",
+          padding: 10,
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
           zIndex: 2147483647,
-          padding: "8px 10px",
-          borderRadius: 10,
-          border: "1px solid #ddd",
-          background: "#fff",
-          boxShadow: "0 6px 18px rgba(0,0,0,.12)",
-          fontSize: 12,
-          cursor: "pointer"
+          pointerEvents: "auto"
         }}
-        title="Эффекты (или нажми F)"
       >
-        FX
-      </button>
-
-      {/* ==== ПАНЕЛЬ ЭФФЕКТОВ (прототип) ==== */}
-      {showFx && (
-        <div
+        <span style={{ fontSize: 12, opacity: .7 }}>Эффект:</span>
+        <select
+          value={effect}
+          onChange={(e) => {
+            const eff = e.target.value as Effect
+            setEffectBySide(prev => ({ ...prev, [side]: eff }))
+            requestAnimationFrame(() => syncEffect(side))
+          }}
           style={{
-            position: "fixed",
-            left: "50%",
-            bottom: 8,
-            transform: "translateX(-50%)",
-            background: "rgba(255,255,255,0.98)",
-            borderRadius: 12,
-            boxShadow: "0 6px 18px rgba(0,0,0,.18)",
-            padding: 8,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            zIndex: 2147483647,
-            pointerEvents: "auto"
+            fontSize: 12, padding: "6px 10px", borderRadius: 10,
+            border: "1px solid #DDD", background: "#FFF"
           }}
         >
-          <span style={{ fontSize: 12, opacity: .7 }}>Эффект:</span>
-          <select
-            value={effect}
-            onChange={(e) => {
-              const eff = e.target.value as Effect
-              setEffectBySide(prev => ({ ...prev, [side]: eff }))
-              requestAnimationFrame(() => syncEffect(side))
-            }}
-            style={{ fontSize: 12, padding: "2px 6px" }}
-          >
-            <option value="none">Нет</option>
-            <option value="screenprint">ScreenPrint (прототип)</option>
-          </select>
+          <option value="none">Нет</option>
+          <option value="screenprint">ScreenPrint</option>
+        </select>
 
-          {effect === "screenprint" && (
-            <>
-              <label style={{ fontSize: 12, opacity: .7 }}>cell</label>
-              <input
-                type="range" min={4} max={24} step={1}
-                value={screenParams.cell}
-                onChange={(e)=> setScreenParams(s => ({ ...s, cell: Number(e.target.value) }))}
-              />
-              <label style={{ fontSize: 12, opacity: .7 }}>levels</label>
-              <input
-                type="range" min={3} max={8} step={1}
-                value={screenParams.levels}
-                onChange={(e)=> setScreenParams(s => ({ ...s, levels: Number(e.target.value) }))}
-              />
-              <label style={{ fontSize: 12, opacity: .7 }}>contrast</label>
-              <input
-                type="range" min={0} max={1} step={0.05}
-                value={screenParams.contrast}
-                onChange={(e)=> setScreenParams(s => ({ ...s, contrast: Number(e.target.value) }))}
-              />
-              <label style={{ fontSize: 12, opacity: .7 }}>angle</label>
-              <input
-                type="range" min={0} max={90} step={1}
-                value={screenParams.angle}
-                onChange={(e)=> setScreenParams(s => ({ ...s, angle: Number(e.target.value) }))}
-              />
-            </>
-          )}
-          {effect !== "none" && (
+        {effect === "screenprint" && (
+          <>
+            <label style={{ fontSize: 12, opacity: .7 }}>cell</label>
+            <input
+              className="fx-range"
+              type="range" min={4} max={24} step={1}
+              value={screenParams.cell}
+              onChange={(e)=> setScreenParams(s => ({ ...s, cell: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>levels</label>
+            <input
+              className="fx-range"
+              type="range" min={3} max={8} step={1}
+              value={screenParams.levels}
+              onChange={(e)=> setScreenParams(s => ({ ...s, levels: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>contrast</label>
+            <input
+              className="fx-range"
+              type="range" min={0} max={1} step={0.05}
+              value={screenParams.contrast}
+              onChange={(e)=> setScreenParams(s => ({ ...s, contrast: Number(e.target.value) }))}
+            />
+            <label style={{ fontSize: 12, opacity: .7 }}>angle</label>
+            <input
+              className="fx-range"
+              type="range" min={0} max={90} step={1}
+              value={screenParams.angle}
+              onChange={(e)=> setScreenParams(s => ({ ...s, angle: Number(e.target.value) }))}
+            />
             <button
               onClick={() => {
                 setEffectBySide(prev => ({ ...prev, [side]: "none" }))
                 requestAnimationFrame(()=> syncEffect(side))
               }}
-              style={{ fontSize: 12, padding: "2px 8px", borderRadius: 8, border: "1px solid #ddd", background: "#fff" }}
+              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 10, border: "1px solid #ddd", background: "#fff" }}
             >
               Сбросить
             </button>
-          )}
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
