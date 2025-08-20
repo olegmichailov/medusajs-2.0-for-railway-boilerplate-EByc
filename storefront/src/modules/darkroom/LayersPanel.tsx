@@ -53,11 +53,11 @@ export default function LayersPanel({
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // квадратные бегунки, трек по центру
+  // центрированные квадратные фейдеры
   const sliderCss = `
   input[type="range"].lp{
     -webkit-appearance:none; appearance:none;
-    width:100%; height:14px; background:transparent; color:currentColor; margin:0; padding:0;
+    width:100%; height:24px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
   }
   input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
   input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
@@ -66,6 +66,9 @@ export default function LayersPanel({
   `
 
   const handleDragStart = (id: string, e: React.DragEvent) => {
+    // drag — только за «гребёнку»
+    const ok = (e.target as HTMLElement)?.closest?.(".lp-grip")
+    if (!ok) { e.preventDefault(); return }
     setDragId(id)
     e.dataTransfer.setData("text/plain", id)
     e.dataTransfer.effectAllowed = "move"
@@ -83,16 +86,22 @@ export default function LayersPanel({
     e.preventDefault()
     const src = dragId || e.dataTransfer.getData("text/plain")
     if (!src || src === destId) {
-      setDragId(null); setDragOver(null); return
+      setDragId(null)
+      setDragOver(null)
+      return
     }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
     const place: "before" | "after" =
       rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
-    setDragId(null); setDragOver(null)
+    setDragId(null)
+    setDragOver(null)
   }
 
-  const handleDragEnd = () => { setDragId(null); setDragOver(null) }
+  const handleDragEnd = () => {
+    setDragId(null)
+    setDragOver(null)
+  }
 
   return (
     <div className="fixed right-6 top-40 z-40 w-[360px] border border-black/10 bg-white/95 shadow-xl rounded-none">
@@ -120,16 +129,14 @@ export default function LayersPanel({
               onDrop={(e)=>handleDrop(it.id, e)}
               className={clx(
                 "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none transition-shadow",
-                isActive
-                  ? "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,1),0_8px_24px_rgba(0,0,0,.35)]"
-                  : "bg-white text-black hover:shadow-[0_8px_24px_rgba(0,0,0,.12)]",
+                isActive ? "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,1),0_8px_24px_rgba(0,0,0,.35)]" : "bg-white text-black hover:shadow-[0_8px_24px_rgba(0,0,0,.12)]",
                 highlight
               )}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* визуальный грэп (тянется вся строка) */}
-              <div className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing">
+              {/* визуальный грэп (drag-handle). Drag стартует ТОЛЬКО отсюда */}
+              <div className="lp-grip w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing">
                 <GripVertical className="w-3.5 h-3.5" />
               </div>
 
@@ -150,7 +157,7 @@ export default function LayersPanel({
                 ))}
               </select>
 
-              {/* Opacity */}
+              {/* Opacity (5–100), центрированный фейдер с квадратным бегунком */}
               <div className="relative w-24" onMouseDown={(e)=>e.stopPropagation()}>
                 <input
                   type="range" min={5} max={100} step={1}
@@ -161,7 +168,7 @@ export default function LayersPanel({
                 <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", isActive ? "bg-white" : "bg-black")} />
               </div>
 
-              {/* controls */}
+              {/* controls (нейтральные, без «красной мусорки») */}
               <button
                 className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
@@ -190,7 +197,7 @@ export default function LayersPanel({
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent text-red-600", isActive ? "border-white/40" : "border-black/20")}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
                 title="Delete"
