@@ -21,8 +21,8 @@ const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W // можно растягивать до ширины всего холста
 
 // Плавность и защита от дрожи/схлопываний
-const EPS  = 0.25               // порог «есть смысл перерисовывать»
-const DEAD = 0.01               // мёртвая зона — полностью гасит микродрожь
+const EPS  = 0.25
+const DEAD = 0.02 // мёртвая зона — полностью гасит микродрожь
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 
@@ -92,8 +92,9 @@ export default function EditorCanvas() {
 
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
-  const isTransformingRef = useRef(false)
-  const isEditingTextRef  = useRef(false)
+  const isTransformingRef   = useRef(false)
+  const isEditingTextRef    = useRef(false)
+  const suppressTransformUntil = useRef<number>(0) // защита от «рывка» трансформера сразу после выхода из textarea
 
   // ===== Вёрстка/масштаб =====
   const [headerH, setHeaderH] = useState(64)
@@ -120,10 +121,26 @@ export default function EditorCanvas() {
     return () => { document.body.style.overflow = prev }
   }, [set])
 
+  useEffect(() => {
+    const cont = stageRef.current?.container()
+    if (cont) cont.style.touchAction = "none"
+  }, [])
+
   // ===== Helpers =====
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
+
+  const findLayerByTargetNode = (tgt: Konva.Node | null): AnyLayer | null => {
+    if (!tgt) return null
+    let p: Konva.Node | null | undefined = tgt
+    while (p) {
+      const hit = layers.find(l => l.node === p)
+      if (hit) return hit
+      p = p.getParent?.()
+    }
+    return null
+  }
 
   // НЕ меняем blend у кисти/ластика — только opacity
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
@@ -154,7 +171,6 @@ export default function EditorCanvas() {
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
   // --- Хелперы для текста ---
-  // ширина «одной буквы» для динамического минимума wrap
   const minLetterW = (t: Konva.Text) => {
     try {
       const m = (t as any).measureSize?.("M")
@@ -168,7 +184,7 @@ export default function EditorCanvas() {
   const textSnapRef = useRef<TextSnap|null>(null)
 
   const captureTextSnap = (t: Konva.Text): TextSnap => {
-    const wrap0 = Math.max(1, t.width() || 1) // width() у Konva.Text = ширина «обёртки»
+    const wrap0 = Math.max(1, t.width() || 1)
     const self  = (t as any).getSelfRect?.() || { width: wrap0, height: Math.max(1, t.height() || 1) }
     const cx0   = Math.round(t.x() + wrap0 / 2)
     const cy0   = Math.round(t.y() + Math.max(1, self.height) / 2)
@@ -178,7 +194,15 @@ export default function EditorCanvas() {
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
-    const disabled = !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
+    const now = performance.now()
+    const disabled =
+      !n ||
+      lay?.meta.locked ||
+      isStrokeGroup(n) ||
+      isEraseGroup(n) ||
+      tool !== "move" ||
+      isEditingTextRef.current ||
+      now < suppressTransformUntil.current // подавляем активацию в течение 140мс после выхода из textarea
 
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
@@ -194,7 +218,7 @@ export default function EditorCanvas() {
     tr.nodes([n])
     tr.rotateEnabled(true)
 
-    const onStart = () => { isTransformingRef.current = true }
+    const onStart = () => { if (performance.now() >= suppressTransformUntil.current) isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
     n.on("transformstart.guard", onStart)
     n.on("transformend.guard", onEndT)
@@ -209,7 +233,7 @@ export default function EditorCanvas() {
         "middle-left","middle-right","top-center","bottom-center"
       ])
 
-      // фиксируем «старт» — от чего считаем масштаб
+      // фиксируем «старт»
       const onTextStart = () => { textSnapRef.current = captureTextSnap(t) }
       const onTextEnd   = () => { textSnapRef.current = null }
 
@@ -222,7 +246,7 @@ export default function EditorCanvas() {
         const snap   = textSnapRef.current ?? captureTextSnap(t)
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // boundBoxFunc работает в абсолютных координатах трансформера — берём относительные коэффициенты
+        // относительные коэффициенты
         const ow = Math.max(1e-6, oldBox.width)
         const oh = Math.max(1e-6, oldBox.height)
         const ratioW = newBox.width  / ow
@@ -231,7 +255,7 @@ export default function EditorCanvas() {
         // боковые хэндлы — меняем ТОЛЬКО wrap ширину (держим центр)
         if (active === "middle-left" || active === "middle-right") {
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
-          const minW  = Math.max(2, minLetterW(t))           // ~ «одна буква», но не 0
+          const minW  = Math.max(2, minLetterW(t))
           const nextW = clamp(Math.round(snap.wrap0 * ratioW), minW, TEXT_MAX_W)
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
             t.width(nextW)
@@ -249,8 +273,6 @@ export default function EditorCanvas() {
         const nextFS = clamp(Math.round(snap.fs0 * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-
-          // после смены fontSize пересчитаем реальный bbox и вернём центр на место
           const self = (t as any).getSelfRect?.() || { width: Math.max(1, t.width() || snap.wrap0), height: Math.max(1, (t.height() || 1)) }
           const nw = Math.max(1, t.width() || self.width)
           const nh = Math.max(1, self.height)
@@ -306,11 +328,44 @@ export default function EditorCanvas() {
           if ((n as any).radius) (n as any).radius(Math.max(1, r * s))
           if ((n as any).scaleX) (n as any).scaleX(1)
           if ((n as any).scaleY) (n as any).scaleY(1)
-        } else {
-          // Group / Line — оставляем scale как есть (нормально масштабируются, напр. «крест»)
-          // ничего не печём, только перерисовка
+        } else if (n instanceof Konva.Group) {
+          // Нормализуем scale в реальные размеры детей => «крест» масштабируется корректно, без дрожи
+          const sfx = Math.abs(sx), sfy = Math.abs(sy)
+          if (Math.abs(sfx - 1) > DEAD || Math.abs(sfy - 1) > DEAD) {
+            n.getChildren().forEach((child: any) => {
+              if (child instanceof Konva.Rect) {
+                child.width(Math.max(1, child.width() * sfx))
+                child.height(Math.max(1, child.height() * sfy))
+                child.x(child.x() * sfx)
+                child.y(child.y() * sfy)
+              } else if (child instanceof Konva.Circle) {
+                const rr = child.radius()
+                child.radius(Math.max(1, rr * Math.max(sfx, sfy)))
+                child.x(child.x() * sfx)
+                child.y(child.y() * sfy)
+              } else if (child instanceof Konva.RegularPolygon) {
+                const rr = child.radius()
+                child.radius(Math.max(1, rr * Math.max(sfx, sfy)))
+                child.x(child.x() * sfx)
+                child.y(child.y() * sfy)
+              } else if (child instanceof Konva.Line) {
+                // Линию масштабируем трансформацией точек относительно (0,0)
+                const pts = child.points()
+                const next:number[] = []
+                for (let i=0;i<pts.length;i+=2) {
+                  next.push(pts[i]*sfx, pts[i+1]*sfy)
+                }
+                child.points(next)
+                child.x(child.x() * sfx)
+                child.y(child.y() * sfy)
+                child.strokeWidth(Math.max(0.5, (child.strokeWidth?.() ?? 1) * Math.max(sfx, sfy)))
+              }
+            })
+          }
+          // возвращаем единичный скейл группы
+          if ((n as any).scaleX) (n as any).scaleX(1)
+          if ((n as any).scaleY) (n as any).scaleY(1)
         }
-
         scheduleUI()
       }
 
@@ -553,7 +608,6 @@ export default function EditorCanvas() {
 
     const place = () => {
       const rect = stContainer.getBoundingClientRect()
-      // используем VisualViewport, чтобы не «ездило» при появлении клавы
       const vv = (window as any).visualViewport as VisualViewport | undefined
       const offX = vv?.offsetLeft ?? 0
       const offY = vv?.offsetTop  ?? 0
@@ -585,6 +639,9 @@ export default function EditorCanvas() {
       WebkitAppearance: "none",
     } as CSSStyleDeclaration)
 
+    // отключаем хиты канваса на время ввода
+    stage.listening(false)
+
     place()
     document.body.appendChild(ta)
     ta.focus()
@@ -608,12 +665,13 @@ export default function EditorCanvas() {
       ta.remove()
       t.opacity(prevOpacity)
       isEditingTextRef.current = false
+      stage.listening(true)
+      suppressTransformUntil.current = performance.now() + 140 // анти-рывок
       scheduleUI()
       // остаёмся на тексте с тем же трансформером (режим текста)
       const id = (t as any).id ? (t as any).id() : undefined
       if (id) select(id)
-      // переустанавливаем текстовый boundBoxFunc
-      resetBBoxFunc(); attachTransformer();
+      resetBBoxFunc(); attachTransformer()
       trRef.current?.nodes([t])
       scheduleUI()
     }
@@ -653,10 +711,8 @@ export default function EditorCanvas() {
     if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
       select(null); trRef.current?.nodes([]); scheduleUI(); return
     }
-    if (tgt && tgt !== st && tgt.getParent()) {
-      const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
-      if (found && found.side === side) select(found.id)
-    }
+    const found = findLayerByTargetNode(tgt)
+    if (found && found.side === side) select(found.id)
   }
   const onMouseMove = (e: any) => {
     if (isTransformingRef.current || isEditingTextRef.current) return
@@ -722,14 +778,11 @@ export default function EditorCanvas() {
       } else if (isImgOrRect(n)) {
         const w0 = (n as any).width ? (n as any).width() : 1
         const h0 = (n as any).height ? (n as any).height() : 1
-        const x0 = (n as any).x ? (n as any).x() : 0
-        const y0 = (n as any).y ? (n as any).y() : 0
-        pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, w0, h0, x0, y0 }
+        pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, w0, h0 }
       } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
         const r0 = (n as any).radius ? (n as any).radius() : 1
         pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, r0 }
       } else {
-        // Group / Line — масштабируем скейлом
         const sx0 = (n as any).scaleX ? (n as any).scaleX() : 1
         const sy0 = (n as any).scaleY ? (n as any).scaleY() : 1
         pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, sx0, sy0 }
@@ -749,10 +802,8 @@ export default function EditorCanvas() {
       if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
         select(null); trRef.current?.nodes([]); scheduleUI(); return
       }
-      if (tgt && tgt !== st && tgt.getParent()) {
-        const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
-        if (found && found.side === side) select(found.id)
-      }
+      const found = findLayerByTargetNode(tgt)
+      if (found && found.side === side) select(found.id)
     }
   }
 
@@ -783,7 +834,7 @@ export default function EditorCanvas() {
         return
       }
 
-      if (isImgOrRect(n) && snap.w0 && snap.h0 && snap.cx0 !== undefined) {
+      if (isImgOrRect(n) && snap.w0 && snap.h0) {
         const nw = Math.max(1, snap.w0 * s)
         const nh = Math.max(1, snap.h0 * s)
         ;(n as any).width(nw)
@@ -840,6 +891,7 @@ export default function EditorCanvas() {
   const onTouchEnd = (e: any) => {
     const evt: TouchEvent = e.evt
     if (pinchRef.current && evt.touches.length < 2) {
+      // нормализация скейла группы в реальные размеры при окончании жеста не делается — UX ок
       pinchRef.current = null
     }
     if (isDrawing && evt.touches.length === 0) finishStroke()
