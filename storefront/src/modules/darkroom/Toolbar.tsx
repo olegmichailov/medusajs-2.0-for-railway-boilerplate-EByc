@@ -55,7 +55,7 @@ type ToolbarProps = {
   setSelectedStrokeW: (n: number) => void
   setSelectedText: (t: string) => void
   setSelectedFontSize: (n: number) => void
-  setSelectedFontFamily: (f: string) => void
+  setSelectedFontFamily?: (f: string) => void
   setSelectedColor: (hex: string) => void
   mobileTopOffset: number
   mobileLayers: MobileLayersProps
@@ -147,7 +147,6 @@ export default function Toolbar(props: ToolbarProps) {
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
-    // Универсальный «центрированный» слайдер (инпут + свой трек)
     const Track = ({ className }: { className?: string }) =>
       <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
 
@@ -245,8 +244,8 @@ export default function Toolbar(props: ToolbarProps) {
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
                 <textarea
-                  value={textValue}
-                  onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+                  value={selectedProps.text ?? ""}
+                  onChange={(e)=>{ props.setSelectedText(e.target.value) }}
                   className="w-full h-16 border border-black p-1 text-sm"
                   placeholder="Enter text"
                   {...stop}
@@ -257,11 +256,11 @@ export default function Toolbar(props: ToolbarProps) {
                     <input
                       type="range" min={8} max={800} step={1}
                       value={selectedProps.fontSize ?? 96}
-                      onChange={(e)=>setSelectedFontSize(parseInt(e.target.value, 10))}
+                      onChange={(e)=>props.setSelectedFontSize(parseInt(e.target.value, 10))}
                       className="ui"
                       {...stop}
                     />
-                    <Track className="bg-black" />
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
                   </div>
                   <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
                 </div>
@@ -284,7 +283,7 @@ export default function Toolbar(props: ToolbarProps) {
                       className="ui"
                       {...stop}
                     />
-                    <Track className="bg-black" />
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
                   </div>
                 </div>
               </div>
@@ -343,6 +342,7 @@ export default function Toolbar(props: ToolbarProps) {
     const isTextSelected = props.selectedKind === "text"
     return (
       <div className="px-2 py-1 flex items-center gap-2">
+        {/* Цветопикер на мобилке возвращён */}
         {!isTextSelected && (
           <>
             <div className="text-[10px]">Color</div>
