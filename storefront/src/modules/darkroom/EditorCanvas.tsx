@@ -18,7 +18,8 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 // Текст — лимиты
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
-const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
+// можно растягивать до ширины всего холста
+const TEXT_MAX_W  = BASE_W
 
 // Плавность и защита от дрожи/схлопываний
 const EPS  = 0.25               // порог «есть смысл перерисовывать»
@@ -136,25 +137,26 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
-  // снапшот текста на начало трансформа
-  const textSnap = useRef<{
-    width:number
-    height:number
-    fs:number
-    cx:number
-    cy:number
-  }|null>(null)
+  // --- Хелперы для текста ---
+  // ширина «одной буквы» для динамического минимума wrap
+  const minLetterW = (t: Konva.Text) => {
+    try {
+      const m = (t as any).measureSize?.("M")
+      if (m && typeof m.width === "number" && m.width > 0) return Math.round(m.width)
+    } catch {}
+    return Math.max(6, Math.round((t.fontSize() || 12) * 0.55))
+  }
 
-  const makeTextSnap = (t: Konva.Text) => {
-    const w0 = Math.max(1, t.width() || 1) // wrap width (важно для выравнивания)
-    // getSelfRect даёт «реальный» контентный бокс текста без stroke
-    let self: any = undefined
-    const hasGetSelf = typeof (t as any).getSelfRect === "function"
-    if (hasGetSelf) self = (t as any).getSelfRect()
-    const h0 = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || 1))
-    const cx0 = t.x() + w0 / 2
-    const cy0 = t.y() + h0 / 2
-    return { width: w0, height: h0, fs: t.fontSize(), cx: cx0, cy: cy0 }
+  // снапшот текста на момент начала трансформа (фиксирует центр, fs и wrap)
+  type TextSnap = { fs0:number; wrap0:number; cx0:number; cy0:number }
+  const textSnapRef = useRef<TextSnap|null>(null)
+
+  const captureTextSnap = (t: Konva.Text): TextSnap => {
+    const wrap0 = Math.max(1, t.width() || 1) // width() у Konva.Text = ширина «обёртки»
+    const self  = (t as any).getSelfRect?.() || { width: wrap0, height: Math.max(1, t.height() || 1) }
+    const cx0   = Math.round(t.x() + wrap0 / 2)
+    const cy0   = Math.round(t.y() + Math.max(1, self.height) / 2)
+    return { fs0: t.fontSize(), wrap0, cx0, cy0 }
   }
 
   const attachTransformer = () => {
@@ -183,65 +185,62 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ——— ТЕКСТ: углы = fontSize, боковые = width ———
+      const t = n as Konva.Text
+
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
         "middle-left","middle-right","top-center","bottom-center"
       ])
 
-      const onTextStart = () => { textSnap.current = makeTextSnap(n) }
-      const onTextEnd   = () => { textSnap.current = null }
+      // фиксируем «старт» — от чего считаем масштаб
+      const onTextStart = () => { textSnapRef.current = captureTextSnap(t) }
+      const onTextEnd   = () => { textSnapRef.current = null }
 
-      n.on("transformstart.textsnap", onTextStart)
-      n.on("transformend.textsnap",   onTextEnd)
+      t.off(".text-bind")
+      t.on("transformstart.text-bind", onTextStart)
+      t.on("transformend.text-bind",   onTextEnd)
 
-      ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
-        const t = n as Konva.Text
-        const snap = textSnap.current || makeTextSnap(t)
-        const active = (trRef.current && (trRef.current as any).getActiveAnchor)
-          ? (trRef.current as any).getActiveAnchor()
-          : undefined
+      // Управляем вручную всё внутри boundBoxFunc — Konva ничего не скейлит сам
+      ;(tr as any).boundBoxFunc((oldBox: any, newBox: any) => {
+        const snap   = textSnapRef.current ?? captureTextSnap(t)
+        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // БОКОВЫЕ: меняем только width относительно центра
+        // boundBoxFunc работает в абсолютных координатах трансформера — берём относительный коэф. масштабирования
+        const ow = Math.max(1e-6, oldBox.width)
+        const oh = Math.max(1e-6, oldBox.height)
+        const ratioW = newBox.width  / ow
+        const ratioH = newBox.height / oh
+
+        // боковые хэндлы — меняем ТОЛЬКО wrap ширину (держим центр)
         if (active === "middle-left" || active === "middle-right") {
-          const ratioW = newBox.width / Math.max(1e-6, snap.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
-
-          const fsNow = t.fontSize()
-          const minW  = Math.max(2, Math.round((fsNow || snap.fs) * 0.45)) // «примерно одна буква»
-          const nextW = clamp(Math.round(snap.width * ratioW), minW, TEXT_MAX_W)
-
+          const minW  = Math.max(2, minLetterW(t))           // ~ «одна буква», но не 0
+          const nextW = clamp(Math.round(snap.wrap0 * ratioW), minW, TEXT_MAX_W)
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
-            const cx = snap.cx
             t.width(nextW)
-            t.x(Math.round(cx - nextW / 2))
+            t.x(Math.round(snap.cx0 - nextW / 2))
           }
-
-          // Никаких скейлов — мы обновили ширину руками
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
           return oldBox
         }
 
-        // УГЛЫ + вертикаль: меняем только fontSize от текущего значения, удерживаем центр
-        const ratioW = newBox.width  / Math.max(1e-6, snap.width)
-        const ratioH = newBox.height / Math.max(1e-6, snap.height)
+        // углы/вертикальные — меняем ТОЛЬКО fontSize от стартового значения, центр удерживаем
         const s = Math.max(ratioW, ratioH)
         if (Math.abs(s - 1) < DEAD) return oldBox
 
-        const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
+        const nextFS = clamp(Math.round(snap.fs0 * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-          // пересчитать контентный бокс и вернуть центр
-          let self: any = undefined
-          const hasGetSelf = typeof (t as any).getSelfRect === "function"
-          if (hasGetSelf) self = (t as any).getSelfRect()
-          const newH = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || snap.height))
-          const newW = Math.max(1, t.width() || snap.width) // wrap ширина остаётся прежней
-          t.x(Math.round(snap.cx - newW/2))
-          t.y(Math.round(snap.cy - newH/2))
+
+          // после смены fontSize пересчитаем реальный bbox и вернём центр на место
+          const self = (t as any).getSelfRect?.() || { width: Math.max(1, t.width() || snap.wrap0), height: Math.max(1, (t.height() || 1)) }
+          const nw = Math.max(1, t.width() || self.width)
+          const nh = Math.max(1, self.height)
+          t.x(Math.round(snap.cx0 - nw/2))
+          t.y(Math.round(snap.cy0 - nh/2))
         }
 
         t.scaleX(1); t.scaleY(1)
@@ -250,15 +249,15 @@ export default function EditorCanvas() {
         return oldBox
       })
 
-      const onTextNormalizeEnd = () => {
-        const t = n as Konva.Text
+      // финальная нормализация (подстраховка)
+      const onTextNormalize = () => {
         t.scaleX(1); t.scaleY(1)
         t.getLayer()?.batchDraw()
         requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
       }
-      n.on("transformend.textnorm", onTextNormalizeEnd)
+      t.on("transformend.text-bind", onTextNormalize)
 
-      detachTextFix.current = () => { n.off(".textsnap"); n.off(".textnorm") }
+      detachTextFix.current = () => { t.off(".text-bind") }
     } else {
       // ——— НЕ ТЕКСТ ———
       tr.keepRatio(false)
@@ -559,11 +558,11 @@ export default function EditorCanvas() {
       fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
       fontSize:   `${t.fontSize() * abs.y}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(t.letterSpacing?.() ?? 0) * abs.x}px`,
+      letterSpacing: `${((t as any).letterSpacing?.() ?? 0) * abs.x}px`,
       whiteSpace: "pre-wrap", overflow: "hidden", outline: "none", resize: "none",
       transformOrigin: "left top", zIndex: "9999", userSelect: "text",
       caretColor: String(t.fill() || "#000"),
-      textAlign: (t.align?.() as any) || "left",
+      textAlign: ((t as any).align?.() as any) || "left",
     } as CSSStyleDeclaration)
 
     place()
