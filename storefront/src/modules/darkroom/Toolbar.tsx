@@ -5,8 +5,7 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Layers, X as ClearIcon, GripHorizontal,
-  Copy, ChevronUp, ChevronDown, Eye, EyeOff, Lock, Unlock, Trash2
+  Layers, X as ClearIcon, GripHorizontal
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -64,7 +63,7 @@ type ToolbarProps = {
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
-const btn  = "h-10 px-3 grid place-items-center border border-black text-[12px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
+const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
 const stop = {
@@ -90,7 +89,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// центрированный трек + квадратный бегунок
+// Унифицированный вид слайдера: скрываем нативный трек, свой центр-трек, ползунок — КВАДРАТНЫЙ
 const sliderCss = `
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
@@ -144,107 +143,65 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // локальный текст state (без сокращений)
+    // локальный текст state
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
+    // Универсальный «центрированный» слайдер (инпут + свой трек)
     const Track = ({ className }: { className?: string }) =>
       <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
 
     return (
-      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 280 }} onMouseDown={(e)=>e.stopPropagation()}>
+      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} onMouseDown={(e)=>e.stopPropagation()}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
 
         {/* header */}
         <div className="flex items-center justify-between border-b border-black/10">
-          <div className="px-3 py-2 text-[11px] tracking-widest">TOOLS</div>
+          <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
-            <button className={btn} title="Clear canvas" onClick={(e)=>{e.stopPropagation(); onClear()}}>
-              <ClearIcon className={ico}/> <span className="ml-2">Clear</span>
-            </button>
+            <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
             <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
               {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-              <span className="ml-2">{open ? "Hide" : "Show"}</span>
             </button>
-            <button className={btn} onMouseDown={onDragStart} title="Drag panel">
-              <GripHorizontal className={ico}/> <span className="ml-2">Move</span>
-            </button>
+            <button className={btn} onMouseDown={onDragStart} title="Drag panel"><GripHorizontal className={ico}/></button>
           </div>
         </div>
 
         {open && (
-          <div className="p-3 space-y-3">
+          <div className="p-2 space-y-2">
             {/* row 1 — инструменты + layers */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className={clx(btn, tool==="move" ? activeBtn : "bg-white")}
-                onClick={(e)=>{ e.stopPropagation(); setTool("move") }}
-              ><Move className={ico}/> <span className="ml-2">Move</span></button>
-
-              <button
-                className={clx(btn, layersOpen ? activeBtn : "bg-white")}
-                onClick={(e)=>{e.stopPropagation(); toggleLayers()}}
-              ><Layers className={ico}/> <span className="ml-2">Layers</span></button>
-
-              <button
-                className={clx(btn, tool==="brush" ? activeBtn : "bg-white")}
-                onClick={(e)=>{ e.stopPropagation(); setTool("brush") }}
-              ><Brush className={ico}/> <span className="ml-2">Brush</span></button>
-
-              <button
-                className={clx(btn, tool==="erase" ? activeBtn : "bg-white")}
-                onClick={(e)=>{ e.stopPropagation(); setTool("erase") }}
-              ><Eraser className={ico}/> <span className="ml-2">Eraser</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddText() }}
-              ><TypeIcon className={ico}/> <span className="ml-2">Add Text</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); fileRef.current?.click() }}
-              ><ImageIcon className={ico}/> <span className="ml-2">Add Image</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddShape("square"); }}
-              ><Square className={ico}/> <span className="ml-2">Square</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddShape("circle"); }}
-              ><Circle className={ico}/> <span className="ml-2">Circle</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddShape("triangle"); }}
-              ><Triangle className={ico}/> <span className="ml-2">Triangle</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddShape("cross"); }}
-              ><Plus className={ico}/> <span className="ml-2">Cross</span></button>
-
-              <button
-                className={btn}
-                onClick={(e)=>{ e.stopPropagation(); onAddShape("line"); }}
-              ><Slash className={ico}/> <span className="ml-2">Line</span></button>
-
+            <div className="flex">
+              {[
+                {t:"move",   icon:<Move className={ico}/>},
+                {t:"brush",  icon:<Brush className={ico}/>},
+                {t:"erase",  icon:<Eraser className={ico}/>},
+                {t:"text",   icon:<TypeIcon className={ico}/>},
+                {t:"image",  icon:<ImageIcon className={ico}/>},
+                {t:"shape",  icon:<Shapes className={ico}/>},
+              ].map((b)=>(
+                <button
+                  key={b.t}
+                  className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
+                  onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") setTool("shape" as Tool); else setTool(b.t as Tool) }}
+                  title={b.t}
+                >{b.icon}</button>
+              ))}
+              <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
+                <Layers className={ico}/>
+              </button>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...stop}/>
             </div>
 
             {/* row 2 — Color + Brush/Eraser size */}
             <div className="flex items-center gap-3">
-              <div className="text-[11px] w-14">Color</div>
+              <div className="text-[10px] w-8">Color</div>
               <input
                 type="color"
                 value={brushColor}
                 onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
-                className="w-7 h-7 border border-black p-0"
+                className="w-6 h-6 border border-black p-0"
                 {...stop}
                 disabled={tool==="erase"}
-                title="Color"
               />
               <div className="relative flex-1 text-black">
                 <input
@@ -256,7 +213,7 @@ export default function Toolbar(props: ToolbarProps) {
                 />
                 <Track className="bg-black" />
               </div>
-              <div className="text-xs w-12 text-right">{brushSize}px</div>
+              <div className="text-xs w-10 text-right">{brushSize}</div>
             </div>
 
             {/* палитра */}
@@ -267,24 +224,35 @@ export default function Toolbar(props: ToolbarProps) {
                   className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
                   style={{ background: c }}
                   onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (props.selectedKind) props.setSelectedColor(c) }}
-                  title={c}
                 />
               ))}
+            </div>
+
+            {/* SHAPES */}
+            <div className="pt-1">
+              <div className="text-[10px] mb-1">Shapes</div>
+              <div className="flex">
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
+                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
+              </div>
             </div>
 
             {/* SELECTED */}
             {selectedKind === "text" && (
               <div className="pt-1 space-y-2">
-                <div className="text-[11px]">Text</div>
+                <div className="text-[10px]">Text</div>
                 <textarea
                   value={textValue}
                   onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-                  className="w-full h-16 border border-black p-2 text-sm"
+                  className="w-full h-16 border border-black p-1 text-sm"
                   placeholder="Enter text"
                   {...stop}
                 />
                 <div className="flex items-center gap-2">
-                  <div className="text-[11px] w-20">Font size</div>
+                  <div className="text-[10px] w-12">Font size</div>
                   <div className="relative flex-1 text-black">
                     <input
                       type="range" min={8} max={800} step={1}
@@ -295,19 +263,19 @@ export default function Toolbar(props: ToolbarProps) {
                     />
                     <Track className="bg-black" />
                   </div>
-                  <div className="text-xs w-12 text-right">{selectedProps.fontSize ?? 96}px</div>
+                  <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
                 </div>
               </div>
             )}
 
             {selectedKind === "shape" && (
               <div className="pt-1 space-y-2">
-                <div className="text-[11px]">Selected shape</div>
+                <div className="text-[10px]">Selected shape</div>
                 <div className="flex items-center gap-2">
-                  <div className="text-[11px] w-12">Fill</div>
-                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>setSelectedFill(e.target.value)} className="w-7 h-7 border border-black" {...stop}/>
-                  <div className="text-[11px] w-12">Stroke</div>
-                  <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>setSelectedStroke(e.target.value)} className="w-7 h-7 border border-black" {...stop}/>
+                  <div className="text-[10px] w-12">Fill</div>
+                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>setSelectedFill(e.target.value)} className="w-6 h-6 border border-black" {...stop}/>
+                  <div className="text-[10px] w-12">Stroke</div>
+                  <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black" {...stop}/>
                   <div className="relative flex-1 text-black">
                     <input
                       type="range" min={0} max={64} step={1}
@@ -318,24 +286,19 @@ export default function Toolbar(props: ToolbarProps) {
                     />
                     <Track className="bg-black" />
                   </div>
-                  <div className="text-xs w-10 text-right">{selectedProps.strokeWidth ?? 0}px</div>
                 </div>
               </div>
             )}
 
             {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
-              <button className={clx("h-10 border border-black flex items-center justify-center", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>
-                Front
+              <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
+              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadFront()}}>
+                <Download className={ico}/> <span className="text-xs">Download</span>
               </button>
-              <button className="h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={(e)=>{e.stopPropagation(); onDownloadFront()}}>
-                <Download className={ico}/> <span>Download</span>
-              </button>
-              <button className={clx("h-10 border border-black flex items-center justify-center", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>
-                Back
-              </button>
-              <button className="h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={(e)=>{e.stopPropagation(); onDownloadBack()}}>
-                <Download className={ico}/> <span>Download</span>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadBack()}}>
+                <Download className={ico}/> <span className="text-xs">Download</span>
               </button>
             </div>
           </div>
@@ -347,13 +310,12 @@ export default function Toolbar(props: ToolbarProps) {
   // =================== MOBILE ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
 
-  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void, label?: string) =>
+  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) =>
     <button
-      className={clx("h-12 px-3 grid grid-cols-[20px_auto] items-center gap-2 border border-black rounded-none text-sm", tool===t ? activeBtn : "bg-white")}
+      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
       onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
     >
-      <span className="grid place-items-center"><span className="sr-only">{label}</span>{icon}</span>
-      <span className="whitespace-nowrap">{label}</span>
+      {icon}
     </button>
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -374,7 +336,6 @@ export default function Toolbar(props: ToolbarProps) {
             <input type="range" min={0} max={64} step={1} value={selectedProps.strokeWidth ?? 0} onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))} className="ui" {...stop}/>
             <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
           </div>
-          <div className="text-xs w-10 text-right">{selectedProps.strokeWidth ?? 0}px</div>
         </div>
       )
     }
@@ -384,7 +345,7 @@ export default function Toolbar(props: ToolbarProps) {
       <div className="px-2 py-1 flex items-center gap-2">
         {!isTextSelected && (
           <>
-            <div className="text-[11px]">Color</div>
+            <div className="text-[10px]">Color</div>
             <input
               type="color"
               value={brushColor}
@@ -405,7 +366,7 @@ export default function Toolbar(props: ToolbarProps) {
           />
           <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
         </div>
-        <div className="text-xs w-12 text-right">{brushSize}px</div>
+        <div className="text-xs w-10 text-right">{brushSize}</div>
       </div>
     )
   }
@@ -417,44 +378,26 @@ export default function Toolbar(props: ToolbarProps) {
         <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[11px] tracking-widest">LAYERS</div>
-              <button className={clx("px-3 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
+              <div className="text-[10px] tracking-widest">LAYERS</div>
+              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
             </div>
             <div className="space-y-2 overflow-auto">
               {mobileLayers.items.map((l)=>(
                 <div
                   key={l.id}
                   className={clx(
-                    "flex items-center gap-2 border border-black px-2 py-2 bg-white",
+                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
                     mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
                   )}
                 >
-                  <button className="border border-black px-2 h-8 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>
-                    {l.type[0].toUpperCase()} <span className="ml-2 text-xs">Select</span>
-                  </button>
-
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
-
-                  <button className="border border-black h-8 px-2 grid place-items-center" title="Move up" onClick={()=>mobileLayers.onMoveUp(l.id)}>
-                    <ChevronUp className={ico}/><span className="sr-only">Move up</span>
-                  </button>
-                  <button className="border border-black h-8 px-2 grid place-items-center" title="Move down" onClick={()=>mobileLayers.onMoveDown(l.id)}>
-                    <ChevronDown className={ico}/><span className="sr-only">Move down</span>
-                  </button>
-                  <button className="border border-black h-8 px-2 grid place-items-center" title="Duplicate" onClick={()=>mobileLayers.onDuplicate(l.id)}>
-                    <Copy className={ico}/><span className="sr-only">Duplicate</span>
-                  </button>
-                  <button className="border border-black h-8 px-2 grid place-items-center" title={l.locked?"Unlock":"Lock"} onClick={()=>mobileLayers.onToggleLock(l.id)}>
-                    {l.locked ? <Lock className={ico}/> : <Unlock className={ico}/>}
-                    <span className="sr-only">{l.locked ? "Unlock" : "Lock"}</span>
-                  </button>
-                  <button className="border border-black h-8 px-2 grid place-items-center" title={l.visible?"Hide":"Show"} onClick={()=>mobileLayers.onToggleVisible(l.id)}>
-                    {l.visible ? <Eye className={ico}/> : <EyeOff className={ico}/>}
-                    <span className="sr-only">{l.visible ? "Hide" : "Show"}</span>
-                  </button>
-                  <button className="border border-black h-8 px-2 grid place-items-center bg-black text-white" title="Delete" onClick={()=>mobileLayers.onDelete(l.id)}>
-                    <Trash2 className={ico}/> <span className="sr-only">Delete</span>
-                  </button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}>↑</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}>↓</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}>Dup</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?"🔒":"🔓"}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?"👁":"🚫"}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}>✕</button>
                 </div>
               ))}
             </div>
@@ -465,36 +408,32 @@ export default function Toolbar(props: ToolbarProps) {
       {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-        <div className="px-2 py-2 grid grid-cols-2 gap-2">
-          {mobileButton("move", <Move className={ico}/>, undefined, "Move")}
-          {mobileButton("brush", <Brush className={ico}/>, undefined, "Brush")}
-          {mobileButton("erase", <Eraser className={ico}/>, undefined, "Eraser")}
-          {mobileButton("text", <TypeIcon className={ico}/>, props.onAddText, "Add Text")}
-          {mobileButton("image", <ImageIcon className={ico}/>, undefined, "Add Image")}
-          {mobileButton("shape", <Shapes className={ico}/>, undefined, "Shapes")}
-          <button className={clx("h-12 px-3 grid grid-cols-[20px_auto] items-center gap-2 border border-black rounded-none text-sm", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
-            <Layers className={ico}/><span>Layers</span>
+        <div className="px-2 py-1 flex items-center gap-1">
+          {mobileButton("move", <Move className={ico}/>)}
+          {mobileButton("brush", <Brush className={ico}/>)}
+          {mobileButton("erase", <Eraser className={ico}/>)}
+          {mobileButton("text", <TypeIcon className={ico}/>, onAddText)}
+          {mobileButton("image", <ImageIcon className={ico}/>)}
+          {mobileButton("shape", <Shapes className={ico}/>)}
+          <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
+            <Layers className={ico}/>
           </button>
-          <button className="h-12 px-3 grid grid-cols-[20px_auto] items-center gap-2 border border-black rounded-none text-sm" onClick={onClear}>
-            <ClearIcon className={ico}/><span>Clear</span>
-          </button>
+          <div className="ml-auto flex gap-1">
+            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onClear}><ClearIcon className={ico}/></button>
+          </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...stop}/>
         </div>
 
         <SecondRow />
 
-        <div className="px-2 py-2 grid grid-cols-2 gap-2">
+        <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
-            <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>Front</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}>
-              <Download className={ico}/> <span>Download</span>
-            </button>
+            <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
           </div>
           <div className="flex gap-2">
-            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>Back</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}>
-              <Download className={ico}/> <span>Download</span>
-            </button>
+            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/>DL</button>
           </div>
         </div>
       </div>
