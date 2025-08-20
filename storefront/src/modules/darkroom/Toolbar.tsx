@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useState } from "react"
@@ -67,6 +68,7 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
+/** Полная блокировка всплытия — для 1-й строки/оверлеев (чтобы не ловил Stage) */
 const stopAll = {
   onPointerDownCapture: (e: any) => e.stopPropagation(),
   onPointerMoveCapture: (e: any) => e.stopPropagation(),
@@ -78,8 +80,17 @@ const stopAll = {
   onMouseMoveCapture:   (e: any) => e.stopPropagation(),
   onMouseUpCapture:     (e: any) => e.stopPropagation(),
 }
+/** Без блокировки move — для строки настроек, чтобы range тянулся ПЛАВНО */
+const stopClicksOnly = {
+  onPointerDownCapture: (e: any) => e.stopPropagation(),
+  onPointerUpCapture:   (e: any) => e.stopPropagation(),
+  onTouchStartCapture:  (e: any) => e.stopPropagation(),
+  onTouchEndCapture:    (e: any) => e.stopPropagation(),
+  onMouseDownCapture:   (e: any) => e.stopPropagation(),
+  onMouseUpCapture:     (e: any) => e.stopPropagation(),
+}
 
-/** палитра для десктопа (как было) */
+/** палитра (десктоп — как было) */
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -91,7 +102,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-/** Слайдеры: большой квадратный бегунок, центр-трек, плавное движение */
+/** Слайдеры: квадратный большой бегунок, центр-трек, плавное движение */
 const sliderCss = `
 :root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
 input[type="range"].ui{
@@ -293,10 +304,10 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // =================== MOBILE (строго 3 строки) ===================
+  // =================== MOBILE (3 строки) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
 
-  // всегда смонтированный hidden input — тап по Image вызывает его
+  // скрытый input для upload — всегда смонтирован
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -307,20 +318,19 @@ export default function Toolbar(props: ToolbarProps) {
   const Track = () =>
     <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
 
-  // корректное поведение иконок
   const tapTool = (t: "move"|"brush"|"erase"|"text"|"image"|"shape") => {
     if (t === "text") { setTool("text"); onAddText(); return }
     if (t === "image") { setTool("image"); requestAnimationFrame(()=> fileRef.current?.click()); return }
     setTool(t as Tool)
   }
 
-  /** Вторая строка: зависит от активного инструмента */
+  /** Вторая строка, зависящая от инструмента */
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
     if (tool === "brush") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopClicksOnly} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px]">Color</div>
           <input
             type="color"
@@ -339,7 +349,7 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "erase") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopClicksOnly} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px] w-12">Size</div>
           <div className="relative flex-1 text-black">
             <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
@@ -351,22 +361,34 @@ export default function Toolbar(props: ToolbarProps) {
     }
 
     if (tool === "text") {
+      // левая половина — input; правая — фейдер
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
-          <div className="text-[10px] w-16">Font size</div>
-          <div className="relative flex-1 text-black">
-            <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopClicksOnly} style={{ ['--thumb-mobile' as any]:'28px' }}>
+          <div className="flex-1 flex items-center gap-2">
+            <div className="text-[10px] w-12">Size</div>
+            <input
+              type="number" inputMode="numeric" pattern="[0-9]*"
+              min={8} max={800} step={1}
+              value={Math.round(fontSize)}
+              onChange={(e)=> {
+                const v = parseInt(e.target.value || "0", 10)
+                if (!Number.isNaN(v)) props.setSelectedFontSize(Math.max(8, Math.min(800, v)))
+              }}
+              className="h-10 w-20 border border-black bg-white px-2 text-sm"
+            />
+          </div>
+          <div className="flex-1 relative text-black">
+            <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> props.setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
             <Track />
           </div>
-          <div className="text-xs w-10 text-right">{Math.round(fontSize)}</div>
         </div>
       )
     }
 
-    // В Image — не дублируем Upload, показываем шейпы, как и в Shapes
+    // В Image и Shapes — одинаковый набор кнопок-фигур
     if (tool === "image" || tool === "shape") {
       return (
-        <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-1" {...stopClicksOnly}>
           <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
           <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
           <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
@@ -381,12 +403,12 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* hidden input — всегда смонтирован */}
+      {/* hidden input — для upload (тап по Image) */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
-      {/* LAYERS шторка (мобайл) */}
+      {/* LAYERS шторка */}
       {layersOpenM && (
-        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 112+56 /* суммарная высота 1-2-3 строк */ }} {...stopAll}>
+        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 112+56 }} {...stopAll}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] tracking-widest">LAYERS</div>
@@ -423,7 +445,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* ===== 1-я строка: TOOLS / LAYERS / CLEAR ===== */}
+      {/* 1-я строка */}
       <div className="fixed inset-x-0 bottom-[112px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
@@ -443,12 +465,12 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       </div>
 
-      {/* ===== 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ ===== */}
-      <div className="fixed inset-x-0 bottom-[56px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      {/* 2-я строка (без блокировки move) */}
+      <div className="fixed inset-x-0 bottom-[56px] z-50 bg-white/95 border-t border-black/10" {...stopClicksOnly}>
         <SettingsRow />
       </div>
 
-      {/* ===== 3-я строка: FRONT/BACK + download ===== */}
+      {/* 3-я строка */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
@@ -461,6 +483,9 @@ export default function Toolbar(props: ToolbarProps) {
           </div>
         </div>
       </div>
+
+      {/* input для Upload */}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
     </>
   )
 }
