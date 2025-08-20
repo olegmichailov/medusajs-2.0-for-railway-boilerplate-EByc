@@ -79,7 +79,7 @@ const stopAll = {
   onMouseUpCapture:     (e: any) => e.stopPropagation(),
 }
 
-/** палитра для десктопа */
+/** палитра для десктопа (как было) */
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -93,23 +93,31 @@ const PALETTE = [
 
 /** Слайдеры: большой квадратный бегунок, строго по центру трека, плавное движение */
 const sliderCss = `
-:root{ --thumb:14px; --track:2px; }
-@supports (-webkit-appearance:none) or (appearance:none){
-  input[type="range"].ui{
-    -webkit-appearance:none; appearance:none;
-    width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
-    position:relative; z-index:1; touch-action:none;
-  }
-  input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
+:root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
+input[type="range"].ui{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+  /* важно: не блокируем жест, чтобы не было «дискретности» на iOS */
+  touch-action:auto;
+}
+input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:var(--thumb-desktop); height:var(--thumb-desktop);
+  background:currentColor; border:0; border-radius:0;
+  margin-top: calc((var(--track) - var(--thumb-desktop))/2);
+}
+@media (pointer:coarse){
   input[type="range"].ui::-webkit-slider-thumb{
-    -webkit-appearance:none; appearance:none; width:var(--thumb); height:var(--thumb);
-    background:currentColor; border:0; border-radius:0;
-    margin-top: calc((var(--track) - var(--thumb))/2);
+    width:var(--thumb-mobile); height:var(--thumb-mobile);
+    margin-top: calc((var(--track) - var(--thumb-mobile))/2);
   }
-  input[type="range"].ui::-moz-range-track{ height:var(--track); background:transparent; }
-  input[type="range"].ui::-moz-range-thumb{
-    width:var(--thumb); height:var(--thumb); background:currentColor; border:0; border-radius:0;
-  }
+}
+input[type="range"].ui::-moz-range-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-moz-range-thumb{
+  width:var(--thumb-desktop); height:var(--thumb-desktop); background:currentColor; border:0; border-radius:0;
+}
+@media (pointer:coarse){
+  input[type="range"].ui::-moz-range-thumb{ width:var(--thumb-mobile); height:var(--thumb-mobile); }
 }
 `
 
@@ -124,8 +132,9 @@ function RangeCtl(props:{
       value={props.value}
       min={props.min} max={props.max}
       step={props.step ?? "any"}
-      onChange={(e)=>props.onChange(parseFloat(e.currentTarget.value))}
+      // onInput даёт «живое» обновление на iOS
       onInput={(e)=>props.onChange(parseFloat((e.currentTarget as HTMLInputElement).value))}
+      onChange={(e)=>props.onChange(parseFloat(e.currentTarget.value))}
     />
   )
 }
@@ -226,12 +235,10 @@ export default function Toolbar(props: ToolbarProps) {
                 disabled={tool==="erase"}
               />
               <div className="relative flex-1 text-black">
-                <RangeCtl
-                  min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}
-                />
+                <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}/>
                 <Track className="bg-black" />
               </div>
-              <div className="text-xs w-10 text-right">{props.brushSize}</div>
+              <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
             </div>
 
             {/* палитра (десктоп) */}
@@ -288,36 +295,42 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // =================== MOBILE (ровно 3 строки) ===================
+  // =================== MOBILE (строго 3 строки) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
+
+  // постоянный hidden input, чтобы Upload всегда работал (даже сразу после тапа)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  const mobileButton = (t: Tool | "image" | "text", icon: React.ReactNode, onPress?: ()=>void) =>
-    <button
-      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : setTool(t as Tool)}}
-      title={typeof t === "string" ? t : "tool"}
-    >
-      {icon}
-    </button>
-
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation()
     const f = e.target.files?.[0]
     if (f) onUploadImage(f)
     e.currentTarget.value = ""
   }
 
-  const Track = ({ dark=false }: { dark?: boolean }) =>
-    <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px]", dark ? "bg-black opacity-80":"bg-black opacity-80")} />
+  const Track = () =>
+    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
 
-  /** Вторая строка: строго один блок, зависит только от АКТИВНОГО инструмента */
+  // правильное поведение иконок (ставим tool + экшн)
+  const tapTool = (t: "move"|"brush"|"erase"|"text"|"image"|"shape") => {
+    if (t === "text") {
+      setTool("text"); onAddText()
+      return
+    }
+    if (t === "image") {
+      setTool("image")
+      // кликаем сразу — инпут всегда смонтирован
+      requestAnimationFrame(()=> fileRef.current?.click())
+      return
+    }
+    setTool(t as Tool)
+  }
+
+  /** Вторая строка: зависит только от АКТИВНОГО инструмента */
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
     if (tool === "brush") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb' as any]:'28px' }}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px]">Color</div>
           <input
             type="color"
@@ -327,7 +340,7 @@ export default function Toolbar(props: ToolbarProps) {
           />
           <div className="relative flex-1 text-black">
             <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
-            <Track dark />
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -336,11 +349,11 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "erase") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb' as any]:'28px' }}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px] w-12">Size</div>
           <div className="relative flex-1 text-black">
             <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
-            <Track dark />
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -349,11 +362,11 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "text") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb' as any]:'28px' }}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px] w-16">Font size</div>
           <div className="relative flex-1 text-black">
             <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
-            <Track dark />
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{fontSize|0}</div>
         </div>
@@ -366,7 +379,6 @@ export default function Toolbar(props: ToolbarProps) {
           <button className="h-10 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>fileRef.current?.click()}>
             <ImageIcon className={ico}/> <span className="text-xs">Upload image</span>
           </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
         </div>
       )
     }
@@ -385,6 +397,9 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
+      {/* hidden input — всегда смонтирован */}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+
       {/* LAYERS шторка (мобайл) */}
       {layersOpenM && (
         <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }} {...stopAll}>
@@ -428,12 +443,13 @@ export default function Toolbar(props: ToolbarProps) {
       <div className="fixed inset-x-0 bottom-[144px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
-          {mobileButton("move",  <Move className={ico}/>)}
-          {mobileButton("brush", <Brush className={ico}/>)}
-          {mobileButton("erase", <Eraser className={ico}/>)}
-          {mobileButton("text",  <TypeIcon className={ico}/>, onAddText)}
-          {mobileButton("image", <ImageIcon className={ico}/>)}
-          {mobileButton("shape", <Shapes className={ico}/>)}
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="move" ? activeBtn : "bg-white")}  onClick={()=>tapTool("move")}><Move className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="brush"? activeBtn : "bg-white")} onClick={()=>tapTool("brush")}><Brush className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="erase"? activeBtn : "bg-white")} onClick={()=>tapTool("erase")}><Eraser className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="text" ? activeBtn : "bg-white")}  onClick={()=>tapTool("text")}><TypeIcon className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="image"? activeBtn : "bg-white")} onClick={()=>tapTool("image")}><ImageIcon className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="shape"? activeBtn : "bg-white")} onClick={()=>tapTool("shape")}><Shapes className={ico}/></button>
+
           <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
             <LayersIcon className={ico}/>
           </button>
@@ -443,7 +459,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       </div>
 
-      {/* ===== 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ (зависят только от активного tool) ===== */}
+      {/* ===== 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ ===== */}
       <div className="fixed inset-x-0 bottom-[96px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <SettingsRow />
       </div>
