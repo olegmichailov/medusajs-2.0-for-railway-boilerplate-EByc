@@ -105,8 +105,8 @@ export default function EditorCanvas() {
   const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const padTop = headerH + 4
-    const padBottom = isMobile ? 156 : 72
+    const padTop = headerH + 2
+    const padBottom = isMobile ? 162 : 72
     const maxW = vw - 8
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
