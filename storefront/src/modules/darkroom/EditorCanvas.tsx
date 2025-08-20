@@ -115,7 +115,6 @@ export default function EditorCanvas() {
 
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
-  const nextTopZ   = () => (currentArt().children?.length ?? 0)
 
   // показываем только активную сторону
   useEffect(() => {
@@ -175,28 +174,27 @@ export default function EditorCanvas() {
         "middle-left","middle-right"
       ])
 
-      // чистим снапшот в конце
-      n.on("transformend.textsnap", () => { textSnap.current = null })
+      const onStartText = () => {
+        const t = n as Konva.Text
+        const w = Math.max(1, t.width() || 1)
+        const h = Math.max(1, t.height() || 1)
+        textSnap.current = {
+          box: { x: t.x(), y: t.y(), width: w, height: h },
+          fs: t.fontSize(),
+          w,
+          cx: t.x() + w/2,
+          cy: t.y() + h/2,
+        }
+      }
+      const onEndText = () => { textSnap.current = null }
+      n.on("transformstart.textsnap", onStartText)
+      n.on("transformend.textsnap", onEndText)
 
-      // важное: берём "точку старта" из oldBox (реальная коробка трансформера),
-      // чтобы не было ни единого скачка
       ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
         const t = n as Konva.Text
-        if (!textSnap.current) {
-          const w = Math.max(1, oldBox.width)
-          const h = Math.max(1, oldBox.height)
-          const cx = oldBox.x + w/2
-          const cy = oldBox.y + h/2
-          textSnap.current = {
-            box: { ...oldBox, width: w, height: h },
-            fs:  t.fontSize(),
-            w:   Math.max(1, t.width() || w),
-            cx, cy,
-          }
-        }
-        const snap = textSnap.current!
+        const snap = textSnap.current
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
-        if (!active) return oldBox
+        if (!snap || !active) return oldBox
 
         const ratioW = newBox.width  / Math.max(1e-6, snap.box.width)
         const ratioH = newBox.height / Math.max(1e-6, snap.box.height)
@@ -214,7 +212,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // углы — меняем ТОЛЬКО кегль, центр сохраняем
+        // углы — масштабируем fontSize из снапшота, удерживая центр
         const s = Math.max(ratioW, ratioH)
         const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
@@ -230,14 +228,14 @@ export default function EditorCanvas() {
         return oldBox
       })
 
-      n.on("transformend.textfix", () => {
+      const onEnd = () => {
         const t = n as Konva.Text
         t.scaleX(1); t.scaleY(1)
         t.getLayer()?.batchDraw()
         requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-      })
+      }
+      n.on("transformend.textfix", onEnd)
 
-      // снять обработчики
       detachTextFix.current = () => { n.off(".textfix"); n.off(".textsnap") }
     } else {
       tr.keepRatio(false)
@@ -277,8 +275,9 @@ export default function EditorCanvas() {
         bump()
       }
 
+      const onEnd = () => onTransform()
       n.on("transform.fix", onTransform)
-      n.on("transformend.fix", onTransform)
+      n.on("transformend.fix", onEnd)
       detachTextFix.current = () => { n.off(".fix") }
     }
 
@@ -331,6 +330,7 @@ export default function EditorCanvas() {
     let gid = currentStrokeId.current[side]
     if (gid) {
       const ex = find(gid)!
+      // если слой кисти полностью погашен — оживим для нового мазка
       if (ex && ex.node.opacity() < 0.02) {
         ex.node.opacity(1)
         ex.meta.opacity = 1
@@ -342,7 +342,7 @@ export default function EditorCanvas() {
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isStrokes = true
     g.id(uid()); const id = g.id()
     const meta = baseMeta(`strokes ${seqs.strokes}`)
-    currentArt().add(g); g.zIndex(nextTopZ())
+    currentArt().add(g); g.moveToTop()
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, strokes: s.strokes + 1 }))
@@ -357,7 +357,7 @@ export default function EditorCanvas() {
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isErase = true
     g.id(uid()); const id = g.id()
     const meta = baseMeta(`erase ${seqs.erase}`)
-    currentArt().add(g); g.zIndex(nextTopZ())
+    currentArt().add(g); g.moveToTop()
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
     setLayers(p => [...p, newLay])
     setSeqs(s => ({ ...s, erase: s.erase + 1 }))
@@ -388,7 +388,7 @@ export default function EditorCanvas() {
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid()); const id = kimg.id()
         const meta = baseMeta(`image ${seqs.image}`)
-        currentArt().add(kimg); kimg.zIndex(nextTopZ())
+        currentArt().add(kimg); kimg.moveToTop()
         attachCommonHandlers(kimg, id)
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
         setSeqs(s => ({ ...s, image: s.image + 1 }))
@@ -413,7 +413,7 @@ export default function EditorCanvas() {
     })
     t.id(uid()); const id = t.id()
     const meta = baseMeta(`text ${seqs.text}`)
-    currentArt().add(t); t.zIndex(nextTopZ())
+    currentArt().add(t); t.moveToTop()
     attachCommonHandlers(t, id)
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
     setSeqs(s => ({ ...s, text: s.text + 1 }))
@@ -432,7 +432,7 @@ export default function EditorCanvas() {
     ;(n as any).id(uid())
     const id = (n as any).id?.() ?? uid()
     const meta = baseMeta(`shape ${seqs.shape}`)
-    currentArt().add(n as any); (n as any).zIndex?.(nextTopZ())
+    currentArt().add(n as any); (n as any).moveToTop?.()
     attachCommonHandlers(n, id)
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
     setSeqs(s => ({ ...s, shape: s.shape + 1 }))
@@ -555,7 +555,6 @@ export default function EditorCanvas() {
       t.getLayer()?.batchDraw()
       set({ tool: "move" as Tool })
       requestAnimationFrame(() => {
-        // гарантируем, что трансформер снова на тексте
         const id = (t as any).id?.() as string | undefined
         if (id) select(id)
         attachTransformer()
@@ -648,7 +647,7 @@ export default function EditorCanvas() {
     const newLay: AnyLayer = { id: (clone as any).id?.() ?? uid(), node: clone, side: src.side, meta: { ...src.meta, name: src.meta.name+" copy" }, type: src.type }
     attachCommonHandlers(clone, newLay.id)
     setLayers(p => [...p, newLay]); select(newLay.id)
-    clone.zIndex(nextTopZ())
+    ;(clone as any).moveToTop?.()
     artLayerRef.current?.batchDraw()
     bump()
   }
