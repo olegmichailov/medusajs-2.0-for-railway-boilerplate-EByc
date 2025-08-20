@@ -1,4 +1,4 @@
-]"use client"
+"use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Stage, Layer, Image as KImage, Transformer, Group as KGroup } from "react-konva"
