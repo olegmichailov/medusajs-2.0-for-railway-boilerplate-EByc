@@ -19,7 +19,7 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
-// динамический минимум ширины текста ~ одна буква
+// динамический минимум ширины текста ≈ одна буква
 const minLetterW = (t: Konva.Text) => Math.max(6, Math.round((t.fontSize() || 1) * 0.55))
 
 const EPS = 0.25
@@ -70,7 +70,7 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // тик UI (для синхры панелей)
+  // тик UI
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
@@ -108,6 +108,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
+  // blend не меняем для кисти/ластика
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -132,7 +133,6 @@ export default function EditorCanvas() {
   // ===== Transformer =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
-  const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -141,7 +141,6 @@ export default function EditorCanvas() {
 
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
-    resetBBoxFunc()
 
     const tr = trRef.current!
     if (disabled) {
@@ -152,6 +151,9 @@ export default function EditorCanvas() {
 
     tr.nodes([n])
     tr.rotateEnabled(true)
+    // Масштаб «из центра» для углов — это решает «не по центру увеличивается»
+    // и даёт стабильное поведение без прыжков.
+    tr.centeredScaling(true) // конва-апи
 
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
@@ -167,7 +169,7 @@ export default function EditorCanvas() {
         "middle-left","middle-right","top-center","bottom-center"
       ])
 
-      // 1) боковые хендлы → меняем ТОЛЬКО width (можно до ширины ~одной буквы)
+      // БОКОВЫЕ ХЕНДЛЫ: меняем только width, НЕ scale, НЕ fontSize
       ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
         const t = n as Konva.Text
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
@@ -178,51 +180,19 @@ export default function EditorCanvas() {
           const nextW = clamp(Math.round(w0 * ratioW), minLetterW(t), TEXT_MAX_W)
           if (Math.abs(nextW - (t.width() || 0)) > EPS) {
             t.width(nextW)
-            t.x(Math.round(cx - nextW / 2))
+            t.x(Math.round(cx - nextW / 2)) // сохраняем центр
           }
-          // не даём Konva масштабировать сам узел — мы всё сделали вручную
-          t.scaleX(1); t.scaleY(1)
+          t.scaleX(1); t.scaleY(1) // не даём копиться scale при боковых
           t.getLayer()?.batchDraw()
           requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-          return oldBox
+          return oldBox // отменяем реальный бокс — мы всё уже применили сами
         }
-        // остальные якоря — пропускаем (дадим обычный scale)
+        // углы и top/bottom — пропускаем (Transformer сделает scale сам, из центра)
         return newBox
       })
 
-      // 2) углы и вертикальные — обычный scale, но пропорционально по углам
-      const onTextTransform = () => {
-        const t = n as Konva.Text
-        const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
-        let sx = Math.abs(t.scaleX() || 1)
-        let sy = Math.abs(t.scaleY() || 1)
-
-        if (active === "top-left" || active === "top-right" || active === "bottom-left" || active === "bottom-right") {
-          const s = clamp(Math.max(sx, sy), 0.05, 20)
-          t.scaleX(s); t.scaleY(s)
-        } else {
-          // top/bottom-center — разрешаем растягивание по Y как есть, но не даём схлопнуться
-          sy = clamp(sy, 0.05, 20)
-          t.scaleY(sy)
-          t.scaleX(clamp(sx, 0.05, 20))
-        }
-        t.getLayer()?.batchDraw()
-        uiLayerRef.current?.batchDraw()
-      }
-
-      const onTextTransformEnd = () => {
-        const t = n as Konva.Text
-        // финальная нормализация
-        t.scaleX(Math.max(0.05, Math.abs(t.scaleX() || 1)))
-        t.scaleY(Math.max(0.05, Math.abs(t.scaleY() || 1)))
-        t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-      }
-
-      n.on("transform.textscale", onTextTransform)
-      n.on("transformend.textscale", onTextTransformEnd)
-
-      detachTextFix.current = () => { n.off(".textscale") }
+      // ничего не «нормализуем» в конце — scale остаётся, fontSize не трогаем
+      detachTextFix.current = () => { /* специально пусто — только guard снимаем выше */ }
     } else {
       // ——— НЕ ТЕКСТ ———
       tr.keepRatio(false)
@@ -292,7 +262,6 @@ export default function EditorCanvas() {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
-
       const n = node(selectedId)
       if (!n || tool !== "move") return
 
@@ -320,8 +289,7 @@ export default function EditorCanvas() {
       if (ex && ex.node.opacity() < 0.02) {
         ex.node.opacity(1)
         ex.meta.opacity = 1
-        artLayerRef.current?.batchDraw()
-        bump()
+        artLayerRef.current?.batchDraw(); bump()
       }
       return ex!
     }
@@ -489,11 +457,15 @@ export default function EditorCanvas() {
     t.opacity(0.01)
     t.getLayer()?.batchDraw()
 
+    // во время редактирования полностью отключаем трансформер
+    trRef.current?.nodes([]); uiLayerRef.current?.batchDraw()
+
     const ta = document.createElement("textarea")
     ta.value = t.text()
 
     const place = () => {
       const b = stContainer.getBoundingClientRect()
+      // clientRect относительно stage — более точно
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
       ta.style.left   = `${b.left + r.x * scale}px`
       ta.style.top    = `${b.top  + r.y * scale}px`
@@ -544,8 +516,7 @@ export default function EditorCanvas() {
       requestAnimationFrame(() => {
         const id = (t as any).id?.() as string | undefined
         if (id) select(id)
-        attachTransformer()
-        trRef.current?.nodes([t])
+        trRef.current?.nodes([t]) // вернуть трансформер
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
         bump()
@@ -686,7 +657,7 @@ export default function EditorCanvas() {
   const selectedProps =
     sel && isTextNode(sel.node) ? {
       text: sel.node.text(),
-      fontSize: Math.round(sel.node.fontSize()), // масштабируешь углами отдельно
+      fontSize: Math.round(sel.node.fontSize()), // слайдер — только базовый кегль, scale уголками отдельно
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
     }
@@ -811,6 +782,7 @@ export default function EditorCanvas() {
               <Transformer
                 ref={trRef}
                 rotateEnabled
+                centeredScaling
                 anchorSize={12}
                 borderStroke="black"
                 anchorStroke="black"
