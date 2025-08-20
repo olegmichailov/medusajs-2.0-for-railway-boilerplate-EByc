@@ -66,10 +66,6 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-// локальные лимиты для слайдера шрифта (без импортов)
-const MIN_FS = 8
-const MAX_FS = 800
-
 const stop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -93,7 +89,7 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// Квадратный ползунок + центрированный «фейдер»
+// Квадратный слайдер + центрированный визуальный трек (оверлей)
 const sliderCss = `
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
@@ -101,13 +97,8 @@ input[type="range"].ui{
 }
 input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
 input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].ui::-webkit-slider-thumb{
-  -webkit-appearance:none; appearance:none; width:14px; height:14px;
-  background:currentColor; border:0; border-radius:0;
-  /* чтобы «квадратик» был по центру нарисованной линии */
-  margin-top:-7px;
-}
-input[type="range"].ui::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
+input[type="range"].ui::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; background:currentColor; border:0; border-radius:0; }
+input[type="range"].ui::-moz-range-thumb{ width:16px; height:16px; background:currentColor; border:0; border-radius:0; }
 `
 
 export default function Toolbar(props: ToolbarProps) {
@@ -118,7 +109,7 @@ export default function Toolbar(props: ToolbarProps) {
     onDownloadFront, onDownloadBack, onClear, toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedFill, setSelectedStroke, setSelectedStrokeW,
-    setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
+    setSelectedText, setSelectedFontSize, setSelectedColor,
     mobileTopOffset, mobileLayers,
   } = props
 
@@ -143,6 +134,7 @@ export default function Toolbar(props: ToolbarProps) {
       window.removeEventListener("mouseup", onDragEnd)
     }
 
+    // upload
     const fileRef = useRef<HTMLInputElement>(null)
     const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       e.stopPropagation()
@@ -155,6 +147,7 @@ export default function Toolbar(props: ToolbarProps) {
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
+    // Трек (оверлей)
     const Track = ({ className }: { className?: string }) =>
       <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
 
@@ -262,7 +255,7 @@ export default function Toolbar(props: ToolbarProps) {
                   <div className="text-[10px] w-12">Font size</div>
                   <div className="relative flex-1 text-black">
                     <input
-                      type="range" min={MIN_FS} max={MAX_FS} step={1}
+                      type="range" min={TEXT_MIN_FS} max={TEXT_MAX_FS} step={1}
                       value={selectedProps.fontSize ?? 96}
                       onChange={(e)=>setSelectedFontSize(parseInt(e.target.value, 10))}
                       className="ui"
