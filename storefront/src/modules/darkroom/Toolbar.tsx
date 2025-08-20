@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useRef, useState } from "react"
@@ -68,7 +67,7 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-/** Полная блокировка всплытия — для 1-й строки/оверлеев (чтобы не ловил Stage) */
+/** Полная блокировка всплытия (для 1-й/3-й строк) */
 const stopAll = {
   onPointerDownCapture: (e: any) => e.stopPropagation(),
   onPointerMoveCapture: (e: any) => e.stopPropagation(),
@@ -80,7 +79,7 @@ const stopAll = {
   onMouseMoveCapture:   (e: any) => e.stopPropagation(),
   onMouseUpCapture:     (e: any) => e.stopPropagation(),
 }
-/** Без блокировки move — для строки настроек, чтобы range тянулся ПЛАВНО */
+/** Без блокировки move — для строки настроек (range тянется плавно) */
 const stopClicksOnly = {
   onPointerDownCapture: (e: any) => e.stopPropagation(),
   onPointerUpCapture:   (e: any) => e.stopPropagation(),
@@ -90,7 +89,7 @@ const stopClicksOnly = {
   onMouseUpCapture:     (e: any) => e.stopPropagation(),
 }
 
-/** палитра (десктоп — как было) */
+/** палитра для десктопа */
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -324,7 +323,7 @@ export default function Toolbar(props: ToolbarProps) {
     setTool(t as Tool)
   }
 
-  /** Вторая строка, зависящая от инструмента */
+  /** Вторая строка, зависит от активного инструмента */
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
@@ -361,20 +360,18 @@ export default function Toolbar(props: ToolbarProps) {
     }
 
     if (tool === "text") {
-      // левая половина — input; правая — фейдер
+      // левая половина — КОРОТКОЕ ПОЛЕ ВВОДА ТЕКСТА; правая — фейдер размера
       return (
         <div className="px-2 py-1 flex items-center gap-2" {...stopClicksOnly} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="flex-1 flex items-center gap-2">
-            <div className="text-[10px] w-12">Size</div>
+            <div className="text-[10px] w-10">Text</div>
             <input
-              type="number" inputMode="numeric" pattern="[0-9]*"
-              min={8} max={800} step={1}
-              value={Math.round(fontSize)}
-              onChange={(e)=> {
-                const v = parseInt(e.target.value || "0", 10)
-                if (!Number.isNaN(v)) props.setSelectedFontSize(Math.max(8, Math.min(800, v)))
-              }}
-              className="h-10 w-20 border border-black bg-white px-2 text-sm"
+              type="text"
+              value={props.selectedProps.text ?? ""}
+              onChange={(e)=> props.setSelectedText(e.target.value)}
+              placeholder="GMORKL"
+              maxLength={20}
+              className="h-10 flex-1 min-w-0 border border-black bg-white px-2 text-sm"
             />
           </div>
           <div className="flex-1 relative text-black">
@@ -385,7 +382,7 @@ export default function Toolbar(props: ToolbarProps) {
       )
     }
 
-    // В Image и Shapes — одинаковый набор кнопок-фигур
+    // В Image и Shapes — одинаковый набор фигур (чтобы не было пустоты)
     if (tool === "image" || tool === "shape") {
       return (
         <div className="px-2 py-1 flex items-center gap-1" {...stopClicksOnly}>
@@ -484,7 +481,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       </div>
 
-      {/* input для Upload */}
+      {/* input для Upload (дублируем внизу, чтобы точно был в DOM) */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
     </>
   )
