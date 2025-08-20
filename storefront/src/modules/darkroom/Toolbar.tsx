@@ -66,6 +66,20 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
+// единый квадратный ползунок, идеально по центру
+const sliderCss = `
+input[type="range"].ui{
+  -webkit-appearance:none; appearance:none;
+  display:block; width:100%; height:24px; background:transparent; color:currentColor; margin:0; padding:0;
+}
+input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
+input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
+input[type="range"].ui::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:0;
+}
+input[type="range"].ui::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
+`
+
 const stop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -88,18 +102,6 @@ const PALETTE = [
   "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
-
-// Квадратный слайдер + центрированный визуальный трек (оверлей)
-const sliderCss = `
-input[type="range"].ui{
-  -webkit-appearance:none; appearance:none;
-  width:100%; height:24px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
-}
-input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
-input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].ui::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; background:currentColor; border:0; border-radius:0; }
-input[type="range"].ui::-moz-range-thumb{ width:16px; height:16px; background:currentColor; border:0; border-radius:0; }
-`
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -147,7 +149,6 @@ export default function Toolbar(props: ToolbarProps) {
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
-    // Трек (оверлей)
     const Track = ({ className }: { className?: string }) =>
       <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
 
@@ -169,7 +170,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers */}
+            {/* инструменты + layers */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -192,7 +193,7 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...stop}/>
             </div>
 
-            {/* row 2 — Color + Brush/Eraser size */}
+            {/* Color + Brush/Eraser size */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <input
