@@ -1,4 +1,3 @@
-// LayersPanel.tsx
 "use client"
 
 import React, { useRef, useState } from "react"
@@ -18,7 +17,7 @@ const blends = [
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes" | "erase"
+  type: "image" | "shape" | "text" | "strokes"
   visible: boolean
   locked: boolean
   blend: string
@@ -38,10 +37,10 @@ type Props = {
   onChangeOpacity: (id: string, opacity: number) => void
 }
 
-/** Desktop Layers — dnd только за «решётку», при перетаскивании:
- *  1) drag-image = вся строка с тенью (понятно, что переносим)
- *  2) подсветка места вставки синей линией (как было)
- *  3) слайдер opacity 0–100, квадратный, трек по центру
+/**
+ * Desktop Layers: DnD только за "решётку".
+ * Во время drag — подсветка всей строки (понятно что переносится).
+ * Опасити 0–100, центрированный трек и квадратный ползунок.
  */
 export default function LayersPanel({
   items,
@@ -58,12 +57,11 @@ export default function LayersPanel({
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const ghostRef = useRef<HTMLDivElement | null>(null)
 
   const sliderCss = `
   input[type="range"].lp{
     -webkit-appearance:none; appearance:none;
-    width:100%; height:22px; background:transparent; color:currentColor; margin:0; padding:0;
+    display:block; width:100%; height:22px; background:transparent; color:currentColor; margin:0; padding:0;
   }
   input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
   input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
@@ -83,41 +81,10 @@ export default function LayersPanel({
     onMouseUp:     (e: any) => e.stopPropagation(),
   }
 
-  const makeGhost = (row: HTMLDivElement) => {
-    const rect = row.getBoundingClientRect()
-    const ghost = row.cloneNode(true) as HTMLDivElement
-    ghost.style.position = "fixed"
-    ghost.style.left = "0px"
-    ghost.style.top = "-9999px"
-    ghost.style.width = `${rect.width}px`
-    ghost.style.height = `${rect.height}px`
-    ghost.style.pointerEvents = "none"
-    ghost.style.opacity = "0.9"
-    ghost.style.boxShadow = "0 10px 28px rgba(0,0,0,.35)"
-    ghost.style.background = getComputedStyle(row).backgroundColor || "white"
-    document.body.appendChild(ghost)
-    ghostRef.current = ghost
-    return { ghost, rect }
-  }
-
-  const cleanupGhost = () => {
-    if (ghostRef.current) {
-      ghostRef.current.remove()
-      ghostRef.current = null
-    }
-  }
-
   const handleDragStart = (id: string, e: React.DragEvent) => {
     setDragId(id)
     e.dataTransfer.setData("text/plain", id)
     e.dataTransfer.effectAllowed = "move"
-
-    const row = rowRefs.current[id]
-    if (row) {
-      const { ghost, rect } = makeGhost(row)
-      // drag image — вся строка
-      e.dataTransfer.setDragImage(ghost, Math.min(40, e.clientX - rect.left), Math.min(rect.height / 2, e.clientY - rect.top))
-    }
   }
 
   const handleDragOver = (id: string, e: React.DragEvent) => {
@@ -131,18 +98,22 @@ export default function LayersPanel({
   const handleDrop = (destId: string, e: React.DragEvent) => {
     e.preventDefault()
     const src = dragId || e.dataTransfer.getData("text/plain")
-    if (!src || src === destId) { setDragId(null); setDragOver(null); cleanupGhost(); return }
+    if (!src || src === destId) {
+      setDragId(null)
+      setDragOver(null)
+      return
+    }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
     const place: "before" | "after" =
       rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
-    setDragId(null); setDragOver(null); cleanupGhost()
+    setDragId(null)
+    setDragOver(null)
   }
 
   const handleDragEnd = () => {
     setDragId(null)
     setDragOver(null)
-    cleanupGhost()
   }
 
   return (
@@ -160,9 +131,6 @@ export default function LayersPanel({
                 : "ring-2 ring-blue-500 -mb-[1px]"
               : ""
 
-          const rowColor = isActive ? "text-white" : "text-black"
-          const borderColor = isActive ? "border-white/40" : "border-black/20"
-
           return (
             <div
               key={it.id}
@@ -170,14 +138,15 @@ export default function LayersPanel({
               onDragOver={(e) => handleDragOver(it.id, e)}
               onDrop={(e) => handleDrop(it.id, e)}
               className={clx(
-                "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
+                "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none relative",
                 isActive ? "bg-black text-white" : "bg-white text-black",
-                highlight
+                highlight,
+                dragId === it.id ? "after:absolute after:inset-0 after:bg-black/5 after:pointer-events-none" : ""
               )}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* ТОЛЬКО «решётка» draggable, но ghost — вся строка */}
+              {/* drag handle — только он draggable */}
               <div
                 className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
                 draggable
@@ -186,7 +155,7 @@ export default function LayersPanel({
                 onMouseDown={(e)=>e.stopPropagation()}
                 title="Reorder"
               >
-                <GripVertical className={clx("w-3.5 h-3.5", rowColor)} />
+                <GripVertical className={clx("w-3.5 h-3.5", isActive ? "text-white" : "text-black")} />
               </div>
 
               <div className="text-xs flex-1 truncate">{it.name}</div>
@@ -195,8 +164,7 @@ export default function LayersPanel({
               <select
                 className={clx(
                   "h-8 px-2 border rounded-none text-xs",
-                  isActive ? "bg-black text-white" : "bg-white",
-                  borderColor
+                  isActive ? "bg-black text-white border-white/40" : "bg-white border-black/20"
                 )}
                 value={it.blend}
                 onChange={(e) => onChangeBlend(it.id, e.target.value)}
@@ -207,7 +175,7 @@ export default function LayersPanel({
                 ))}
               </select>
 
-              {/* Opacity 0–100, квадратный */}
+              {/* Opacity (0–100) */}
               <div className="relative w-24" onMouseDown={(e)=>e.stopPropagation()}>
                 <input
                   type="range" min={0} max={100} step={1}
@@ -220,39 +188,39 @@ export default function LayersPanel({
 
               {/* controls */}
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
                 title={it.visible ? "Hide" : "Show"}
               >
-                {it.visible ? <Eye className={clx("w-4 h-4", rowColor)}/> : <EyeOff className={clx("w-4 h-4", rowColor)}/>}
+                {it.visible ? <Eye className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/> : <EyeOff className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/>}
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
                 title={it.locked ? "Unlock" : "Lock"}
               >
-                {it.locked ? <Lock className={clx("w-4 h-4", rowColor)}/> : <Unlock className={clx("w-4 h-4", rowColor)}/>}
+                {it.locked ? <Lock className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/> : <Unlock className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/>}
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
                 title="Duplicate"
               >
-                <Copy className={clx("w-4 h-4", rowColor)}/>
+                <Copy className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/>
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
                 title="Delete"
               >
-                <Trash2 className={clx("w-4 h-4", rowColor)}/>
+                <Trash2 className={clx("w-4 h-4", isActive ? "text-white" : "text-black")}/>
               </button>
             </div>
           )
