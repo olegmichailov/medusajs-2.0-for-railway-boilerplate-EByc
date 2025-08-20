@@ -64,22 +64,17 @@ type ToolbarProps = {
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
-const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none touch-manipulation"
+const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-const stopAll = {
-  onPointerDownCapture: (e: any) => e.stopPropagation(),
-  onPointerMoveCapture: (e: any) => e.stopPropagation(),
-  onPointerUpCapture:   (e: any) => e.stopPropagation(),
-  onTouchStartCapture:  (e: any) => e.stopPropagation(),
-  onTouchMoveCapture:   (e: any) => e.stopPropagation(),
-  onTouchEndCapture:    (e: any) => e.stopPropagation(),
-  onMouseDownCapture:   (e: any) => e.stopPropagation(),
-  onMouseMoveCapture:   (e: any) => e.stopPropagation(),
-  onMouseUpCapture:     (e: any) => e.stopPropagation(),
+/** НЕ используем capture на move/up — иначе range на iOS не тянется */
+const stopTap = {
+  onPointerDown: (e: any) => e.stopPropagation(),
+  onTouchStart:  (e: any) => e.stopPropagation(),
+  onMouseDown:   (e: any) => e.stopPropagation(),
 }
 
-/** Десктопная палитра — как было */
+/** Палитра (десктоп — как было) */
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -91,58 +86,53 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-/** Кастомный фейдер — гладкий, с pointer capture */
-function Fader({
-  value, min, max, onChange, className
-}: { value:number; min:number; max:number; onChange:(n:number)=>void; className?:string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const dragging = useRef(false)
-  const raf = useRef<number| null>(null)
+/** Слайдеры.
+ *  — десктоп: маленький аккуратный (как раньше)
+ *  — мобайл: крупный квадрат под палец
+ */
+const sliderCss = `
+:root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
+input[type="range"].ui{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+  touch-action:auto;
+}
+input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:var(--thumb-desktop); height:var(--thumb-desktop);
+  background:currentColor; border:0; border-radius:0;
+  margin-top: calc((var(--track) - var(--thumb-desktop))/2);
+}
+input[type="range"].ui::-moz-range-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-moz-range-thumb{
+  width:var(--thumb-desktop); height:var(--thumb-desktop); background:currentColor; border:0; border-radius:0;
+}
+/* mobile thumb больше */
+@media (pointer:coarse){
+  input[type="range"].ui::-webkit-slider-thumb{
+    width:var(--thumb-mobile); height:var(--thumb-mobile);
+    margin-top: calc((var(--track) - var(--thumb-mobile))/2);
+  }
+  input[type="range"].ui::-moz-range-thumb{ width:var(--thumb-mobile); height:var(--thumb-mobile); }
+}
+`
 
-  const pct = (value - min) / (max - min)
-  const onPos = (clientX:number) => {
-    const el = ref.current!
-    const r = el.getBoundingClientRect()
-    const x = clamp(clientX - r.left, 0, r.width)
-    const v = min + (x / Math.max(1, r.width)) * (max - min)
-    if (raf.current) cancelAnimationFrame(raf.current)
-    raf.current = requestAnimationFrame(()=> onChange(v))
-  }
-
-  const onPointerDown: React.PointerEventHandler = (e) => {
-    dragging.current = true
-    ref.current?.setPointerCapture(e.pointerId)
-    onPos(e.clientX)
-  }
-  const onPointerMove: React.PointerEventHandler = (e) => {
-    if (!dragging.current) return
-    onPos(e.clientX)
-  }
-  const onPointerUp: React.PointerEventHandler = (e) => {
-    dragging.current = false
-    ref.current?.releasePointerCapture?.(e.pointerId)
-  }
-
+function RangeCtl(props:{
+  value:number, min:number, max:number, step?:number|"any",
+  onChange:(n:number)=>void, className?:string
+}){
   return (
-    <div
-      ref={ref}
-      className={clx("relative h-10 select-none", className)}
-      style={{ touchAction: "none" }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-    >
-      {/* трек по центру */}
-      <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/90" />
-      {/* бегунок — большой квадрат */}
-      <div
-        className="absolute top-1/2 -translate-y-1/2 h-7 w-7 bg-black"
-        style={{ left: `calc(${Math.round(pct*100)}% - 14px)` }}
-      />
-    </div>
+    <input
+      type="range"
+      className={clx("ui", props.className)}
+      value={props.value}
+      min={props.min} max={props.max}
+      step={props.step ?? "any"}
+      onInput={(e)=>props.onChange(parseFloat((e.currentTarget as HTMLInputElement).value))}
+      onChange={(e)=>props.onChange(parseFloat(e.currentTarget.value))}
+    />
   )
 }
-function clamp(n:number, a:number, b:number){ return Math.max(a, Math.min(b, n)) }
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -185,10 +175,15 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
+    const Track = ({ className }: { className?: string }) =>
+      <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80 z-0", className)} />
+
     return (
-      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }}>
+      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} {...stopTap}>
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
+
         {/* header */}
-        <div className="flex items-center justify-between border-b border-black/10" onMouseDown={(e)=>e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
             <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
@@ -200,7 +195,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
 
         {open && (
-          <div className="p-2 space-y-2" {...stopAll}>
+          <div className="p-2 space-y-2">
             {/* row 1 — инструменты + layers */}
             <div className="flex">
               {[
@@ -221,7 +216,7 @@ export default function Toolbar(props: ToolbarProps) {
               <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
                 <LayersIcon className={ico}/>
               </button>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
             </div>
 
             {/* row 2 — Color + Brush/Eraser size */}
@@ -230,17 +225,18 @@ export default function Toolbar(props: ToolbarProps) {
               <input
                 type="color"
                 value={brushColor}
-                onChange={(e)=>{ props.setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
+                onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
                 className="w-6 h-6 border border-black p-0"
                 disabled={tool==="erase"}
               />
-              <div className="flex-1">
-                <Fader min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}/>
+              <div className="relative flex-1 text-black">
+                <RangeCtl min={1} max={200} value={brushSize} onChange={(v)=>setBrushSize(Math.max(1, v))}/>
+                <Track className="bg-black" />
               </div>
-              <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
+              <div className="text-xs w-10 text-right">{brushSize|0}</div>
             </div>
 
-            {/* палитра (десктоп, как было) */}
+            {/* палитра */}
             <div className="grid grid-cols-12 gap-1">
               {PALETTE.map((c)=>(
                 <button
@@ -252,7 +248,7 @@ export default function Toolbar(props: ToolbarProps) {
               ))}
             </div>
 
-            {/* SHAPES вставка (десктоп) */}
+            {/* SHAPES */}
             <div className="pt-1">
               <div className="text-[10px] mb-1">Shapes</div>
               <div className="flex">
@@ -264,7 +260,7 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* SELECTED (десктоп) */}
+            {/* SELECTED */}
             {props.selectedKind === "text" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
@@ -276,13 +272,30 @@ export default function Toolbar(props: ToolbarProps) {
                 />
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Font size</div>
-                  <div className="flex-1">
-                    <Fader min={8} max={800} value={props.selectedProps.fontSize ?? 96} onChange={(v)=>props.setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+                  <div className="relative flex-1 text-black">
+                    <RangeCtl
+                      min={8} max={800}
+                      value={props.selectedProps.fontSize ?? 96}
+                      onChange={(v)=>props.setSelectedFontSize(Math.max(8, Math.min(800, v)))}
+                    />
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
                   </div>
                   <div className="text-xs w-10 text-right">{props.selectedProps.fontSize ?? 96}</div>
                 </div>
               </div>
             )}
+
+            {/* FRONT/BACK + downloads */}
+            <div className="grid grid-cols-2 gap-2">
+              <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
+              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadFront}>
+                <Download className={ico}/> <span className="text-xs">Download</span>
+              </button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadBack}>
+                <Download className={ico}/> <span className="text-xs">Download</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -291,6 +304,8 @@ export default function Toolbar(props: ToolbarProps) {
 
   // =================== MOBILE (строго 3 строки) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
+
+  // permanent hidden input — upload стабильно
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -300,17 +315,21 @@ export default function Toolbar(props: ToolbarProps) {
 
   const tapTool = (t: "move"|"brush"|"erase"|"text"|"image"|"shape") => {
     if (t === "text") { setTool("text"); onAddText(); return }
-    if (t === "image") { setTool("image"); requestAnimationFrame(()=> fileRef.current?.click()); return }
+    if (t === "image") { setTool("image"); requestAnimationFrame(()=>fileRef.current?.click()); return }
     setTool(t as Tool)
   }
 
-  /** Вторая строка: зависит от активного tool */
+  const Track = () => (
+    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+  )
+
+  /** Вторая строка — только активный инструмент */
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
     if (tool === "brush") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopTap}>
           <div className="text-[10px]">Color</div>
           <input
             type="color"
@@ -318,8 +337,9 @@ export default function Toolbar(props: ToolbarProps) {
             onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) setSelectedColor(e.target.value) }}
             className="w-8 h-8 border border-black p-0"
           />
-          <div className="flex-1">
-            <Fader min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -328,10 +348,11 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "erase") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopTap}>
           <div className="text-[10px] w-12">Size</div>
-          <div className="flex-1">
-            <Fader min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -340,27 +361,27 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "text") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
-          {/* левая половина — ввод текста */}
+        <div className="px-2 py-1 flex items-center gap-2" {...stopTap}>
+          {/* слева — поле ввода текста */}
           <input
-            type="text"
             value={props.selectedProps.text ?? ""}
-            onChange={(e)=> props.setSelectedText(e.target.value)}
-            placeholder="Enter text"
-            className="flex-1 h-10 border border-black px-2 text-sm"
+            onChange={(e)=>props.setSelectedText(e.target.value)}
+            placeholder="Type text"
+            className="flex-1 h-10 border border-black px-2 text-sm bg-white"
           />
-          {/* правая половина — фейдер FS */}
-          <div className="flex-1">
-            <Fader min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+          {/* справа — фейдер font-size */}
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+            <Track />
           </div>
+          <div className="text-xs w-10 text-right">{fontSize|0}</div>
         </div>
       )
     }
 
-    if (tool === "image") {
-      // чтобы не было пустоты — показываем шейпы
+    if (tool === "image" || tool === "shape") {
       return (
-        <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-1" {...stopTap}>
           <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
           <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
           <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
@@ -370,25 +391,18 @@ export default function Toolbar(props: ToolbarProps) {
       )
     }
 
-    // tool === "shape"
-    return (
-      <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
-        <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-      </div>
-    )
+    // move — пусто
+    return <div className="h-12" />
   }
 
   return (
     <>
+      {/* hidden input — всегда смонтирован */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
-      {/* LAYERS шторка (мобайл) — чутка ниже, чтобы не «перегораживала» */}
+      {/* LAYERS шторка (мобайл) */}
       {layersOpenM && (
-        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 120 }} {...stopAll}>
+        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }} {...stopTap}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] tracking-widest">LAYERS</div>
@@ -402,7 +416,6 @@ export default function Toolbar(props: ToolbarProps) {
                     "flex items-center gap-2 border border-black px-2 py-1 bg-white",
                     props.mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
                   )}
-                  {...stopAll}
                 >
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onSelect(l.id)} title="Select">{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
@@ -426,7 +439,8 @@ export default function Toolbar(props: ToolbarProps) {
       )}
 
       {/* ===== 1-я строка: TOOLS / LAYERS / CLEAR ===== */}
-      <div className="fixed inset-x-0 bottom-[128px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      <div className="fixed inset-x-0 bottom-[144px] z-50 bg-white/95 border-t border-black/10" {...stopTap}>
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
           <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="move" ? activeBtn : "bg-white")}  onClick={()=>tapTool("move")}><Move className={ico}/></button>
           <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="brush"? activeBtn : "bg-white")} onClick={()=>tapTool("brush")}><Brush className={ico}/></button>
@@ -445,12 +459,12 @@ export default function Toolbar(props: ToolbarProps) {
       </div>
 
       {/* ===== 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ ===== */}
-      <div className="fixed inset-x-0 bottom-[80px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      <div className="fixed inset-x-0 bottom-[96px] z-50 bg-white/95 border-t border-black/10" {...stopTap}>
         <SettingsRow />
       </div>
 
       {/* ===== 3-я строка: FRONT/BACK + download ===== */}
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" {...stopTap}>
         <div className="px-2 pb-2 pt-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
