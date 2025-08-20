@@ -29,26 +29,32 @@ type Props = {
   getPreview?: (id: string) => string | null
 }
 
-const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
+const blends = [
+  "source-over","multiply","screen","overlay","darken","lighten","xor",
+] as const
 
+// трек по центру + квадратный бегунок (по центру)
 const sliderCss = `
 input[type="range"].lp{
   -webkit-appearance:none; appearance:none;
-  width:100%; height:20px; background:transparent; color:currentColor; margin:0; padding:0; touch-action:none;
+  width:100%; height:18px; background:transparent; color:currentColor; margin:0; padding:0;
 }
-input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
-input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:0; }
+input[type="range"].lp::-webkit-slider-runnable-track{ height:2px; background:transparent; }
+input[type="range"].lp::-moz-range-track{ height:2px; background:transparent; }
+input[type="range"].lp::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0;
+  margin-top:-6px; /* центрируем квадрат относительно 2px трека */
+}
 input[type="range"].lp::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
 `
 
 export default function LayersPanel(props: Props) {
-  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete,
-    onDuplicate, onReorder, onChangeBlend, onChangeOpacity, getPreview } = props
+  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate, onReorder, onChangeBlend, onChangeOpacity, getPreview } = props
 
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const handleRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const byId = useMemo(() => {
     const m: Record<string, LayerItem> = {}
@@ -56,16 +62,17 @@ export default function LayersPanel(props: Props) {
     return m
   }, [items])
 
+  // Только за «ручку» (Grip) начинаем drag — чтобы опции/фейдеры не конфликтовали
   const startDrag = (e: React.DragEvent, id: string) => {
-    const target = e.target as HTMLElement
-    if (target.closest('[data-no-drag="1"]')) { e.preventDefault(); return }
-
+    if ((e.target as HTMLElement)?.getAttribute("data-handle") !== "1") return
     setDragId(id)
     e.dataTransfer.effectAllowed = "move"
     e.dataTransfer.setData("text/plain", id)
 
-    // кастомный drag image по центру — чтобы «не уезжал»
-    const src = byId[id]?.thumb ?? (typeof getPreview === "function" ? getPreview(id) : null)
+    const src =
+      byId[id]?.thumb ??
+      (typeof getPreview === "function" ? getPreview(id) : null)
+
     if (src) {
       const img = new Image()
       img.src = src
@@ -89,6 +96,7 @@ export default function LayersPanel(props: Props) {
   }
 
   const over = (e: React.DragEvent, id: string) => {
+    if (!dragId) return
     e.preventDefault()
     const rect = rowRefs.current[id]?.getBoundingClientRect()
     if (!rect) return
@@ -101,22 +109,20 @@ export default function LayersPanel(props: Props) {
     const src = dragId || e.dataTransfer.getData("text/plain")
     if (!src || src === destId) { cancelDrag(); return }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
-    const place: "before" | "after" = rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
+    const place: "before" | "after" =
+      rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
     cancelDrag()
   }
 
-  const cancelDrag = () => {
-    setDragId(null)
-    setDragOver(null)
-  }
+  const cancelDrag = () => { setDragId(null); setDragOver(null) }
 
   return (
-    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black bg-white shadow-xl rounded-none" onMouseDown={(e)=>e.stopPropagation()}>
+    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black bg-white shadow-xl rounded-none">
       <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase tracking-widest">Layers</div>
 
-      <div className="max-h-[64vh] overflow-auto p-2 space-y-1" data-no-drag="1">
+      <div className="max-h-[64vh] overflow-auto p-2 space-y-1">
         {items.map((it) => {
           const isActive = selectId === it.id
           const hl =
@@ -135,23 +141,29 @@ export default function LayersPanel(props: Props) {
                 isActive ? "bg-black text-white" : "bg-white text-black hover:bg-black/[0.04]",
                 hl
               )}
-              draggable
-              onDragStart={(e)=>startDrag(e, it.id)}
               onDragOver={(e)=>over(e, it.id)}
+              onDragEnter={(e)=>over(e, it.id)}
               onDrop={(e)=>drop(e, it.id)}
               onDragEnd={cancelDrag}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              <div className="w-8 h-8 grid place-items-center pointer-events-none">
-                {it.thumb
-                  ? <img src={it.thumb} alt="" className="max-w-full max-h-full object-contain" />
-                  : <GripVertical className="w-3.5 h-3.5 opacity-70" />
-                }
+              {/* хэндл для dnd */}
+              <div
+                ref={(el)=>handleRefs.current[it.id]=el}
+                data-handle="1"
+                className="w-8 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
+                draggable
+                onDragStart={(e)=>startDrag(e, it.id)}
+                onDragEnd={cancelDrag}
+                title="Drag to reorder"
+              >
+                <GripVertical className="w-4 h-4 opacity-70" />
               </div>
 
-              <div className="text-xs flex-1 truncate" data-no-drag="1">{it.name}</div>
+              <div className="text-xs flex-1 truncate">{it.name}</div>
 
+              {/* Blend */}
               <select
                 className={clx(
                   "h-8 px-2 border rounded-none text-xs",
@@ -164,6 +176,7 @@ export default function LayersPanel(props: Props) {
                 {blends.map((b) => (<option key={b} value={b}>{b}</option>))}
               </select>
 
+              {/* Opacity */}
               <div className="relative w-24" data-no-drag="1">
                 <input
                   type="range" min={5} max={100} step={1}
@@ -171,22 +184,47 @@ export default function LayersPanel(props: Props) {
                   onChange={(e)=> onChangeOpacity(it.id, Math.max(5, parseInt(e.target.value,10))/100)}
                   className="lp"
                 />
-                <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", isActive ? "bg-white" : "bg-black")} />
+                <div
+                  className={clx(
+                    "pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80",
+                    isActive ? "bg-white" : "bg-black"
+                  )}
+                />
               </div>
 
-              <button className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")} onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }} title={it.visible ? "Hide" : "Show"} data-no-drag="1">
+              <button
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
+                onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
+                title={it.visible ? "Hide" : "Show"}
+                data-no-drag="1"
+              >
                 {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
               </button>
 
-              <button className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")} onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }} title={it.locked ? "Unlock" : "Lock"} data-no-drag="1">
+              <button
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
+                onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
+                title={it.locked ? "Unlock" : "Lock"}
+                data-no-drag="1"
+              >
                 {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
               </button>
 
-              <button className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")} onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }} title="Duplicate" data-no-drag="1">
+              <button
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
+                onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
+                title="Duplicate"
+                data-no-drag="1"
+              >
                 <Copy className="w-4 h-4"/>
               </button>
 
-              <button className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")} onClick={(e) => { e.stopPropagation(); onDelete(it.id) }} title="Delete" data-no-drag="1">
+              <button
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
+                onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
+                title="Delete"
+                data-no-drag="1"
+              >
                 <Trash2 className="w-4 h-4"/>
               </button>
             </div>
