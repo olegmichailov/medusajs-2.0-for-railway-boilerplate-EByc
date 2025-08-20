@@ -4,7 +4,6 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
-/** Допустимые режимы смешивания */
 const blends = [
   "source-over",
   "multiply",
@@ -15,7 +14,6 @@ const blends = [
   "xor",
 ] as const
 
-/** Элемент списка слоёв (данные приходят из EditorCanvas) */
 export type LayerItem = {
   id: string
   name: string
@@ -23,7 +21,7 @@ export type LayerItem = {
   visible: boolean
   locked: boolean
   blend: string
-  opacity: number // 0..1
+  opacity: number
 }
 
 type Props = {
@@ -36,10 +34,10 @@ type Props = {
   onDuplicate: (id: string) => void
   onReorder: (srcId: string, destId: string, place: "before" | "after") => void
   onChangeBlend: (id: string, blend: string) => void
-  onChangeOpacity: (id: string, opacity: number) => void // ожидает 0..1
+  onChangeOpacity: (id: string, opacity: number) => void
 }
 
-/** Панель слоёв (десктоп) */
+/** Desktop Layers */
 export default function LayersPanel({
   items,
   selectId,
@@ -56,23 +54,18 @@ export default function LayersPanel({
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // Квадратный слайдер + центрированный кастом-трек
+  // квадратные фейдеры, центрированный трек
   const sliderCss = `
   input[type="range"].lp{
     -webkit-appearance:none; appearance:none;
-    width:100%; height:22px; background:transparent; color:currentColor; margin:0; padding:0;
+    width:100%; height:18px; background:transparent; color:currentColor; margin:0; padding:0;
   }
   input[type="range"].lp::-webkit-slider-runnable-track{ height:0; background:transparent; }
   input[type="range"].lp::-moz-range-track{ height:0; background:transparent; }
-  input[type="range"].lp::-webkit-slider-thumb{
-    -webkit-appearance:none; appearance:none; width:12px; height:12px; background:currentColor; border:0; border-radius:0;
-  }
-  input[type="range"].lp::-moz-range-thumb{
-    width:12px; height:12px; background:currentColor; border:0; border-radius:0;
-  }
+  input[type="range"].lp::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:-2px; }
+  input[type="range"].lp::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
   `
 
-  // Стопим события на интерактивных элементах, чтобы не мешать DnD
   const stop = {
     onPointerDown: (e: any) => e.stopPropagation(),
     onPointerMove: (e: any) => e.stopPropagation(),
@@ -128,21 +121,12 @@ export default function LayersPanel({
       <div className="max-h-[64vh] overflow-auto p-2 space-y-1">
         {items.map((it) => {
           const isActive = selectId === it.id
-          const isDraggingThis = dragId === it.id
-
-          // Подсветка места вставки (тонкая полоса сверху/снизу у целевой строки)
-          const insertLine =
+          const highlight =
             dragOver && dragOver.id === it.id
               ? dragOver.place === "before"
-                ? "before:content-[''] before:absolute before:left-0 before:right-0 before:top-0 before:h-[2px] before:bg-blue-500"
-                : "after:content-['']  after:absolute  after:left-0  after:right-0  after:bottom-0 after:h-[2px] after:bg-blue-500"
+                ? "ring-2 ring-blue-500 -mt-[1px]"
+                : "ring-2 ring-blue-500 -mb-[1px]"
               : ""
-
-          // Тень «перетаскиваемого» элемента — на всю строку
-          const draggingShadow = isDraggingThis ? "ring-2 ring-blue-500" : ""
-
-          const rowColor = isActive ? "text-white" : "text-black"
-          const borderColor = isActive ? "border-white/40" : "border-black/20"
 
           return (
             <div
@@ -151,15 +135,15 @@ export default function LayersPanel({
               onDragOver={(e) => handleDragOver(it.id, e)}
               onDrop={(e) => handleDrop(it.id, e)}
               className={clx(
-                "relative flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none",
+                "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none transition-shadow",
                 isActive ? "bg-black text-white" : "bg-white text-black",
-                insertLine,
-                draggingShadow
+                highlight,
+                dragId===it.id ? "shadow-[0_12px_28px_rgba(0,0,0,0.35)]" : ""
               )}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* drag handle — ТОЛЬКО он draggable */}
+              {/* drag handle */}
               <div
                 className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
                 draggable
@@ -168,87 +152,76 @@ export default function LayersPanel({
                 onMouseDown={(e)=>e.stopPropagation()}
                 title="Reorder"
               >
-                <GripVertical className={clx("w-3.5 h-3.5", rowColor)} />
+                <GripVertical className="w-3.5 h-3.5" />
               </div>
 
-              {/* Имя слоя */}
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
               {/* Blend */}
               <select
                 className={clx(
                   "h-8 px-2 border rounded-none text-xs",
-                  isActive ? "bg-black text-white" : "bg-white",
-                  borderColor
+                  isActive ? "bg-black text-white border-white/40" : "bg-white border-black/20"
                 )}
                 value={it.blend}
                 onChange={(e) => onChangeBlend(it.id, e.target.value)}
                 onMouseDown={(e)=>e.stopPropagation()}
-                {...stop}
               >
                 {blends.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
 
-              {/* Opacity 0–100 */}
-              <div className="relative w-28" onMouseDown={(e)=>e.stopPropagation()}>
+              {/* Opacity */}
+              <div className="relative w-24" onMouseDown={(e)=>e.stopPropagation()}>
                 <input
-                  type="range" min={0} max={100} step={1}
+                  type="range" min={5} max={100} step={1}
                   value={Math.round(it.opacity * 100)}
-                  onChange={(e)=> onChangeOpacity(it.id, Math.max(0, Math.min(100, parseInt(e.target.value,10)))/100)}
+                  onChange={(e)=> onChangeOpacity(it.id, Math.max(5, parseInt(e.target.value,10))/100)}
                   className="lp"
-                  {...stop}
                 />
-                <div
-                  className={clx(
-                    "pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80",
-                    isActive ? "bg-white" : "bg-black"
-                  )}
-                />
-                <div className={clx("absolute -right-7 -top-0.5 text-[10px]", rowColor)}>
-                  {Math.round(it.opacity * 100)}
-                </div>
+                <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", isActive ? "bg-white" : "bg-black")} />
               </div>
 
-              {/* Видимость */}
+              {/* controls */}
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent",
+                isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
                 title={it.visible ? "Hide" : "Show"}
               >
-                {it.visible ? <Eye className={clx("w-4 h-4", rowColor)}/> : <EyeOff className={clx("w-4 h-4", rowColor)}/>}
+                {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
               </button>
 
-              {/* Лок */}
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent",
+                isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
                 title={it.locked ? "Unlock" : "Lock"}
               >
-                {it.locked ? <Lock className={clx("w-4 h-4", rowColor)}/> : <Unlock className={clx("w-4 h-4", rowColor)}/>}
+                {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
               </button>
 
-              {/* Дубликат */}
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent",
+                isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
                 title="Duplicate"
               >
-                <Copy className={clx("w-4 h-4", rowColor)}/>
+                <Copy className="w-4 h-4"/>
               </button>
 
-              {/* Удаление */}
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", borderColor)}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent",
+                isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
                 title="Delete"
               >
-                <Trash2 className={clx("w-4 h-4", rowColor)}/>
+                <Trash2 className="w-4 h-4"/>
               </button>
             </div>
           )
