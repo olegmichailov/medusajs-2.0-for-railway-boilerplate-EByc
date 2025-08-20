@@ -10,6 +10,10 @@ import {
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
+// чтобы не было ReferenceError
+const TEXT_MIN_FS = 8
+const TEXT_MAX_FS = 800
+
 type MobileLayersItem = {
   id: string
   name: string
@@ -66,20 +70,7 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-// единый квадратный ползунок, идеально по центру
-const sliderCss = `
-input[type="range"].ui{
-  -webkit-appearance:none; appearance:none;
-  display:block; width:100%; height:24px; background:transparent; color:currentColor; margin:0; padding:0;
-}
-input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
-input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].ui::-webkit-slider-thumb{
-  -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:0;
-}
-input[type="range"].ui::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
-`
-
+// единые стопперы
 const stop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -102,6 +93,18 @@ const PALETTE = [
   "#C084FC","#F472B6","#F59E0B","#F97316","#EA580C","#84CC16",
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
+
+// КВАДРАТНЫЕ ползунки + центрированный трек
+const sliderCss = `
+input[type="range"].ui{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:18px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+}
+input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
+input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
+input[type="range"].ui::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:-2px; }
+input[type="range"].ui::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
+`
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -145,7 +148,7 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // локальный текст state
+    // локальный текст state (чтобы textarea не дёргалась)
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
@@ -253,7 +256,7 @@ export default function Toolbar(props: ToolbarProps) {
                   {...stop}
                 />
                 <div className="flex items-center gap-2">
-                  <div className="text-[10px] w-12">Font size</div>
+                  <div className="text-[10px] w-12">Font</div>
                   <div className="relative flex-1 text-black">
                     <input
                       type="range" min={TEXT_MIN_FS} max={TEXT_MAX_FS} step={1}
