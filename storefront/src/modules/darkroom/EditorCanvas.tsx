@@ -19,12 +19,12 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
-// динамический минимум ширины текста ≈ одна буква
-const minLetterW = (t: Konva.Text) => Math.max(6, Math.round((t.fontSize() || 1) * 0.55))
-
 const EPS = 0.25
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
+
+// динамический минимум ширины текста ~ одна буква текущего кегля
+const minLetterW = (t: Konva.Text) => Math.max(6, Math.round((t.fontSize() || 1) * 0.55))
 
 // ==== ТИПЫ ====
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
@@ -108,7 +108,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // blend не меняем для кисти/ластика
+  // НЕ меняем blend у кисти/ластика — только opacity
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -130,9 +130,30 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer =====
+  // ===== Transformer (текст: углы = fontSize от центра; боковые = width) =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
+  const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
+
+  const textSnap = useRef<{
+    box:{x:number;y:number;width:number;height:number}
+    fs:number
+    w:number
+    cx:number
+    cy:number
+  }|null>(null)
+
+  const makeSnap = (t: Konva.Text) => {
+    const w = Math.max(1, t.width() || 1)
+    const h = Math.max(1, t.height() || 1)
+    return {
+      box: { x: t.x(), y: t.y(), width: w, height: h },
+      fs: t.fontSize(),
+      w,
+      cx: t.x() + w/2,
+      cy: t.y() + h/2,
+    }
+  }
 
   const attachTransformer = () => {
     const lay = find(selectedId)
@@ -141,6 +162,7 @@ export default function EditorCanvas() {
 
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
+    resetBBoxFunc()
 
     const tr = trRef.current!
     if (disabled) {
@@ -151,9 +173,6 @@ export default function EditorCanvas() {
 
     tr.nodes([n])
     tr.rotateEnabled(true)
-    // Масштаб «из центра» для углов — это решает «не по центру увеличивается»
-    // и даёт стабильное поведение без прыжков.
-    tr.centeredScaling(true) // конва-апи
 
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
@@ -162,37 +181,61 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ——— ТЕКСТ ———
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
         "middle-left","middle-right","top-center","bottom-center"
       ])
 
-      // БОКОВЫЕ ХЕНДЛЫ: меняем только width, НЕ scale, НЕ fontSize
+      const t = n as Konva.Text
+      // фиксируем снапшот на старте
+      const onStartText = () => { textSnap.current = makeSnap(t) }
+      const onEndText   = () => { textSnap.current = null }
+      t.on("transformstart.textsnap", onStartText)
+      t.on("transformend.textsnap",   onEndText)
+
       ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
-        const t = n as Konva.Text
+        const snap = textSnap.current || makeSnap(t)
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+        if (!active) return oldBox
+
+        // ширина/высота текущего бокса снапшота
+        const baseW = Math.max(1e-6, snap.box.width)
+        const baseH = Math.max(1e-6, snap.box.height)
+        const ratioW = newBox.width  / baseW
+        const ratioH = newBox.height / baseH
+
+        // 1) Боковые хендлы — только width (центр сохраняем)
         if (active === "middle-left" || active === "middle-right") {
-          const w0 = Math.max(1, t.width() || 1)
-          const cx = t.x() + w0 / 2
-          const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
-          const nextW = clamp(Math.round(w0 * ratioW), minLetterW(t), TEXT_MAX_W)
-          if (Math.abs(nextW - (t.width() || 0)) > EPS) {
+          const nextW = clamp(Math.round(snap.w * ratioW), minLetterW(t), TEXT_MAX_W)
+          if (Math.abs((t.width()||0) - nextW) > EPS) {
             t.width(nextW)
-            t.x(Math.round(cx - nextW / 2)) // сохраняем центр
+            t.x(Math.round(snap.cx - nextW/2))
           }
-          t.scaleX(1); t.scaleY(1) // не даём копиться scale при боковых
+          t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
-          return oldBox // отменяем реальный бокс — мы всё уже применили сами
+          return oldBox
         }
-        // углы и top/bottom — пропускаем (Transformer сделает scale сам, из центра)
-        return newBox
+
+        // 2) Углы и вертикальные — меняем ТОЛЬКО fontSize пропорционально, удерживая центр
+        const s = Math.max(ratioW, ratioH)
+        const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
+        if (Math.abs(t.fontSize() - nextFS) > EPS) {
+          t.fontSize(nextFS)
+          const nh = Math.max(1, t.height())
+          const nw = Math.max(1, t.width() || snap.w)
+          t.y(Math.round(snap.cy - nh/2))
+          t.x(Math.round(snap.cx - nw/2))
+        }
+        t.scaleX(1); t.scaleY(1)
+        t.getLayer()?.batchDraw()
+        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+        return oldBox
       })
 
-      // ничего не «нормализуем» в конце — scale остаётся, fontSize не трогаем
-      detachTextFix.current = () => { /* специально пусто — только guard снимаем выше */ }
+      // снятие хэндлеров текста
+      detachTextFix.current = () => { n.off(".textsnap") }
     } else {
       // ——— НЕ ТЕКСТ ———
       tr.keepRatio(false)
@@ -262,6 +305,7 @@ export default function EditorCanvas() {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
+
       const n = node(selectedId)
       if (!n || tool !== "move") return
 
@@ -289,7 +333,8 @@ export default function EditorCanvas() {
       if (ex && ex.node.opacity() < 0.02) {
         ex.node.opacity(1)
         ex.meta.opacity = 1
-        artLayerRef.current?.batchDraw(); bump()
+        artLayerRef.current?.batchDraw()
+        bump()
       }
       return ex!
     }
@@ -457,15 +502,11 @@ export default function EditorCanvas() {
     t.opacity(0.01)
     t.getLayer()?.batchDraw()
 
-    // во время редактирования полностью отключаем трансформер
-    trRef.current?.nodes([]); uiLayerRef.current?.batchDraw()
-
     const ta = document.createElement("textarea")
     ta.value = t.text()
 
     const place = () => {
       const b = stContainer.getBoundingClientRect()
-      // clientRect относительно stage — более точно
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
       ta.style.left   = `${b.left + r.x * scale}px`
       ta.style.top    = `${b.top  + r.y * scale}px`
@@ -516,7 +557,8 @@ export default function EditorCanvas() {
       requestAnimationFrame(() => {
         const id = (t as any).id?.() as string | undefined
         if (id) select(id)
-        trRef.current?.nodes([t]) // вернуть трансформер
+        attachTransformer()
+        trRef.current?.nodes([t])
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
         bump()
@@ -657,7 +699,7 @@ export default function EditorCanvas() {
   const selectedProps =
     sel && isTextNode(sel.node) ? {
       text: sel.node.text(),
-      fontSize: Math.round(sel.node.fontSize()), // слайдер — только базовый кегль, scale уголками отдельно
+      fontSize: Math.round(sel.node.fontSize()),
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
     }
@@ -672,7 +714,22 @@ export default function EditorCanvas() {
   const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (typeof n?.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (typeof n?.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump() }
+
+  // fontSize через UI — держим центр, чтобы не прыгало
+  const setSelectedFontSize   = (nsize:number)=> {
+    const n = sel?.node as Konva.Text; if (!n) return
+    const fs = clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)
+    const w0 = Math.max(1, n.width() || 1)
+    const h0 = Math.max(1, n.height() || 1)
+    const cx = n.x() + w0/2, cy = n.y() + h0/2
+    n.fontSize(fs)
+    const w1 = Math.max(1, n.width() || 1)
+    const h1 = Math.max(1, n.height() || 1)
+    n.x(Math.round(cx - w1/2))
+    n.y(Math.round(cy - h1/2))
+    artLayerRef.current?.batchDraw(); bump()
+  }
+
   const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump() }
 
   const setSelectedColor = (hex:string)  => {
@@ -782,7 +839,6 @@ export default function EditorCanvas() {
               <Transformer
                 ref={trRef}
                 rotateEnabled
-                centeredScaling
                 anchorSize={12}
                 borderStroke="black"
                 anchorStroke="black"
