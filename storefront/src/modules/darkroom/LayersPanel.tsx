@@ -4,12 +4,20 @@ import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
-const blends = ["source-over","multiply","screen","overlay","darken","lighten","xor"] as const
+const blends = [
+  "source-over",
+  "multiply",
+  "screen",
+  "overlay",
+  "darken",
+  "lighten",
+  "xor",
+] as const
 
 export type LayerItem = {
   id: string
   name: string
-  type: "image" | "shape" | "text" | "strokes"
+  type: "image" | "shape" | "text" | "strokes" | "erase"
   visible: boolean
   locked: boolean
   blend: string
@@ -29,14 +37,23 @@ type Props = {
   onChangeOpacity: (id: string, opacity: number) => void
 }
 
-export default function LayersPanel(props: Props) {
-  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate, onReorder, onChangeBlend, onChangeOpacity } = props
-
+export default function LayersPanel({
+  items,
+  selectId,
+  onSelect,
+  onToggleVisible,
+  onToggleLock,
+  onDelete,
+  onDuplicate,
+  onReorder,
+  onChangeBlend,
+  onChangeOpacity,
+}: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // центрированные квадратные фейдеры
+  // квадратные бегунки, трек по центру
   const sliderCss = `
   input[type="range"].lp{
     -webkit-appearance:none; appearance:none;
@@ -53,6 +70,7 @@ export default function LayersPanel(props: Props) {
     e.dataTransfer.setData("text/plain", id)
     e.dataTransfer.effectAllowed = "move"
   }
+
   const handleDragOver = (id: string, e: React.DragEvent) => {
     e.preventDefault()
     const rect = rowRefs.current[id]?.getBoundingClientRect()
@@ -60,15 +78,20 @@ export default function LayersPanel(props: Props) {
     const place: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after"
     setDragOver({ id, place })
   }
+
   const handleDrop = (destId: string, e: React.DragEvent) => {
     e.preventDefault()
     const src = dragId || e.dataTransfer.getData("text/plain")
-    if (!src || src === destId) { setDragId(null); setDragOver(null); return }
+    if (!src || src === destId) {
+      setDragId(null); setDragOver(null); return
+    }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
-    const place: "before" | "after" = rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
+    const place: "before" | "after" =
+      rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
     setDragId(null); setDragOver(null)
   }
+
   const handleDragEnd = () => { setDragId(null); setDragOver(null) }
 
   return (
@@ -97,13 +120,15 @@ export default function LayersPanel(props: Props) {
               onDrop={(e)=>handleDrop(it.id, e)}
               className={clx(
                 "flex items-center gap-2 px-2 py-2 border border-black/15 rounded-none select-none transition-shadow",
-                isActive ? "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,1),0_8px_24px_rgba(0,0,0,.35)]" : "bg-white text-black hover:shadow-[0_8px_24px_rgba(0,0,0,.12)]",
+                isActive
+                  ? "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,1),0_8px_24px_rgba(0,0,0,.35)]"
+                  : "bg-white text-black hover:shadow-[0_8px_24px_rgba(0,0,0,.12)]",
                 highlight
               )}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* видимый «грэп», но тянется ВСЯ строка */}
+              {/* визуальный грэп (тянется вся строка) */}
               <div className="w-6 h-8 grid place-items-center cursor-grab active:cursor-grabbing">
                 <GripVertical className="w-3.5 h-3.5" />
               </div>
@@ -120,10 +145,12 @@ export default function LayersPanel(props: Props) {
                 onChange={(e) => onChangeBlend(it.id, e.target.value)}
                 onMouseDown={(e)=>e.stopPropagation()}
               >
-                {blends.map((b) => <option key={b} value={b}>{b}</option>)}
+                {blends.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
               </select>
 
-              {/* Opacity — центрированный фейдер с квадратным бегунком */}
+              {/* Opacity */}
               <div className="relative w-24" onMouseDown={(e)=>e.stopPropagation()}>
                 <input
                   type="range" min={5} max={100} step={1}
@@ -134,6 +161,7 @@ export default function LayersPanel(props: Props) {
                 <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", isActive ? "bg-white" : "bg-black")} />
               </div>
 
+              {/* controls */}
               <button
                 className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
@@ -162,7 +190,7 @@ export default function LayersPanel(props: Props) {
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
+                className={clx("w-8 h-8 grid place-items-center border bg-transparent text-red-600", isActive ? "border-white/40" : "border-black/20")}
                 onMouseDown={(e)=>e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
                 title="Delete"
