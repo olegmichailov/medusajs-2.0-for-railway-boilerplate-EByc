@@ -23,7 +23,7 @@ const TEXT_MAX_W  = BASE_W
 
 // Плавность и защита от дрожи/схлопываний
 const EPS  = 0.25               // порог «есть смысл перерисовывать»
-const DEAD = 0.006              // «мёртвая зона» против микродрожи
+const DEAD = 0.01               // ↑ слегка поднял «мёртвую зону» — полностью гасит микродрожь
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 
@@ -75,9 +75,23 @@ export default function EditorCanvas() {
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
+  // единый рендер тик без моргания (один rAF на пачку операций)
+  const rafId = useRef<number | null>(null)
+  const scheduleUI = () => {
+    if (rafId.current != null) return
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null
+      trRef.current?.forceUpdate()
+      uiLayerRef.current?.batchDraw()
+      artLayerRef.current?.batchDraw()
+      bump()
+    })
+  }
+
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
   const isTransformingRef = useRef(false)
+  const isEditingTextRef  = useRef(false)
 
   // ===== Вёрстка/масштаб =====
   const [headerH, setHeaderH] = useState(64)
@@ -206,7 +220,7 @@ export default function EditorCanvas() {
         const snap   = textSnapRef.current ?? captureTextSnap(t)
         const active = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // boundBoxFunc работает в абсолютных координатах трансформера — берём относительный коэф. масштабирования
+        // boundBoxFunc работает в абсолютных координатах трансформера — берём относительные коэффициенты
         const ow = Math.max(1e-6, oldBox.width)
         const oh = Math.max(1e-6, oldBox.height)
         const ratioW = newBox.width  / ow
@@ -222,8 +236,7 @@ export default function EditorCanvas() {
             t.x(Math.round(snap.cx0 - nextW / 2))
           }
           t.scaleX(1); t.scaleY(1)
-          t.getLayer()?.batchDraw()
-          requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+          scheduleUI()
           return oldBox
         }
 
@@ -244,16 +257,14 @@ export default function EditorCanvas() {
         }
 
         t.scaleX(1); t.scaleY(1)
-        t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+        scheduleUI()
         return oldBox
       })
 
       // финальная нормализация (подстраховка)
       const onTextNormalize = () => {
         t.scaleX(1); t.scaleY(1)
-        t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+        scheduleUI()
       }
       t.on("transformend.text-bind", onTextNormalize)
 
@@ -293,10 +304,7 @@ export default function EditorCanvas() {
 
         if ((n as any).scaleX) (n as any).scaleX(1)
         if ((n as any).scaleY) (n as any).scaleY(1)
-        n.getLayer()?.batchDraw()
-        trRef.current?.forceUpdate()
-        uiLayerRef.current?.batchDraw()
-        bump()
+        scheduleUI()
       }
 
       const onEnd = () => onTransform()
@@ -344,7 +352,7 @@ export default function EditorCanvas() {
         if (e.key === "ArrowRight") { (n as any).x((n as any).x()+step) }
         if (e.key === "ArrowUp")    { (n as any).y((n as any).y()-step) }
         if (e.key === "ArrowDown")  { (n as any).y((n as any).y()+step) }
-        n.getLayer()?.batchDraw()
+        scheduleUI()
       }
     }
     window.addEventListener("keydown", onKey)
@@ -359,8 +367,7 @@ export default function EditorCanvas() {
       if (ex && ex.node.opacity() < 0.02) {
         ex.node.opacity(1)
         ex.meta.opacity = 1
-        artLayerRef.current?.batchDraw()
-        bump()
+        scheduleUI()
       }
       return ex!
     }
@@ -418,7 +425,7 @@ export default function EditorCanvas() {
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
         setSeqs(s => ({ ...s, image: s.image + 1 }))
         select(id)
-        artLayerRef.current?.batchDraw()
+        scheduleUI()
         set({ tool: "move" })
       }
       img.src = r.result as string
@@ -443,7 +450,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
     setSeqs(s => ({ ...s, text: s.text + 1 }))
     select(id)
-    artLayerRef.current?.batchDraw()
+    scheduleUI()
     set({ tool: "move" })
   }
 
@@ -468,7 +475,7 @@ export default function EditorCanvas() {
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
     setSeqs(s => ({ ...s, shape: s.shape + 1 }))
     select(id)
-    artLayerRef.current?.batchDraw()
+    scheduleUI()
     set({ tool: "move" })
   }
 
@@ -487,7 +494,7 @@ export default function EditorCanvas() {
       })
       g.add(line)
       setIsDrawing(true)
-      artLayerRef.current?.batchDraw()
+      scheduleUI()
     } else if (tool === "erase") {
       const lay = ensureEraseGroup()
       const g = lay.node as Konva.Group
@@ -501,7 +508,7 @@ export default function EditorCanvas() {
       })
       g.add(line)
       setIsDrawing(true)
-      artLayerRef.current?.batchDraw()
+      scheduleUI()
     }
   }
   const appendStroke = (x: number, y: number) => {
@@ -513,14 +520,14 @@ export default function EditorCanvas() {
       const line = last instanceof Konva.Line ? last : (last as Konva.Group)?.getChildren().at(-1)
       if (!(line instanceof Konva.Line)) return
       line.points(line.points().concat([x, y]))
-      artLayerRef.current?.batchDraw()
+      scheduleUI()
     } else if (tool === "erase") {
       const gid = currentEraseId.current[side]
       const g = gid ? (find(gid)?.node as Konva.Group) : null
       const last = g?.getChildren().at(-1) as Konva.Line | undefined
       if (!(last instanceof Konva.Line)) return
       last.points(last.points().concat([x, y]))
-      artLayerRef.current?.batchDraw()
+      scheduleUI()
     }
   }
   const finishStroke = () => setIsDrawing(false)
@@ -532,7 +539,7 @@ export default function EditorCanvas() {
 
     const prevOpacity = t.opacity()
     t.opacity(0.01)
-    t.getLayer()?.batchDraw()
+    scheduleUI()
 
     const ta = document.createElement("textarea")
     ta.value = t.text()
@@ -570,10 +577,12 @@ export default function EditorCanvas() {
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
+    isEditingTextRef.current = true
+
     const onInput = () => {
       t.text(ta.value)
-      t.getLayer()?.batchDraw()
-      requestAnimationFrame(() => { place(); trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
+      // не дергаем канвас каждую букву — просто обновляем позицию textarea и UI одним rAF
+      scheduleUI(); place()
     }
 
     const cleanup = (apply = true) => {
@@ -584,18 +593,15 @@ export default function EditorCanvas() {
       if (apply) t.text(ta.value)
       ta.remove()
       t.opacity(prevOpacity)
-      t.getLayer()?.batchDraw()
-      set({ tool: "move" as Tool })
-      requestAnimationFrame(() => {
-        // остаёмся на тексте с тем же трансформером (режим текста)
-        const id = (t as any).id ? (t as any).id() : undefined
-        if (id) select(id)
-        attachTransformer()
-        trRef.current?.nodes([t])
-        trRef.current?.forceUpdate()
-        uiLayerRef.current?.batchDraw()
-        bump()
-      })
+      isEditingTextRef.current = false
+      scheduleUI()
+      // остаёмся на тексте с тем же трансформером (режим текста)
+      const id = (t as any).id ? (t as any).id() : undefined
+      if (id) select(id)
+      // переустанавливаем текстовый boundBoxFunc
+      resetBBoxFunc(); attachTransformer();
+      trRef.current?.nodes([t])
+      scheduleUI()
     }
 
     const onKey = (ev: KeyboardEvent) => {
@@ -629,7 +635,7 @@ export default function EditorCanvas() {
     const st = stageRef.current!
     const tgt = e.target as Konva.Node
     if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
-      select(null); trRef.current?.nodes([]); uiLayerRef.current?.batchDraw(); return
+      select(null); trRef.current?.nodes([]); scheduleUI(); return
     }
     if (tgt && tgt !== st && tgt.getParent()) {
       const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
@@ -637,7 +643,7 @@ export default function EditorCanvas() {
     }
   }
   const onMove = (e: any) => {
-    if (isTransformingRef.current) return
+    if (isTransformingRef.current || isEditingTextRef.current) return
     if (isTransformerChild(e.target)) return
     if (!isDrawing) return
     const p = toCanvas(getStagePointer())
@@ -666,8 +672,7 @@ export default function EditorCanvas() {
       return p.filter(x => x.id!==id)
     })
     if (selectedId === id) select(null)
-    artLayerRef.current?.batchDraw()
-    bump()
+    scheduleUI()
   }
 
   const duplicateLayer = (id: string) => {
@@ -681,8 +686,7 @@ export default function EditorCanvas() {
     attachCommonHandlers(clone, newLay.id)
     setLayers(p => [...p, newLay]); select(newLay.id)
     if ((clone as any).zIndex) (clone as any).zIndex(nextTopZ())
-    artLayerRef.current?.batchDraw()
-    bump()
+    scheduleUI()
   }
 
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
@@ -706,7 +710,7 @@ export default function EditorCanvas() {
       return [...others, ...sortedCurrent]
     })
     select(srcId)
-    requestAnimationFrame(() => { attachTransformer(); bump() })
+    requestAnimationFrame(() => { attachTransformer(); scheduleUI() })
   }
 
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
@@ -717,8 +721,7 @@ export default function EditorCanvas() {
       if (typeof patch.visible === "boolean") l.node.visible(meta.visible && l.side === side)
       return { ...l, meta }
     }))
-    artLayerRef.current?.batchDraw()
-    bump()
+    scheduleUI()
   }
 
   const onLayerSelect = (id: string) => {
@@ -743,12 +746,12 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n || !n.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n || typeof n.stroke !== "function") return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n || typeof n.strokeWidth !== "function") return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump() }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n || !n.fill) return; n.fill(hex); scheduleUI() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n || typeof n.stroke !== "function") return; n.stroke(hex); scheduleUI() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n || typeof n.strokeWidth !== "function") return; n.strokeWidth(w); scheduleUI() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); scheduleUI() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); scheduleUI() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); scheduleUI() }
 
   const setSelectedColor = (hex:string)  => {
     if (!sel) return
@@ -772,8 +775,7 @@ export default function EditorCanvas() {
         n.fill(hex)
       }
     }
-    artLayerRef.current?.batchDraw()
-    bump()
+    scheduleUI()
   }
 
   // ===== Clear =====
@@ -784,8 +786,7 @@ export default function EditorCanvas() {
     currentStrokeId.current[side] = null
     currentEraseId.current[side]  = null
     select(null)
-    artLayerRef.current?.batchDraw()
-    bump()
+    scheduleUI()
   }
 
   // ===== Скачивание =====
