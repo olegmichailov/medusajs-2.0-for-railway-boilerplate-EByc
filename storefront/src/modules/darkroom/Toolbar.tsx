@@ -64,10 +64,10 @@ type ToolbarProps = {
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
 const ico  = "w-4 h-4"
-const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none touch-manipulation"
+const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 const activeBtn = "bg-black text-white"
 
-// стопаем ВСЕ указатели на фазе capture, чтобы Stage не перехватывал
+/** стопаем события, чтобы Stage не перехватывал клики/тачи со слайдеров/кнопок */
 const stopAll = {
   onPointerDownCapture: (e: any) => e.stopPropagation(),
   onPointerMoveCapture: (e: any) => e.stopPropagation(),
@@ -91,24 +91,28 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-/* КВАДРАТНЫЕ фейдеры. Трек — тонкая линия строго по центру. 
-   На таче — большой 28px бегунок. */
+/** Слайдеры: квадратный большой бегунок по центру трека.
+ * Управляется через CSS-переменные, чтобы на мобилке сделать бегунок крупнее. */
 const sliderCss = `
-:root{ --thumb:16px; }
-@media (hover:none),(pointer:coarse){ :root{ --thumb:28px; } }
-
-input[type="range"].ui{
-  -webkit-appearance:none; appearance:none;
-  width:100%;
-  height:var(--thumb);
-  background:transparent;
-  color:currentColor; margin:0; padding:0; display:block;
-  touch-action:none;
+:root{ --thumb:14px; --track:2px; }
+@supports (-webkit-appearance:none) or (appearance:none){
+  input[type="range"].ui{
+    -webkit-appearance:none; appearance:none;
+    width:100%; height:32px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+    position:relative; z-index:1; touch-action:none;
+  }
+  input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
+  input[type="range"].ui::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none; width:var(--thumb); height:var(--thumb);
+    background:currentColor; border:0; border-radius:0;
+    /* Центрируем thumb по треку */
+    margin-top: calc((var(--track) - var(--thumb))/2);
+  }
+  input[type="range"].ui::-moz-range-track{ height:var(--track); background:transparent; }
+  input[type="range"].ui::-moz-range-thumb{
+    width:var(--thumb); height:var(--thumb); background:currentColor; border:0; border-radius:0;
+  }
 }
-input[type="range"].ui::-webkit-slider-runnable-track{ height:0; background:transparent; }
-input[type="range"].ui::-moz-range-track{ height:0; background:transparent; }
-input[type="range"].ui::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:var(--thumb); height:var(--thumb); background:currentColor; border:0; border-radius:0; margin-top:0; }
-input[type="range"].ui::-moz-range-thumb{ width:var(--thumb); height:var(--thumb); background:currentColor; border:0; border-radius:0; }
 `
 
 export default function Toolbar(props: ToolbarProps) {
@@ -153,14 +157,14 @@ export default function Toolbar(props: ToolbarProps) {
     }
 
     const Track = ({ className }: { className?: string }) =>
-      <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80", className)} />
+      <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80 z-0", className)} />
 
     return (
-      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} onMouseDown={(e)=>e.stopPropagation()}>
+      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260, ['--thumb' as any]:"14px" }}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
 
         {/* header */}
-        <div className="flex items-center justify-between border-b border-black/10">
+        <div className="flex items-center justify-between border-b border-black/10" onMouseDown={(e)=>e.stopPropagation()}>
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
             <button className={btn} title="Clear" onClick={(e)=>{e.stopPropagation(); onClear()}}><ClearIcon className={ico}/></button>
@@ -172,7 +176,7 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
 
         {open && (
-          <div className="p-2 space-y-2">
+          <div className="p-2 space-y-2" {...stopAll}>
             {/* row 1 — инструменты + layers */}
             <div className="flex">
               {[
@@ -209,9 +213,8 @@ export default function Toolbar(props: ToolbarProps) {
               <div className="relative flex-1 text-black">
                 <input
                   type="range" min={1} max={200} step={1}
-                  value={brushSize}
-                  onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}
-                  onInput={(e:any)=>setBrushSize(parseInt(e.target.value,10))}
+                  value={props.brushSize}
+                  onChange={(e)=>props.setBrushSize(parseInt(e.target.value,10))}
                   className="ui"
                 />
                 <Track className="bg-black" />
@@ -219,7 +222,7 @@ export default function Toolbar(props: ToolbarProps) {
               <div className="text-xs w-10 text-right">{brushSize}</div>
             </div>
 
-            {/* палитра — ВЕРНУЛ */}
+            {/* палитра (вернул) */}
             <div className="grid grid-cols-12 gap-1">
               {PALETTE.map((c)=>(
                 <button
@@ -235,20 +238,20 @@ export default function Toolbar(props: ToolbarProps) {
             <div className="pt-1">
               <div className="text-[10px] mb-1">Shapes</div>
               <div className="flex">
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
+                <button className={btn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
               </div>
             </div>
 
             {/* SELECTED */}
-            {props.selectedKind === "text" && (
+            {selectedKind === "text" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
                 <textarea
-                  value={props.selectedProps.text ?? ""}
+                  value={selectedProps.text ?? ""}
                   onChange={(e)=>{ props.setSelectedText(e.target.value) }}
                   className="w-full h-16 border border-black p-1 text-sm"
                   placeholder="Enter text"
@@ -258,35 +261,33 @@ export default function Toolbar(props: ToolbarProps) {
                   <div className="relative flex-1 text-black">
                     <input
                       type="range" min={8} max={800} step={1}
-                      value={props.selectedProps.fontSize ?? 96}
+                      value={selectedProps.fontSize ?? 96}
                       onChange={(e)=>props.setSelectedFontSize(parseInt(e.target.value, 10))}
-                      onInput={(e:any)=>props.setSelectedFontSize(parseInt(e.target.value, 10))}
                       className="ui"
                     />
-                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80 z-0" />
                   </div>
-                  <div className="text-xs w-10 text-right">{props.selectedProps.fontSize ?? 96}</div>
+                  <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
                 </div>
               </div>
             )}
 
-            {props.selectedKind === "shape" && (
+            {selectedKind === "shape" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Selected shape</div>
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Fill</div>
-                  <input type="color" value={props.selectedProps.fill ?? "#000000"} onChange={(e)=>props.setSelectedFill(e.target.value)} className="w-6 h-6 border border-black"/>
+                  <input type="color" value={selectedProps.fill ?? "#000000"} onChange={(e)=>setSelectedFill(e.target.value)} className="w-6 h-6 border border-black"/>
                   <div className="text-[10px] w-12">Stroke</div>
-                  <input type="color" value={props.selectedProps.stroke ?? "#000000"} onChange={(e)=>props.setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black"/>
+                  <input type="color" value={selectedProps.stroke ?? "#000000"} onChange={(e)=>setSelectedStroke(e.target.value)} className="w-6 h-6 border border-black"/>
                   <div className="relative flex-1 text-black">
                     <input
                       type="range" min={0} max={64} step={1}
-                      value={props.selectedProps.strokeWidth ?? 0}
-                      onChange={(e)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))}
-                      onInput={(e:any)=>props.setSelectedStrokeW(parseInt(e.target.value, 10))}
+                      value={selectedProps.strokeWidth ?? 0}
+                      onChange={(e)=>setSelectedStrokeW(parseInt(e.target.value, 10))}
                       className="ui"
                     />
-                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80 z-0" />
                   </div>
                 </div>
               </div>
@@ -294,12 +295,12 @@ export default function Toolbar(props: ToolbarProps) {
 
             {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
-              <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
-              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadFront()}}>
+              <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
+              <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadFront}>
                 <Download className={ico}/> <span className="text-xs">Download</span>
               </button>
-              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={(e)=>{e.stopPropagation(); onDownloadBack()}}>
+              <button className="h-10 border border-black flex items-center justify-center gap-2 bg-white" onClick={onDownloadBack}>
                 <Download className={ico}/> <span className="text-xs">Download</span>
               </button>
             </div>
@@ -309,16 +310,8 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // =================== MOBILE (3 строки, всегда есть строка настроек) ===================
+  // =================== MOBILE (ТОЛЬКО 3 СТРОКИ) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
-
-  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) =>
-    <button
-      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
-    >
-      {icon}
-    </button>
 
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -328,38 +321,61 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
-  // Строка 2 — контекст. 
-  // Если выделен текст — ВСЕГДА показываем font-size, даже если активен move.
-  // Для image, чтобы панель не «прыгала», показываем шейпы (как ты просил).
-  const SettingsRow = () => {
-    if (props.selectedKind === "text") {
+  const Row1Tools = () => (
+    <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="move"?activeBtn:"bg-white")} onClick={()=>setTool("move")}><Move className={ico}/></button>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="brush"?activeBtn:"bg-white")} onClick={()=>setTool("brush")}><Brush className={ico}/></button>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="erase"?activeBtn:"bg-white")} onClick={()=>setTool("erase")}><Eraser className={ico}/></button>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="text"?activeBtn:"bg-white")} onClick={onAddText}><TypeIcon className={ico}/></button>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="image"?activeBtn:"bg-white")} onClick={()=>fileRef.current?.click()}><ImageIcon className={ico}/></button>
+      <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="shape"?activeBtn:"bg-white")} onClick={()=>setTool("shape")}><Shapes className={ico}/></button>
+
+      <button className={clx("h-12 px-3 border border-black rounded-none ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
+        <LayersIcon className={ico}/>
+      </button>
+
+      <div className="ml-auto flex gap-1">
+        <button className="h-12 w-12 grid place-items-center border border-black rounded-none bg-white" onClick={onClear}><ClearIcon className={ico}/></button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
+    </div>
+  )
+
+  /** Вторая строка — стабильная высота, без прыжков. */
+  const Row2Settings = () => {
+    const track = <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80 z-0" />
+    const rowClass = "px-2 py-1 flex items-center gap-2"
+    const thumbVar = { ['--thumb' as any]:"22px" } // крупный квадрат под палец
+
+    // 1) Если выбран TEXT — только фонт-сайз
+    if (selectedKind === "text") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className={rowClass} style={thumbVar} {...stopAll}>
           <div className="text-[10px] w-16">Font size</div>
           <div className="relative flex-1 text-black">
             <input
               type="range" min={8} max={800} step={1}
-              value={props.selectedProps.fontSize ?? 96}
+              value={selectedProps.fontSize ?? 96}
               onChange={(e)=>props.setSelectedFontSize(parseInt(e.target.value, 10))}
-              onInput={(e:any)=>props.setSelectedFontSize(parseInt(e.target.value, 10))}
               className="ui"
             />
-            <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+            {track}
           </div>
-          <div className="text-xs w-10 text-right">{props.selectedProps.fontSize ?? 96}</div>
+          <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
         </div>
       )
     }
 
+    // 2) Brush/Eraser — цвет + размер
     if (tool === "brush" || tool === "erase") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className={rowClass} style={thumbVar} {...stopAll}>
           <div className="text-[10px]">Color</div>
           <input
             type="color"
             value={brushColor}
             onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
-            className="w-9 h-9 border border-black p-0"
+            className="w-8 h-8 border border-black p-0"
             disabled={tool==="erase"}
           />
           <div className="relative flex-1 text-black">
@@ -367,39 +383,49 @@ export default function Toolbar(props: ToolbarProps) {
               type="range" min={1} max={200} step={1}
               value={brushSize}
               onChange={(e)=> setBrushSize(parseInt(e.target.value, 10))}
-              onInput={(e:any)=> setBrushSize(parseInt(e.target.value, 10))}
               className="ui"
             />
-            <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+            {track}
           </div>
           <div className="text-xs w-10 text-right">{brushSize}</div>
         </div>
       )
     }
 
-    // shape И image — показываем шейпы (чтобы панель не схлопывалась)
-    if (tool === "shape" || tool === "image") {
+    // 3) Shape — только кнопки добавления фигур
+    if (tool === "shape") {
       return (
-        <div className="px-2 py-1" {...stopAll}>
-          <div className="text-[10px] mb-1">Add shape</div>
-          <div className="flex">
-            <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-            <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-            <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-            <button className={btn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-            <button className={btn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-          </div>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+          <button className="w-12 h-12 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
+          <button className="w-12 h-12 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
+          <button className="w-12 h-12 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
+          <button className="w-12 h-12 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
+          <button className="w-12 h-12 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
         </div>
       )
     }
 
-    // запасной вариант — фиксированная высота, чтобы ничего не прыгало
-    return <div className="h-[44px]" {...stopAll}/>
+    // 4) Image / прочее — пустой стаб фиксированной высоты, чтобы не прыгало
+    return <div className="px-2 py-1" style={{ height: 48 }} {...stopAll} />
   }
+
+  /** Третья строка — Front/Back с маленькими Download рядом; подсветка активной стороны. */
+  const Row3Sides = () => (
+    <div className="px-2 pb-2 grid grid-cols-2 gap-2" {...stopAll}>
+      <div className="flex gap-2">
+        <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
+        <button className="w-12 h-10 border border-black bg-white grid place-items-center" onClick={onDownloadFront}><Download className={ico}/></button>
+      </div>
+      <div className="flex gap-2">
+        <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
+        <button className="w-12 h-10 border border-black bg-white grid place-items-center" onClick={onDownloadBack}><Download className={ico}/></button>
+      </div>
+    </div>
+  )
 
   return (
     <>
-      {/* LAYERS шторка (мобайл) */}
+      {/* Мобильная шторка Layers */}
       {layersOpenM && (
         <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }} {...stopAll}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
@@ -438,45 +464,12 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* ===== 3 строки интерфейса на мобилке ===== */}
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      {/* Низ — 3 строки */}
+      <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" style={{ ['--thumb' as any]:"22px" }}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-
-        {/* Строка 1: инструменты + слои + clear */}
-        <div className="px-2 py-1 flex items-center gap-1">
-          {mobileButton("move", <Move className={ico}/>)}
-          {mobileButton("brush", <Brush className={ico}/>)}
-          {mobileButton("erase", <Eraser className={ico}/>)}
-          {mobileButton("text", <TypeIcon className={ico}/>, onAddText)}
-          {mobileButton("image", <ImageIcon className={ico}/>)}
-          {mobileButton("shape", <Shapes className={ico}/>)}
-          <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
-            <LayersIcon className={ico}/>
-          </button>
-          <div className="ml-auto flex gap-1">
-            <button className="h-12 w-12 grid place-items-center border border-black" onClick={onClear}><ClearIcon className={ico}/></button>
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
-        </div>
-
-        {/* Строка 2: контекстные настройки — всегда присутствует */}
-        <SettingsRow />
-
-        {/* Строка 3: Front + download | Back + download */}
-        <div className="px-2 pb-2 grid grid-cols-2 gap-2">
-          <div className="flex gap-1">
-            <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
-            <button className="h-10 w-10 border border-black bg-white grid place-items-center" onClick={onDownloadFront}>
-              <Download className={ico}/>
-            </button>
-          </div>
-          <div className="flex gap-1">
-            <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
-            <button className="h-10 w-10 border border-black bg-white grid place-items-center" onClick={onDownloadBack}>
-              <Download className={ico}/>
-            </button>
-          </div>
-        </div>
+        <Row1Tools />
+        <Row2Settings />
+        <Row3Sides />
       </div>
     </>
   )
