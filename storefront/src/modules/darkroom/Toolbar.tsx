@@ -91,13 +91,12 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-/** Слайдеры: большой квадратный бегунок, строго по центру трека, плавное движение */
+/** Слайдеры: большой квадратный бегунок, центр-трек, плавное движение */
 const sliderCss = `
 :root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
   width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
-  /* важно: не блокируем жест, чтобы не было «дискретности» на iOS */
   touch-action:auto;
 }
 input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
@@ -132,7 +131,6 @@ function RangeCtl(props:{
       value={props.value}
       min={props.min} max={props.max}
       step={props.step ?? "any"}
-      // onInput даёт «живое» обновление на iOS
       onInput={(e)=>props.onChange(parseFloat((e.currentTarget as HTMLInputElement).value))}
       onChange={(e)=>props.onChange(parseFloat(e.currentTarget.value))}
     />
@@ -238,7 +236,7 @@ export default function Toolbar(props: ToolbarProps) {
                 <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}/>
                 <Track className="bg-black" />
               </div>
-              <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
+              <div className="text-xs w-10 text-right">{Math.round(props.brushSize)}</div>
             </div>
 
             {/* палитра (десктоп) */}
@@ -298,7 +296,7 @@ export default function Toolbar(props: ToolbarProps) {
   // =================== MOBILE (строго 3 строки) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
 
-  // постоянный hidden input, чтобы Upload всегда работал (даже сразу после тапа)
+  // всегда смонтированный hidden input — тап по Image вызывает его
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -309,22 +307,14 @@ export default function Toolbar(props: ToolbarProps) {
   const Track = () =>
     <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
 
-  // правильное поведение иконок (ставим tool + экшн)
+  // корректное поведение иконок
   const tapTool = (t: "move"|"brush"|"erase"|"text"|"image"|"shape") => {
-    if (t === "text") {
-      setTool("text"); onAddText()
-      return
-    }
-    if (t === "image") {
-      setTool("image")
-      // кликаем сразу — инпут всегда смонтирован
-      requestAnimationFrame(()=> fileRef.current?.click())
-      return
-    }
+    if (t === "text") { setTool("text"); onAddText(); return }
+    if (t === "image") { setTool("image"); requestAnimationFrame(()=> fileRef.current?.click()); return }
     setTool(t as Tool)
   }
 
-  /** Вторая строка: зависит только от АКТИВНОГО инструмента */
+  /** Вторая строка: зависит от активного инструмента */
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
@@ -342,7 +332,7 @@ export default function Toolbar(props: ToolbarProps) {
             <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
             <Track />
           </div>
-          <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
+          <div className="text-xs w-10 text-right">{Math.round(props.brushSize)}</div>
         </div>
       )
     }
@@ -355,7 +345,7 @@ export default function Toolbar(props: ToolbarProps) {
             <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
             <Track />
           </div>
-          <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
+          <div className="text-xs w-10 text-right">{Math.round(props.brushSize)}</div>
         </div>
       )
     }
@@ -368,31 +358,25 @@ export default function Toolbar(props: ToolbarProps) {
             <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
             <Track />
           </div>
-          <div className="text-xs w-10 text-right">{fontSize|0}</div>
+          <div className="text-xs w-10 text-right">{Math.round(fontSize)}</div>
         </div>
       )
     }
 
-    if (tool === "image") {
+    // В Image — не дублируем Upload, показываем шейпы, как и в Shapes
+    if (tool === "image" || tool === "shape") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
-          <button className="h-10 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>fileRef.current?.click()}>
-            <ImageIcon className={ico}/> <span className="text-xs">Upload image</span>
-          </button>
+        <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
+          <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
+          <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
+          <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
+          <button className={btn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
+          <button className={btn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
         </div>
       )
     }
 
-    // tool === "shape"
-    return (
-      <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
-        <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-        <button className={btn} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-      </div>
-    )
+    return null
   }
 
   return (
@@ -402,7 +386,7 @@ export default function Toolbar(props: ToolbarProps) {
 
       {/* LAYERS шторка (мобайл) */}
       {layersOpenM && (
-        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }} {...stopAll}>
+        <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 112+56 /* суммарная высота 1-2-3 строк */ }} {...stopAll}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] tracking-widest">LAYERS</div>
@@ -440,7 +424,7 @@ export default function Toolbar(props: ToolbarProps) {
       )}
 
       {/* ===== 1-я строка: TOOLS / LAYERS / CLEAR ===== */}
-      <div className="fixed inset-x-0 bottom-[144px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      <div className="fixed inset-x-0 bottom-[112px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
           <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="move" ? activeBtn : "bg-white")}  onClick={()=>tapTool("move")}><Move className={ico}/></button>
@@ -460,13 +444,13 @@ export default function Toolbar(props: ToolbarProps) {
       </div>
 
       {/* ===== 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ ===== */}
-      <div className="fixed inset-x-0 bottom-[96px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+      <div className="fixed inset-x-0 bottom-[56px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
         <SettingsRow />
       </div>
 
       {/* ===== 3-я строка: FRONT/BACK + download ===== */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10" {...stopAll}>
-        <div className="px-2 pb-2 pt-1 grid grid-cols-2 gap-2">
+        <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
             <button className="h-10 w-12 border border-black bg-white grid place-items-center" onClick={onDownloadFront}><Download className={ico}/></button>
