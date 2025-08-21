@@ -1333,8 +1333,3 @@ export default function EditorCanvas() {
     </div>
   )
 }
-
-// ===== helpers for toolbar buttons
-function btnDesk(active:boolean){ return "h-9 w-9 grid place-items-center border border-black " + (active?"bg-black text-white":"bg-white") }
-function btnDeskSmall(active:boolean){ return "h-9 w-9 grid place-items-center border border-black " + (active?"bg-black text-white":"bg-white") }
-function btnMob(active:boolean){ return "h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation " + (active?"bg-black text-white":"bg-white") }
