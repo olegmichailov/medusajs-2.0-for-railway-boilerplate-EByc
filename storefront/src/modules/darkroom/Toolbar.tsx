@@ -1,12 +1,13 @@
 "use client"
 
-import React, { useRef, useState } from "react"
+import React, { useRef, useState, useEffect } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
   Layers as LayersIcon, X as ClearIcon, GripHorizontal,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, AlignLeft, AlignCenter, AlignRight
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2,
+  AlignLeft, AlignCenter, AlignRight
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -20,7 +21,6 @@ type MobileLayersItem = {
   blend: string
   opacity: number
 }
-
 type MobileLayersProps = {
   items: MobileLayersItem[]
   selectedId?: string
@@ -50,10 +50,7 @@ type ToolbarProps = {
   toggleLayers: () => void
   layersOpen: boolean
   selectedKind: "image" | "shape" | "text" | "strokes" | "erase" | null
-  selectedProps: {
-    text?: string; fontSize?: number; fontFamily?: string; fill?: string; stroke?: string; strokeWidth?: number
-    align?: "left"|"center"|"right"; lineHeight?: number; letterSpacing?: number
-  }
+  selectedProps: { text?: string; fontSize?: number; fontFamily?: string; fill?: string; stroke?: string; strokeWidth?: number; align?: "left"|"center"|"right"; lineHeight?: number; letterSpacing?: number }
   setSelectedFill: (hex: string) => void
   setSelectedStroke: (hex: string) => void
   setSelectedStrokeW: (n: number) => void
@@ -61,9 +58,10 @@ type ToolbarProps = {
   setSelectedFontSize: (n: number) => void
   setSelectedFontFamily?: (f: string) => void
   setSelectedColor: (hex: string) => void
-  setSelectedAlign: (a:"left"|"center"|"right") => void
-  setSelectedLineHeight: (n:number) => void
-  setSelectedLetterSpacing: (n:number) => void
+  // доп. текстовые (десктоп)
+  setSelectedAlign?: (a:"left"|"center"|"right")=>void
+  setSelectedLH?: (lh:number)=>void
+  setSelectedLS?: (ls:number)=>void
   mobileTopOffset: number
   mobileLayers: MobileLayersProps
 }
@@ -73,6 +71,7 @@ const ico  = "w-4 h-4"
 const btn  = "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none touch-manipulation"
 const activeBtn = "bg-black text-white"
 
+// стоп-капчур — чтобы события не улетали в Stage
 const stopAll = {
   onPointerDownCapture: (e: any) => e.stopPropagation(),
   onPointerMoveCapture: (e: any) => e.stopPropagation(),
@@ -85,7 +84,7 @@ const stopAll = {
   onMouseUpCapture:     (e: any) => e.stopPropagation(),
 }
 
-/** палитра для десктопа (как было) */
+/** палитра (десктоп) */
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -97,49 +96,100 @@ const PALETTE = [
   "#A3E635","#22D3EE","#38BDF8","#60A5FA","#93C5FD","#FDE047",
 ]
 
-// ===== СВОЙ ГЛАДКИЙ СЛАЙДЕР (без input[type=range]) =====
-function SmoothSlider({
-  min, max, value, onChange, label, coarse=false,
-}:{
-  min:number; max:number; value:number; onChange:(n:number)=>void; label?:string; coarse?:boolean;
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [drag, setDrag] = useState(false)
-  const pct = (value-min)/(max-min)
+/** Слайдер: плавный, по центру, квадратный на мобиле, аккуратный на десктопе */
+const sliderCss = `
+:root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
+input[type="range"].ui{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+  touch-action:pan-x; /* не блокируем горизонтальный свайп */
+}
+input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:var(--thumb-desktop); height:var(--thumb-desktop);
+  background:currentColor; border:0; border-radius:0;
+  margin-top: calc((var(--track) - var(--thumb-desktop))/2);
+}
+@media (pointer:coarse){
+  input[type="range"].ui{ height:44px; }
+  input[type="range"].ui::-webkit-slider-thumb{
+    width:var(--thumb-mobile); height:var(--thumb-mobile);
+    margin-top: calc((var(--track) - var(--thumb-mobile))/2);
+  }
+}
+input[type="range"].ui::-moz-range-track{ height:var(--track); background:transparent; }
+input[type="range"].ui::-moz-range-thumb{
+  width:var(--thumb-desktop); height:var(--thumb-desktop); background:currentColor; border:0; border-radius:0;
+}
+@media (pointer:coarse){
+  input[type="range"].ui::-moz-range-thumb{ width:var(--thumb-mobile); height:var(--thumb-mobile); }
+}
+`
 
-  const setFromEvent = (clientX:number) => {
-    const el = ref.current!
-    const r = el.getBoundingClientRect()
-    const x = clamp(clientX - r.left, 0, r.width)
-    const v = min + (x / r.width) * (max-min)
-    onChange(v)
+/** Плавный range + pointer-capture: без дискретности на iOS/Android */
+function RangeCtl(props:{
+  value:number, min:number, max:number, step?:number|"any",
+  onChange:(n:number)=>void, className?:string
+}){
+  const ref = useRef<HTMLInputElement>(null)
+
+  // обновлять во время перетаскивания — через input
+  const onInput = (e: React.FormEvent<HTMLInputElement>) => {
+    props.onChange(parseFloat(e.currentTarget.value))
   }
 
+  // pointer-drag для строгого захвата
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let dragging = false
+
+    const getVal = (clientX:number) => {
+      const r = el.getBoundingClientRect()
+      const t = (clientX - r.left) / Math.max(1, r.width)
+      const v = props.min + clamp01(t) * (props.max - props.min)
+      return props.step==="any" || props.step==null
+        ? v
+        : Math.round(v / (props.step as number)) * (props.step as number)
+    }
+    const clamp01 = (x:number)=> Math.max(0, Math.min(1, x))
+
+    const onPointerDown = (ev: PointerEvent) => {
+      dragging = true
+      try { (ev.target as any).setPointerCapture?.(ev.pointerId) } catch {}
+      props.onChange(getVal(ev.clientX))
+      ev.preventDefault()
+    }
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!dragging) return
+      props.onChange(getVal(ev.clientX))
+      ev.preventDefault()
+    }
+    const onPointerUp = (_: PointerEvent) => { dragging = false }
+
+    el.addEventListener("pointerdown", onPointerDown, { passive:false })
+    el.addEventListener("pointermove", onPointerMove, { passive:false })
+    el.addEventListener("pointerup", onPointerUp, { passive:true })
+    return () => {
+      el.removeEventListener("pointerdown", onPointerDown as any)
+      el.removeEventListener("pointermove", onPointerMove as any)
+      el.removeEventListener("pointerup", onPointerUp as any)
+    }
+  }, [props.min, props.max, props.step, props.onChange])
+
   return (
-    <div className="relative h-8 select-none" ref={ref}
-      onPointerDown={(e)=>{ setDrag(true); (e.currentTarget as any).setPointerCapture?.(e.pointerId); setFromEvent(e.clientX) }}
-      onPointerMove={(e)=>{ if (drag) setFromEvent(e.clientX) }}
-      onPointerUp  ={()=> setDrag(false)}
-      onPointerCancel={()=> setDrag(false)}
-      style={{ touchAction: "none" }}
-    >
-      {/* трек */}
-      <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/80"/>
-      {/* бегунок */}
-      <div
-        className="absolute top-1/2 -translate-y-1/2 bg-black"
-        style={{
-          width: coarse ? 28 : 14,
-          height: coarse ? 28 : 14,
-          left: `calc(${(pct*100).toFixed(4)}% - ${(coarse?28:14)/2}px)`,
-        }}
-      />
-      {label && <div className="absolute right-0 -top-5 text-[10px]">{label}</div>}
-    </div>
+    <input
+      ref={ref}
+      type="range"
+      className={clx("ui", props.className)}
+      value={props.value}
+      min={props.min} max={props.max}
+      step={props.step ?? "any"}
+      onInput={onInput}
+      onChange={onInput}
+    />
   )
 }
-
-// ==============================
 
 export default function Toolbar(props: ToolbarProps) {
   const {
@@ -150,7 +200,7 @@ export default function Toolbar(props: ToolbarProps) {
     selectedKind, selectedProps,
     setSelectedFill, setSelectedStroke, setSelectedStrokeW,
     setSelectedText, setSelectedFontSize, setSelectedColor,
-    setSelectedAlign, setSelectedLineHeight, setSelectedLetterSpacing,
+    setSelectedAlign, setSelectedLH, setSelectedLS,
     mobileTopOffset, mobileLayers,
   } = props
 
@@ -183,8 +233,13 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
+    const Track = ({ className }: { className?: string }) =>
+      <div className={clx("pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] opacity-80 z-0", className)} />
+
     return (
       <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 280 }}>
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
+
         {/* header */}
         <div className="flex items-center justify-between border-b border-black/10" onMouseDown={(e)=>e.stopPropagation()}>
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
@@ -199,7 +254,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2" {...stopAll}>
-            {/* row 1 — инструменты + layers */}
+            {/* инструменты + layers */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -222,7 +277,7 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile}/>
             </div>
 
-            {/* row 2 — Color + Brush/Eraser size (аккуратный) */}
+            {/* цвет + толщина кисти */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <input
@@ -232,13 +287,14 @@ export default function Toolbar(props: ToolbarProps) {
                 className="w-6 h-6 border border-black p-0"
                 disabled={tool==="erase"}
               />
-              <div className="flex-1">
-                <SmoothSlider min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}/>
+              <div className="relative flex-1 text-black">
+                <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=>props.setBrushSize(Math.max(1, v))}/>
+                <Track className="bg-black" />
               </div>
               <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
             </div>
 
-            {/* палитра (десктоп — как было) */}
+            {/* палитра */}
             <div className="grid grid-cols-12 gap-1">
               {PALETTE.map((c)=>(
                 <button
@@ -250,7 +306,7 @@ export default function Toolbar(props: ToolbarProps) {
               ))}
             </div>
 
-            {/* SHAPES вставка (десктоп) */}
+            {/* SHAPES (десктоп) */}
             <div className="pt-1">
               <div className="text-[10px] mb-1">Shapes</div>
               <div className="flex">
@@ -262,43 +318,41 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* SELECTED TEXT — + выравнивание, line-height, letter-spacing */}
+            {/* TEXT controls (desktop) */}
             {props.selectedKind === "text" && (
               <div className="pt-1 space-y-2">
                 <div className="text-[10px]">Text</div>
-                <textarea
-                  value={props.selectedProps.text ?? ""}
-                  onChange={(e)=>{ props.setSelectedText(e.target.value) }}
-                  className="w-full h-16 border border-black p-1 text-sm"
-                  placeholder="Enter text"
-                />
+                <div className="flex gap-2">
+                  <button className={btn} onClick={()=>props.setSelectedAlign?.("left")} title="Align Left"><AlignLeft className={ico}/></button>
+                  <button className={btn} onClick={()=>props.setSelectedAlign?.("center")} title="Align Center"><AlignCenter className={ico}/></button>
+                  <button className={btn} onClick={()=>props.setSelectedAlign?.("right")} title="Align Right"><AlignRight className={ico}/></button>
+                </div>
 
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Font size</div>
-                  <div className="flex-1">
-                    <SmoothSlider min={8} max={800} value={props.selectedProps.fontSize ?? 96}
-                                  onChange={(v)=>props.setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+                  <div className="relative flex-1 text-black">
+                    <RangeCtl min={8} max={800} value={props.selectedProps.fontSize ?? 96} onChange={(v)=>props.setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
                   </div>
                   <div className="text-xs w-10 text-right">{props.selectedProps.fontSize ?? 96}</div>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <div className="text-[10px] w-12">Align</div>
-                  <button className={clx(btn, (props.selectedProps.align||"left")==="left" ? activeBtn : "bg-white")}  onClick={()=>props.setSelectedAlign("left")}><AlignLeft className={ico}/></button>
-                  <button className={clx(btn, (props.selectedProps.align||"left")==="center" ? activeBtn : "bg-white")} onClick={()=>props.setSelectedAlign("center")}><AlignCenter className={ico}/></button>
-                  <button className={clx(btn, (props.selectedProps.align||"left")==="right" ? activeBtn : "bg-white")} onClick={()=>props.setSelectedAlign("right")}><AlignRight className={ico}/></button>
-                </div>
-
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Line</div>
-                  <div className="flex-1"><SmoothSlider min={0.7} max={2.5} value={props.selectedProps.lineHeight ?? 1} onChange={(v)=>props.setSelectedLineHeight(v)}/></div>
-                  <div className="text-[10px] w-12 text-right">{(props.selectedProps.lineHeight ?? 1).toFixed(2)}</div>
+                  <div className="relative flex-1 text-black">
+                    <RangeCtl min={0.6} max={2.2} step={0.02} value={props.selectedProps.lineHeight ?? 1.0} onChange={(v)=>props.setSelectedLH?.(v)}/>
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                  </div>
+                  <div className="text-xs w-10 text-right">{(props.selectedProps.lineHeight ?? 1.0).toFixed(2)}</div>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] w-12">Letter</div>
-                  <div className="flex-1"><SmoothSlider min={-1} max={20} value={props.selectedProps.letterSpacing ?? 0} onChange={(v)=>props.setSelectedLetterSpacing(v)}/></div>
-                  <div className="text-[10px] w-12 text-right">{Math.round(props.selectedProps.letterSpacing ?? 0)}</div>
+                  <div className="relative flex-1 text-black">
+                    <RangeCtl min={-5} max={20} step={0.5} value={props.selectedProps.letterSpacing ?? 0} onChange={(v)=>props.setSelectedLS?.(v)}/>
+                    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                  </div>
+                  <div className="text-xs w-10 text-right">{(props.selectedProps.letterSpacing ?? 0).toFixed(1)}</div>
                 </div>
               </div>
             )}
@@ -308,9 +362,10 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
-  // =================== MOBILE (строго 3 строки) ===================
+  // =================== MOBILE (ровно 3 строки) ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
 
+  // upload — всегда смонтирован
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -318,27 +373,27 @@ export default function Toolbar(props: ToolbarProps) {
     e.currentTarget.value = ""
   }
 
+  const Track = () =>
+    <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+
   const tapTool = (t: "move"|"brush"|"erase"|"text"|"image"|"shape") => {
     if (t === "text") { setTool("text"); onAddText(); return }
     if (t === "image") { setTool("image"); requestAnimationFrame(()=> fileRef.current?.click()); return }
     setTool(t as Tool)
   }
 
+  // 2-я строка: зависит от активного инструмента
   const SettingsRow = () => {
     const fontSize = props.selectedProps.fontSize ?? 96
 
     if (tool === "brush") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px]">Color</div>
-          <input
-            type="color"
-            value={props.brushColor}
-            onChange={(e)=>{ props.setBrushColor(e.target.value); if (props.selectedKind) props.setSelectedColor(e.target.value) }}
-            className="w-8 h-8 border border-black p-0"
-          />
-          <div className="flex-1">
-            <SmoothSlider min={1} max={200} value={props.brushSize} onChange={(v)=> props.setBrushSize(Math.max(1, v))} coarse/>
+          <input type="color" value={props.brushColor} onChange={(e)=>{ setBrushColor(e.target.value); if (props.selectedKind) setSelectedColor(e.target.value) }} className="w-8 h-8 border border-black p-0"/>
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -347,10 +402,11 @@ export default function Toolbar(props: ToolbarProps) {
 
     if (tool === "erase") {
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
           <div className="text-[10px] w-12">Size</div>
-          <div className="flex-1">
-            <SmoothSlider min={1} max={200} value={props.brushSize} onChange={(v)=> props.setBrushSize(Math.max(1, v))} coarse/>
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={1} max={200} value={props.brushSize} onChange={(v)=> setBrushSize(Math.max(1, v))}/>
+            <Track />
           </div>
           <div className="text-xs w-10 text-right">{props.brushSize|0}</div>
         </div>
@@ -358,26 +414,27 @@ export default function Toolbar(props: ToolbarProps) {
     }
 
     if (tool === "text") {
-      // левая половина — короткое поле ввода, правая — фейдер размера
       return (
-        <div className="px-2 py-1 flex items-center gap-2" {...stopAll}>
+        <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
+          {/* слева — короткое поле ввода текста */}
           <input
             type="text"
             value={props.selectedProps.text ?? ""}
-            onChange={(e)=> props.setSelectedText(e.target.value)}
+            onChange={(e)=>props.setSelectedText(e.target.value)}
+            className="flex-[0.9] h-10 border border-black px-2 text-sm"
             placeholder="Text…"
-            className="flex-[0_0_45%] h-9 border border-black px-2 text-sm"
           />
-          <div className="flex-1">
-            <SmoothSlider min={8} max={800} value={fontSize} onChange={(v)=> props.setSelectedFontSize(Math.max(8, Math.min(800, v)))} coarse/>
+          {/* справа — половина фейдера font-size */}
+          <div className="relative flex-1 text-black">
+            <RangeCtl min={8} max={800} value={fontSize} onChange={(v)=> setSelectedFontSize(Math.max(8, Math.min(800, v)))}/>
+            <Track />
           </div>
-          <div className="text-xs w-10 text-right">{fontSize|0}</div>
         </div>
       )
     }
 
     if (tool === "image") {
-      // показ шейпов, как просил — чтобы не было пустоты; upload не дублируем
+      // чтобы не было пустоты — показываем те же шейпы, но без повторной кнопки upload
       return (
         <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
           <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
@@ -389,7 +446,7 @@ export default function Toolbar(props: ToolbarProps) {
       )
     }
 
-    // tool === "shape"
+    // shape
     return (
       <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
         <button className={btn} onClick={()=>onAddShape("square")}><Square className={ico}/></button>
@@ -406,7 +463,7 @@ export default function Toolbar(props: ToolbarProps) {
       {/* hidden input — всегда смонтирован */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
-      {/* LAYERS шторка (мобайл) */}
+      {/* LAYERS шторка */}
       {layersOpenM && (
         <div className="fixed inset-x-0 z-40 px-3 overflow-hidden" style={{ top: mobileTopOffset, bottom: 144 }} {...stopAll}>
           <div className={clx(wrap, "p-2 h-full flex flex-col")}>
@@ -418,18 +475,13 @@ export default function Toolbar(props: ToolbarProps) {
               {props.mobileLayers.items.map((l)=>(
                 <div
                   key={l.id}
-                  className={clx(
-                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
-                    props.mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : ""
-                  )}
+                  className={clx("flex items-center gap-2 border border-black px-2 py-1 bg-white", props.mobileLayers.selectedId===l.id ? "bg-black/5 ring-1 ring-black" : "")}
                   {...stopAll}
                 >
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onSelect(l.id)} title="Select">{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
-
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveUp(l.id)} title="Up">↑</button>
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveDown(l.id)} title="Down">↓</button>
-
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onDuplicate(l.id)} title="Duplicate"><Copy className="w-3.5 h-3.5"/></button>
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleLock(l.id)} title={l.locked?"Unlock":"Lock"}>
                     {l.locked ? <Lock className="w-3.5 h-3.5"/> : <Unlock className="w-3.5 h-3.5"/>}
@@ -447,13 +499,14 @@ export default function Toolbar(props: ToolbarProps) {
 
       {/* ===== 1-я строка: TOOLS / LAYERS / CLEAR ===== */}
       <div className="fixed inset-x-0 bottom-[144px] z-50 bg-white/95 border-t border-black/10" {...stopAll}>
+        <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
         <div className="px-2 py-1 flex items-center gap-1">
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="move" ? activeBtn : "bg-white")}  onClick={()=>tapTool("move")}><Move className={ico}/></button>
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="brush"? activeBtn : "bg-white")} onClick={()=>tapTool("brush")}><Brush className={ico}/></button>
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="erase"? activeBtn : "bg-white")} onClick={()=>tapTool("erase")}><Eraser className={ico}/></button>
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="text" ? activeBtn : "bg-white")}  onClick={()=>tapTool("text")}><TypeIcon className={ico}/></button>
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="image"? activeBtn : "bg-white")} onClick={()=>tapTool("image")}><ImageIcon className={ico}/></button>
-          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none touch-manipulation", tool==="shape"? activeBtn : "bg-white")} onClick={()=>tapTool("shape")}><Shapes className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="move" ? activeBtn : "bg-white")}  onClick={()=>tapTool("move")}><Move className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="brush"? activeBtn : "bg-white")} onClick={()=>tapTool("brush")}><Brush className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="erase"? activeBtn : "bg-white")} onClick={()=>tapTool("erase")}><Eraser className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="text" ? activeBtn : "bg-white")}  onClick={()=>tapTool("text")}><TypeIcon className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="image"? activeBtn : "bg-white")} onClick={()=>tapTool("image")}><ImageIcon className={ico}/></button>
+          <button className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool==="shape"? activeBtn : "bg-white")} onClick={()=>tapTool("shape")}><Shapes className={ico}/></button>
 
           <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
             <LayersIcon className={ico}/>
