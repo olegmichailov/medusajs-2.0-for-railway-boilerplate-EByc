@@ -7,14 +7,14 @@ import useImage from "use-image"
 import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
-
 import {
-  Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
+  Move, Brush, Eraser, Type as TypeIcon, Shapes as ShapesIco, Image as ImageIcon,
   Download, Layers as LayersIcon, X as ClearIcon,
-  Circle, Square, Triangle, Plus, Slash, AlignLeft, AlignCenter, AlignRight
+  Circle as CircleIco, Square as SquareIco, Triangle as TriangleIco, Plus, Slash,
+  AlignLeft, AlignCenter, AlignRight
 } from "lucide-react"
 
-// ===== БАЗА =====
+// ====== БАЗА ======
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
@@ -23,7 +23,7 @@ const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 // Текст — лимиты
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
-const TEXT_MAX_W  = BASE_W
+const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // Плавность и защита от дрожи
 const EPS  = 0.25
@@ -31,14 +31,14 @@ const DEAD = 0.01
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 const dist = (a:{x:number,y:number}, b:{x:number,y:number}) => Math.hypot(a.x-b.x, a.y-b.y)
-const angle = (a:{x:number,y:number}, b:{x:number,y:number}) => Math.atan2(b.y-a.y, b.x-a.x)
+const angleAB = (a:{x:number,y:number}, b:{x:number,y:number}) => Math.atan2(b.y-a.y, b.x-a.x)
 
-// ===== Стили фейдера =====
+// ====== стили фейдеров и кнопок (унифицировано для desktop+mobile) ======
 const SLIDER_CSS = `
 :root{ --thumb-desktop:14px; --thumb-mobile:28px; --track:2px; }
 input[type="range"].ui{
   -webkit-appearance:none; appearance:none;
-  width:100%; height:32px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
+  width:100%; height:36px; background:transparent; color:currentColor; margin:0; padding:0; display:block;
   touch-action:auto;
 }
 input[type="range"].ui::-webkit-slider-runnable-track{ height:var(--track); background:transparent; }
@@ -62,7 +62,7 @@ input[type="range"].ui::-moz-range-thumb{
 }
 `
 
-// ===== Типы слоёв =====
+// ====== Типы ======
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
 type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
 type AnyNode =
@@ -80,16 +80,24 @@ const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 const isImgOrRect   = (n: AnyNode) => n instanceof Konva.Image || n instanceof Konva.Rect
 
-// ===== Палитра (Desktop) =====
-const PALETTE = ["#000000","#FFFFFF","#FF0000","#00FF00","#0000FF","#FFD600","#FF6D00","#00B8D9","#8777D9","#FF4081","#8D6E63","#9E9E9E"]
+// ====== ПАЛИТРЫ ======
+const SWATCHES = [
+  "#000000","#FFFFFF","#FF1493","#FF007F","#FF5400","#FFB800","#FFD400",
+  "#FFEE00","#9DFF00","#1BFF00","#00F5FF","#00A3FF","#0066FF","#7A00FF",
+  "#B300FF","#FF00E6","#FF99CC","#FF6666","#FF9966","#FFCC66","#FFFF66",
+  "#CCFF66","#99FF66","#66FF66","#66FF99","#66FFCC","#66FFFF","#66CCFF",
+  "#6699FF","#6666FF","#9966FF","#CC66FF"
+]
 
+// ======================================================================
+//   ОСНОВНОЙ КОМПОНЕНТ
+// ======================================================================
 export default function EditorCanvas() {
   const {
     side, set, tool, brushColor, brushSize,
     selectedId, select, showLayers
   } = useDarkroom()
 
-  // iOS хит-тест во время drag
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
 
@@ -114,7 +122,7 @@ export default function EditorCanvas() {
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
-  // единый rAF — без моргания
+  // единый rAF
   const rafId = useRef<number | null>(null)
   const scheduleUI = () => {
     if (rafId.current != null) return
@@ -132,27 +140,26 @@ export default function EditorCanvas() {
   const isTransformingRef = useRef(false)
   const isEditingTextRef  = useRef(false)
 
-  // ===== Верстка/масштаб =====
-  const [headerH, setHeaderH] = useState(48)
+  // ===== Вёрстка/масштаб =====
+  const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
-    setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 48))
+    setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 64))
   }, [])
 
-  const ROW_H_M = 48 // высота строки моб. тулбара
-  const DESK_TOOLBAR_H = 88 // высота десктоп тулбара
+  const ROW_H = isMobile ? 48 : 0
   const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + (isMobile ? 4 : 8)
-    const padBottom = isMobile ? ROW_H_M * 3 + 8 : (DESK_TOOLBAR_H + 16)
+    const padBottom = isMobile ? ROW_H * 3 + 6 : 64
     const maxW = vw - (isMobile ? 8 : 24)
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // блокируем прокрутку страницы внутри редактора
+  // блокируем прокрутку внутри редактора
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -164,15 +171,14 @@ export default function EditorCanvas() {
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
+  const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
+  const currentArt = () => artGroup(side)
+  const nextTopZ   = () => (currentArt().children?.length ?? 0)
 
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
   }
-
-  const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
-  const currentArt = () => artGroup(side)
-  const nextTopZ   = () => (currentArt().children?.length ?? 0)
 
   // показываем только активную сторону
   useEffect(() => {
@@ -186,7 +192,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer для текста — антискачок =====
+  // ===== Transformer & текст без дрожи =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
@@ -243,7 +249,6 @@ export default function EditorCanvas() {
       const t = n as Konva.Text
       const onTextStart = () => { textSnapRef.current = captureTextSnap(t) }
       const onTextEnd   = () => { textSnapRef.current = null }
-
       t.off(".text-bind")
       t.on("transformstart.text-bind", onTextStart)
       t.on("transformend.text-bind",   onTextEnd)
@@ -274,7 +279,6 @@ export default function EditorCanvas() {
         // углы/вертикаль — только fontSize (центр держим)
         const s = Math.max(ratioW, ratioH)
         if (Math.abs(s - 1) < DEAD) return oldBox
-
         const nextFS = clamp(Math.round(snap.fs0 * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
@@ -296,7 +300,7 @@ export default function EditorCanvas() {
       t.on("transformend.text-bind", onTextNormalize)
       detachTextFix.current = () => { t.off(".text-bind") }
     } else {
-      // не текст — впаиваем размер в геометрию
+      // не текст — впаиваем масштаб в геометрию
       const onTransform = () => {
         const active = (trRef.current && (trRef.current as any).getActiveAnchor)
           ? (trRef.current as any).getActiveAnchor()
@@ -304,12 +308,8 @@ export default function EditorCanvas() {
 
         let sx = (n as any).scaleX ? (n as any).scaleX() : 1
         let sy = (n as any).scaleY ? (n as any).scaleY() : 1
-
         const isCorner = active === "top-left" || active === "top-right" || active === "bottom-left" || active === "bottom-right"
-        if (isCorner) {
-          const s = Math.max(Math.abs(sx), Math.abs(sy))
-          sx = s; sy = s
-        }
+        if (isCorner) { const s = Math.max(Math.abs(sx), Math.abs(sy)); sx = s; sy = s }
 
         if (isImgOrRect(n)) {
           const w = (n as any).width ? (n as any).width() : 0
@@ -324,8 +324,6 @@ export default function EditorCanvas() {
           if ((n as any).radius) (n as any).radius(Math.max(1, r * s))
           if ((n as any).scaleX) (n as any).scaleX(1)
           if ((n as any).scaleY) (n as any).scaleY(1)
-        } else {
-          // Group/Line — оставляем scale
         }
         scheduleUI()
       }
@@ -340,7 +338,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // brush/erase — отключаем драг
+  // brush/erase — отключаем drag
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -354,7 +352,7 @@ export default function EditorCanvas() {
     if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
-  // ===== хоткеи (desktop) =====
+  // ===== хоткеи (desktop)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
@@ -381,16 +379,12 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  // ===== Рисование =====
+  // ===== Рисование
   const ensureStrokeGroup = (): AnyLayer => {
     let gid = currentStrokeId.current[side]
     if (gid) {
       const ex = find(gid)!
-      if (ex && ex.meta.opacity < 1) {
-        ex.node.opacity(1)
-        ex.meta.opacity = 1
-        scheduleUI()
-      }
+      if (ex && ex.node.opacity() < 0.02) { ex.node.opacity(1); ex.meta.opacity = 1; scheduleUI() }
       return ex!
     }
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isStrokes = true
@@ -404,7 +398,6 @@ export default function EditorCanvas() {
     select(id)
     return newLay
   }
-
   const ensureEraseGroup = (): AnyLayer => {
     let gid = currentEraseId.current[side]
     if (gid) return find(gid)!
@@ -463,9 +456,8 @@ export default function EditorCanvas() {
       fontFamily: siteFont(),
       fontStyle: "bold",
       fill: brushColor, width: 720, align: "center",
-      lineHeight: 1.2,
       draggable: true,
-    } as any)
+    })
     t.id(uid()); const id = t.id()
     const meta = baseMeta(`text ${seqs.text}`)
     currentArt().add(t); t.zIndex(nextTopZ())
@@ -555,7 +547,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста (VisualViewport-safe) =====
+  // ===== Overlay-редактор текста (фиксация клавы на мобиле)
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stContainer = stage.container()
@@ -591,8 +583,8 @@ export default function EditorCanvas() {
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
       fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
       fontSize:   `${t.fontSize() * abs.y}px`,
-      lineHeight: String((t as any).lineHeight?.() ?? 1.2),
-      letterSpacing: `${(((t as any).letterSpacing?.() ?? 0)) * abs.x}px`,
+      lineHeight: String(t.lineHeight()),
+      letterSpacing: `${((t as any).letterSpacing?.() ?? 0) * abs.x}px`,
       whiteSpace: "pre-wrap", overflow: "hidden", outline: "none", resize: "none",
       transformOrigin: "left top", zIndex: "9999", userSelect: "text",
       caretColor: String(t.fill() || "#000"),
@@ -642,24 +634,15 @@ export default function EditorCanvas() {
     ;(window as any).visualViewport?.addEventListener?.("scroll", place as any)
   }
 
-  // ===== Жесты: пинч-масштаб + поворот =====
-  const isTransformerChild = (t: Konva.Node | null) => {
-    let p: Konva.Node | null | undefined = t
-    const tr = trRef.current as unknown as Konva.Node | null
-    while (p) { if (tr && p === tr) return true; p = p.getParent?.() }
-    return false
-  }
-  const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
-  const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
-
+  // ===== Жесты (pinch scale + rotate, центр между пальцами)
   type PinchSnap = {
     node: AnyNode
     isText: boolean
     startDist: number
     startAngle: number
+    rot0: number
     cx0: number
     cy0: number
-    rot0: number
     text?: TextSnap
     w0?: number; h0?: number
     r0?: number
@@ -682,11 +665,11 @@ export default function EditorCanvas() {
     return arr
   }
 
-  // mouse
   const onMouseDown = (e: any) => {
     if (isTransformerChild(e.target)) return
     if (tool === "brush" || tool === "erase") {
-      const sp = getStagePointer(); const p = toCanvas(sp)
+      const sp = stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+      const p = { x: sp.x/scale, y: sp.y/scale }
       startStroke(p.x, p.y); return
     }
     const st = stageRef.current!
@@ -703,12 +686,12 @@ export default function EditorCanvas() {
     if (isTransformingRef.current || isEditingTextRef.current) return
     if (isTransformerChild(e.target)) return
     if (!isDrawing) return
-    const p = toCanvas(getStagePointer())
+    const sp = stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+    const p = { x: sp.x/scale, y: sp.y/scale }
     appendStroke(p.x, p.y)
   }
   const onMouseUp = () => { if (isDrawing) finishStroke() }
 
-  // touch
   const onTouchStart = (e: any) => {
     const evt: TouchEvent = e.evt
     if (isEditingTextRef.current) return
@@ -717,20 +700,25 @@ export default function EditorCanvas() {
     if (touches.length >= 2 && tool === "move" && selectedId) {
       const n = node(selectedId); if (!n) return
       const a = touches[0], b = touches[1]
-      pinchRef.current = {
-        node: n,
-        isText: isTextNode(n),
-        startDist: dist(a,b),
-        startAngle: angle(a,b),
-        cx0: (a.x + b.x) / 2,
-        cy0: (a.y + b.y) / 2,
-        rot0: (n as any).rotation?.() ?? 0,
-        text: isTextNode(n) ? captureTextSnap(n) : undefined,
-        w0: isImgOrRect(n) ? ((n as any).width?.() ?? 1) : undefined,
-        h0: isImgOrRect(n) ? ((n as any).height?.() ?? 1) : undefined,
-        r0: (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) ? ((n as any).radius?.() ?? 1) : undefined,
-        sx0: ("scaleX" in (n as any)) ? ((n as any).scaleX?.() ?? 1) : undefined,
-        sy0: ("scaleY" in (n as any)) ? ((n as any).scaleY?.() ?? 1) : undefined,
+      const startDist = dist(a,b)
+      const cx0 = (a.x + b.x) / 2
+      const cy0 = (a.y + b.y) / 2
+      const startAngle = angleAB(a,b)
+      const rot0 = (n as any).rotation ? (n as any).rotation() : 0
+
+      if (isTextNode(n)) {
+        pinchRef.current = { node: n, isText: true, startDist, startAngle, rot0, cx0, cy0, text: captureTextSnap(n) }
+      } else if (isImgOrRect(n)) {
+        const w0 = (n as any).width ? (n as any).width() : 1
+        const h0 = (n as any).height ? (n as any).height() : 1
+        pinchRef.current = { node: n, isText: false, startDist, startAngle, rot0, cx0, cy0, w0, h0 }
+      } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
+        const r0 = (n as any).radius ? (n as any).radius() : 1
+        pinchRef.current = { node: n, isText: false, startDist, startAngle, rot0, cx0, cy0, r0 }
+      } else {
+        const sx0 = (n as any).scaleX ? (n as any).scaleX() : 1
+        const sy0 = (n as any).scaleY ? (n as any).scaleY() : 1
+        pinchRef.current = { node: n, isText: false, startDist, startAngle, rot0, cx0, cy0, sx0, sy0 }
       }
       evt.preventDefault()
       return
@@ -758,28 +746,24 @@ export default function EditorCanvas() {
     if (pinchRef.current && touches.length >= 2) {
       const a = touches[0], b = touches[1]
       const s = dist(a,b) / Math.max(1e-6, pinchRef.current.startDist)
-      const ang = angle(a,b)
-      const dAng = (ang - pinchRef.current.startAngle) * 180 / Math.PI
+      const ang = angleAB(a,b)
+      const deltaDeg = ((ang - pinchRef.current.startAngle) * 180) / Math.PI
 
       const snap = pinchRef.current
       const n = snap.node
 
-      // РОТАЦИЯ
-      if ((n as any).rotation) {
-        (n as any).rotation(snap.rot0 + dAng)
-      }
+      if ((n as any).rotation) (n as any).rotation(snap.rot0 + deltaDeg)
 
-      // СКЕЙЛ
       if (snap.isText && isTextNode(n) && snap.text) {
         const nextFS = clamp(Math.round(snap.text.fs0 * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(n.fontSize() - nextFS) > EPS) {
           n.fontSize(nextFS)
+          const self = (n as any).getSelfRect?.() || { width: Math.max(1, n.width() || snap.text.wrap0), height: Math.max(1, (n.height() || 1)) }
+          const nw = Math.max(1, n.width() || self.width)
+          const nh = Math.max(1, self.height)
+          n.x(Math.round(snap.text.cx0 - nw/2))
+          n.y(Math.round(snap.text.cy0 - nh/2))
         }
-        const self = (n as any).getSelfRect?.() || { width: Math.max(1, n.width() || snap.text.wrap0), height: Math.max(1, (n.height() || 1)) }
-        const nw = Math.max(1, n.width() || self.width)
-        const nh = Math.max(1, self.height)
-        n.x(Math.round(snap.text.cx0 - nw/2))
-        n.y(Math.round(snap.text.cy0 - nh/2))
         n.scaleX(1); n.scaleY(1)
         scheduleUI(); evt.preventDefault(); return
       }
@@ -805,18 +789,10 @@ export default function EditorCanvas() {
         scheduleUI(); evt.preventDefault(); return
       }
 
-      // Group/Line
       if ("scaleX" in (n as any)) {
         const sx = (snap.sx0 ?? 1) * s
         const sy = (snap.sy0 ?? 1) * s
         ;(n as any).scaleX(sx); (n as any).scaleY(sy)
-        const bbox = (n as any).getClientRect?.() || { x: (n as any).x?.() ?? 0, y: (n as any).y?.() ?? 0, width: 0, height: 0 }
-        const cx = bbox.x + bbox.width / 2
-        const cy = bbox.y + bbox.height / 2
-        if ((n as any).x && (n as any).y && isFinite(cx) && isFinite(cy)) {
-          ;(n as any).x((n as any).x() + (snap.cx0 - cx))
-          ;(n as any).y((n as any).y() + (snap.cy0 - cy))
-        }
         scheduleUI(); evt.preventDefault(); return
       }
     }
@@ -828,11 +804,17 @@ export default function EditorCanvas() {
       evt.preventDefault()
     }
   }
-
   const onTouchEnd = (e: any) => {
     const evt: TouchEvent = e.evt
     if (pinchRef.current && evt.touches.length < 2) pinchRef.current = null
     if (isDrawing && evt.touches.length === 0) finishStroke()
+  }
+
+  const isTransformerChild = (t: Konva.Node | null) => {
+    let p: Konva.Node | null | undefined = t
+    const tr = trRef.current as unknown as Konva.Node | null
+    while (p) { if (tr && p === tr) return true; p = p.getParent?.() }
+    return false
   }
 
   // ===== Данные для панелей =====
@@ -908,12 +890,7 @@ export default function EditorCanvas() {
     scheduleUI()
   }
 
-  const onLayerSelect = (id: string) => {
-    select(id)
-    if (tool !== "move") set({ tool: "move" })
-  }
-
-  // ===== Свойства выбранного узла =====
+  // ===== Свойства выбранного узла
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -923,8 +900,8 @@ export default function EditorCanvas() {
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
       align: (sel.node as any).align?.() as "left"|"center"|"right" | undefined,
-      lineHeight: (sel.node as any).lineHeight?.() as number | undefined,
-      letterSpacing: (sel.node as any).letterSpacing?.() as number | undefined,
+      lineHeight: (sel.node as any).lineHeight?.() ?? 1,
+      letterSpacing: (sel.node as any).letterSpacing?.() ?? 0,
     }
     : sel && (sel.node as any).fill ? {
       fill: (sel.node as any).fill ? (sel.node as any).fill() : "#000000",
@@ -933,14 +910,14 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n || !n.fill) return; n.fill(hex); scheduleUI() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n || typeof n.stroke !== "function") return; n.stroke(hex); scheduleUI() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n || typeof n.strokeWidth !== "function") return; n.strokeWidth(w); scheduleUI() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); scheduleUI() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); scheduleUI() }
-  const setSelectedAlign      = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).align?.(a); scheduleUI() }
-  const setSelectedLineHeight = (lh:number)   => { const n = sel?.node as any; if (!n?.lineHeight) return; n.lineHeight(Math.max(0.4, Math.min(4, lh))); scheduleUI() }
-  const setSelectedLetterSp   = (ls:number)   => { const n = sel?.node as any; if (!n?.letterSpacing) return; n.letterSpacing(Math.max(-10, Math.min(80, ls))); scheduleUI() }
+  const setSelectedFill            = (hex:string) => { const n = sel?.node as any; if (!n || !n.fill) return; n.fill(hex); scheduleUI() }
+  const setSelectedStroke          = (hex:string) => { const n = sel?.node as any; if (!n || typeof n.stroke !== "function") return; n.stroke(hex); scheduleUI() }
+  const setSelectedStrokeW         = (w:number)    => { const n = sel?.node as any; if (!n || typeof n.strokeWidth !== "function") return; n.strokeWidth(w); scheduleUI() }
+  const setSelectedText            = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); scheduleUI() }
+  const setSelectedFontSize        = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); scheduleUI() }
+  const setSelectedAlign           = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).align?.(a); scheduleUI() }
+  const setSelectedLineHeight      = (v:number) => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).lineHeight?.(clamp(v, 0.6, 3)); scheduleUI() }
+  const setSelectedLetterSpacing   = (v:number) => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).letterSpacing?.(clamp(v, -2, 60)); scheduleUI() }
 
   const setSelectedColor = (hex:string)  => {
     if (!sel) return
@@ -964,7 +941,7 @@ export default function EditorCanvas() {
     scheduleUI()
   }
 
-  // ===== Clear =====
+  // ===== Clear
   const clearArt = () => {
     const g = currentArt(); if (!g) return
     g.removeChildren()
@@ -975,7 +952,7 @@ export default function EditorCanvas() {
     scheduleUI()
   }
 
-  // ===== Скачивание (два файла: с мокапом и отдельно арт) =====
+  // ===== Скачивание (2 файла подряд)
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -1004,7 +981,7 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ===== UI helpers =====
+  // ===== UI helpers
   const clx = (...cs:(string|false|undefined)[]) => cs.filter(Boolean).join(" ")
   const stopAll = {
     onPointerDownCapture: (e: any) => e.stopPropagation(),
@@ -1018,19 +995,22 @@ export default function EditorCanvas() {
     onMouseUpCapture:     (e: any) => e.stopPropagation(),
   }
   const ico  = "w-4 h-4"
+  const btn  = "h-10 px-2 grid place-items-center border border-black bg-white rounded-none touch-manipulation"
+  const btnSq= "h-10 w-10 grid place-items-center border border-black bg-white rounded-none touch-manipulation"
+  const activeBtn = "bg-black text-white"
   const wrap = "backdrop-blur bg-white/90 border-t border-black/10"
 
-  // ===== РЕНДЕР =====
+  // ===== Рендер
   return (
     <div className="fixed inset-0 bg-white" style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}>
       <style dangerouslySetInnerHTML={{ __html: SLIDER_CSS }} />
 
-      {/* Desktop: левый сайдбар слоёв */}
+      {/* LEFT Layers (desktop) */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
           selectId={selectedId}
-          onSelect={onLayerSelect}
+          onSelect={(id)=>{ select(id); if (tool!=="move") set({ tool: "move" }) }}
           onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
           onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
           onDelete={deleteLayer}
@@ -1041,12 +1021,138 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Desktop: кнопка Layers вверху */}
+      {/* RIGHT TOP — быстрые кнопки + Download (desktop) */}
       {!isMobile && (
         <div className="fixed top-4 right-4 flex gap-2 z-50" {...stopAll}>
           <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>set({ showLayers: !showLayers })}>
             <LayersIcon className={ico}/><span className="text-xs">Layers</span>
           </button>
+          <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("front")}>
+            <Download className={ico}/><span className="text-xs">Front</span>
+          </button>
+          <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("back")}>
+            <Download className={ico}/><span className="text-xs">Back</span>
+          </button>
+        </div>
+      )}
+
+      {/* Desktop toolbar (полный) */}
+      {!isMobile && (
+        <div className="fixed left-4 top-[88px] w-[320px] border border-black bg-white z-50" {...stopAll}>
+          <div className="p-2 border-b border-black flex flex-wrap gap-2">
+            <button className={clx(btnSq, tool==="move"  ? activeBtn : "")}  onClick={()=>set({ tool:"move"  })}><Move className={ico}/></button>
+            <button className={clx(btnSq, tool==="brush" ? activeBtn : "")} onClick={()=>set({ tool:"brush" })}><Brush className={ico}/></button>
+            <button className={clx(btnSq, tool==="erase" ? activeBtn : "")} onClick={()=>set({ tool:"erase" })}><Eraser className={ico}/></button>
+            <button className={clx(btnSq, tool==="text"  ? activeBtn : "")} onClick={()=>{ set({ tool:"text" }); onAddText() }}><TypeIcon className={ico}/></button>
+            <button className={clx(btnSq, tool==="image" ? activeBtn : "")} onClick={()=>{ set({ tool:"image" }); document.getElementById("darkroom-upload-desktop")?.dispatchEvent(new MouseEvent("click",{bubbles:true})) }}><ImageIcon className={ico}/></button>
+            <button className={clx(btnSq, tool==="shape" ? activeBtn : "")} onClick={()=>set({ tool:"shape" })}><ShapesIco className={ico}/></button>
+            <div className="ml-auto">
+              <button className={clx(btn)} onClick={clearArt}><ClearIcon className={ico}/></button>
+            </div>
+          </div>
+
+          {/* upload input (desktop) */}
+          <input id="darkroom-upload-desktop" type="file" accept="image/*" className="hidden"
+                 onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUploadImage(f); (e.currentTarget as HTMLInputElement).value="" }} />
+
+          {/* Brush / Erase */}
+          {(tool==="brush" || tool==="erase") && (
+            <div className="p-2 border-b border-black flex items-center gap-2">
+              {tool==="brush" && (<>
+                <div className="text-xs">Color</div>
+                <input type="color" value={brushColor}
+                       onChange={(e)=>{ set({ brushColor:e.target.value }); if (selectedKind) setSelectedColor(e.target.value) }}
+                       className="w-8 h-8 border border-black p-0 bg-white"/>
+              </>)}
+              <div className="text-xs w-10">Size</div>
+              <div className="relative flex-1 text-black">
+                <input type="range" min={1} max={200} step="any" value={brushSize}
+                       className="ui"
+                       onInput={(e)=>set({ brushSize: Math.max(1, parseFloat((e.currentTarget as HTMLInputElement).value)) })}
+                       onChange={(e)=>set({ brushSize: Math.max(1, parseFloat((e.currentTarget as HTMLInputElement).value)) })}/>
+                <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+              </div>
+              <div className="text-xs w-10 text-right">{brushSize|0}</div>
+            </div>
+          )}
+
+          {/* Text settings (полный) */}
+          {selectedKind==="text" && (
+            <div className="p-2 border-b border-black space-y-2">
+              <div className="flex gap-2">
+                <input type="text" className="h-9 flex-1 border border-black px-2 bg-white"
+                       placeholder="Введите текст"
+                       value={(selectedProps as any).text ?? ""}
+                       onChange={(e)=> setSelectedText(e.target.value)} />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="text-xs w-16">Font</div>
+                <div className="relative flex-1 text-black">
+                  <input type="range" min={8} max={800} step="any"
+                         value={(selectedProps as any).fontSize ?? 96}
+                         className="ui"
+                         onInput={(e)=> setSelectedFontSize(parseFloat((e.currentTarget as HTMLInputElement).value))}
+                         onChange={(e)=> setSelectedFontSize(parseFloat((e.currentTarget as HTMLInputElement).value))}/>
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                </div>
+                <div className="w-12 text-right text-xs">{(selectedProps as any).fontSize ?? 96}</div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="text-xs w-16">Line</div>
+                <div className="relative flex-1 text-black">
+                  <input type="range" min={0.6} max={3} step="0.05"
+                         value={(selectedProps as any).lineHeight ?? 1}
+                         className="ui"
+                         onInput={(e)=> setSelectedLineHeight(parseFloat((e.currentTarget as HTMLInputElement).value))}
+                         onChange={(e)=> setSelectedLineHeight(parseFloat((e.currentTarget as HTMLInputElement).value))}/>
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                </div>
+                <div className="w-12 text-right text-xs">{((selectedProps as any).lineHeight ?? 1).toFixed(2)}</div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="text-xs w-16">Letters</div>
+                <div className="relative flex-1 text-black">
+                  <input type="range" min={-2} max={60} step="1"
+                         value={(selectedProps as any).letterSpacing ?? 0}
+                         className="ui"
+                         onInput={(e)=> setSelectedLetterSpacing(parseFloat((e.currentTarget as HTMLInputElement).value))}
+                         onChange={(e)=> setSelectedLetterSpacing(parseFloat((e.currentTarget as HTMLInputElement).value))}/>
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black opacity-80" />
+                </div>
+                <div className="w-12 text-right text-xs">{(selectedProps as any).letterSpacing ?? 0}</div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button className={clx(btnSq, ((selectedProps as any).align ?? "left")==="left" ? activeBtn : "")}
+                        onClick={()=>setSelectedAlign("left")}><AlignLeft className={ico}/></button>
+                <button className={clx(btnSq, ((selectedProps as any).align ?? "left")==="center" ? activeBtn : "")}
+                        onClick={()=>setSelectedAlign("center")}><AlignCenter className={ico}/></button>
+                <button className={clx(btnSq, ((selectedProps as any).align ?? "left")==="right" ? activeBtn : "")}
+                        onClick={()=>setSelectedAlign("right")}><AlignRight className={ico}/></button>
+              </div>
+            </div>
+          )}
+
+          {/* Цветовые свотчи (для выбранного узла) */}
+          <div className="p-2 grid grid-cols-8 gap-[6px]">
+            {SWATCHES.map((c) => (
+              <button key={c} className="h-5 w-5 border border-black" style={{ background:c }} onClick={()=>setSelectedColor(c)} />
+            ))}
+          </div>
+
+          {/* Shapes mini */}
+          {tool==="shape" && (
+            <div className="p-2 border-t border-black flex gap-2">
+              <button className={btnSq} onClick={()=>onAddShape("square")}><SquareIco className={ico}/></button>
+              <button className={btnSq} onClick={()=>onAddShape("circle")}><CircleIco className={ico}/></button>
+              <button className={btnSq} onClick={()=>onAddShape("triangle")}><TriangleIco className={ico}/></button>
+              <button className={btnSq} onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
+              <button className={btnSq} onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1056,9 +1162,7 @@ export default function EditorCanvas() {
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
             ref={stageRef}
-            // мышь
             onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-            // тач
             onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
           >
             <Layer ref={bgLayerRef} listening={true}>
@@ -1085,137 +1189,26 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* ===== DESKTOP TOOLBAR (полный) ===== */}
-      {!isMobile && (
-        <div className={clx("fixed inset-x-0 bottom-0 z-50", wrap)} style={{ height: DESK_TOOLBAR_H }} {...stopAll}>
-          <div className="h-full px-3 py-2 grid grid-cols-12 gap-3 items-center text-sm">
-            {/* Tools */}
-            <div className="col-span-2 flex items-center gap-2">
-              <button className={btnDesk(tool==="move")}  onClick={()=>set({ tool: "move" })}><Move className={ico}/></button>
-              <button className={btnDesk(tool==="brush")} onClick={()=>set({ tool: "brush" })}><Brush className={ico}/></button>
-              <button className={btnDesk(tool==="erase")} onClick={()=>set({ tool: "erase" })}><Eraser className={ico}/></button>
-              <button className={btnDesk(tool==="text")}  onClick={()=>{ set({ tool: "text" }); onAddText() }}><TypeIcon className={ico}/></button>
-              <button className={btnDesk(tool==="image")} onClick={()=>{ set({ tool: "image" }); document.getElementById("darkroom-upload-d")?.dispatchEvent(new MouseEvent("click", { bubbles: true })) }}><ImageIcon className={ico}/></button>
-              <button className={btnDesk(tool==="shape")} onClick={()=>set({ tool: "shape" })}><Shapes className={ico}/></button>
-              <input id="darkroom-upload-d" type="file" accept="image/*" className="hidden" onChange={(e)=>{ const f = e.target.files?.[0]; if (f) onUploadImage(f); (e.currentTarget as HTMLInputElement).value="" }} />
-            </div>
-
-            {/* Palette / Color */}
-            <div className="col-span-3 flex items-center gap-2">
-              <input type="color" value={brushColor} onChange={(e)=>{ set({ brushColor: e.target.value }); if (selectedKind) setSelectedColor(e.target.value) }} className="w-9 h-9 border border-black bg-white" />
-              <div className="flex flex-wrap gap-1">
-                {PALETTE.map(c=>(
-                  <button key={c} className="w-6 h-6 border border-black" style={{ background: c }} onClick={()=>{ set({ brushColor: c }); if (selectedKind) setSelectedColor(c) }} />
-                ))}
-              </div>
-            </div>
-
-            {/* Brush/Eraser size */}
-            <div className="col-span-2 flex items-center gap-2">
-              <div className="w-14 text-[11px]">{tool==="erase" ? "Erase" : "Brush"} size</div>
-              <div className="relative flex-1">
-                <input type="range" min={1} max={200} step="any" value={brushSize} className="ui"
-                  onInput={(e)=>set({ brushSize: Math.max(1, parseFloat((e.currentTarget as HTMLInputElement).value)) })}
-                  onChange={(e)=>set({ brushSize: Math.max(1, parseFloat((e.currentTarget as HTMLInputElement).value)) })} />
-                <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/80" />
-              </div>
-              <div className="w-10 text-right text-xs">{brushSize|0}</div>
-            </div>
-
-            {/* Shapes quick */}
-            <div className="col-span-2 flex items-center gap-1">
-              <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-              <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-              <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-              <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-              <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-            </div>
-
-            {/* Text block (полный) */}
-            <div className="col-span-3 flex items-center gap-2">
-              <input
-                type="text"
-                className="h-9 flex-[0.9] border border-black px-2 bg-white"
-                placeholder="Введите текст"
-                value={(selectedKind==="text" ? (selectedProps as any).text : "") ?? ""}
-                onChange={(e)=> setSelectedText(e.target.value)}
-              />
-              <div className="flex items-center gap-1">
-                <button className={btnDeskSmall((selectedKind==="text"?(selectedProps as any).align:"left")==="left")}  onClick={()=>setSelectedAlign("left")}><AlignLeft className={ico}/></button>
-                <button className={btnDeskSmall((selectedKind==="text"?(selectedProps as any).align:"left")==="center")} onClick={()=>setSelectedAlign("center")}><AlignCenter className={ico}/></button>
-                <button className={btnDeskSmall((selectedKind==="text"?(selectedProps as any).align:"left")==="right")} onClick={()=>setSelectedAlign("right")}><AlignRight className={ico}/></button>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-3 pb-2 grid grid-cols-12 gap-3 items-center text-[12px]">
-            {/* Font size */}
-            <div className="col-span-4 flex items-center gap-2">
-              <div className="w-20">Font size</div>
-              <div className="relative flex-1">
-                <input type="range" min={8} max={800} step="any" value={(selectedKind==="text" ? (selectedProps as any).fontSize : 96) ?? 96} className="ui"
-                  onInput={(e)=> setSelectedFontSize(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                  onChange={(e)=> setSelectedFontSize(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                />
-                <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/80" />
-              </div>
-            </div>
-
-            {/* Line height */}
-            <div className="col-span-4 flex items-center gap-2">
-              <div className="w-24">Line height</div>
-              <div className="relative flex-1">
-                <input type="range" min={0.6} max={3.0} step="any" value={(selectedKind==="text" ? (selectedProps as any).lineHeight ?? 1.2 : 1.2)} className="ui"
-                  onInput={(e)=> setSelectedLineHeight(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                  onChange={(e)=> setSelectedLineHeight(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                />
-                <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/80" />
-              </div>
-            </div>
-
-            {/* Letter spacing */}
-            <div className="col-span-4 flex items-center gap-2">
-              <div className="w-28">Letter spacing</div>
-              <div className="relative flex-1">
-                <input type="range" min={-10} max={80} step="any" value={(selectedKind==="text" ? (selectedProps as any).letterSpacing ?? 0 : 0)} className="ui"
-                  onInput={(e)=> setSelectedLetterSp(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                  onChange={(e)=> setSelectedLetterSp(parseFloat((e.currentTarget as HTMLInputElement).value))}
-                />
-                <div className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[2px] bg-black/80" />
-              </div>
-            </div>
-
-            {/* Downloads + Clear */}
-            <div className="col-span-12 flex items-center justify-end gap-2 mt-1">
-              <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("front")}><Download className={ico}/><span>Front</span></button>
-              <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("back")}><Download className={ico}/><span>Back</span></button>
-              <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={clearArt}><ClearIcon className={ico}/><span>Clear side</span></button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== МОБИЛЬНЫЙ НИЖНИЙ UI: 3 строки ===== */}
+      {/* ===== МОБИЛЬНЫЙ НИЖНИЙ UI (3 ряда) ===== */}
       {isMobile && (
         <>
-          {/* hidden file input */}
           <input
             id="darkroom-upload"
             type="file" accept="image/*" className="hidden"
             onChange={(e)=>{ const f = e.target.files?.[0]; if (f) onUploadImage(f); (e.currentTarget as HTMLInputElement).value="" }}
           />
 
-          {/* 1-я строка: TOOLS / LAYERS / CLEAR */}
-          <div className={clx("fixed inset-x-0 z-50", wrap)} style={{ bottom: ROW_H_M*2 }}>
+          {/* 1-я строка: инструменты + Layers + Clear */}
+          <div className={clx("fixed inset-x-0 z-50", wrap)} style={{ bottom: ROW_H*2 }}>
             <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
-              <button className={btnMob(tool==="move")}  onClick={()=>set({ tool: "move" })}><Move className={ico}/></button>
-              <button className={btnMob(tool==="brush")} onClick={()=>set({ tool: "brush" })}><Brush className={ico}/></button>
-              <button className={btnMob(tool==="erase")} onClick={()=>set({ tool: "erase" })}><Eraser className={ico}/></button>
-              <button className={btnMob(tool==="text" )} onClick={()=>{ set({ tool: "text" }); onAddText() }}><TypeIcon className={ico}/></button>
-              <button className={btnMob(tool==="image")} onClick={()=>{ set({ tool: "image" }); document.getElementById("darkroom-upload")?.dispatchEvent(new MouseEvent("click", { bubbles: true })) }}><ImageIcon className={ico}/></button>
-              <button className={btnMob(tool==="shape")} onClick={()=>set({ tool: "shape" })}><Shapes className={ico}/></button>
+              <button className={clx(btnSq, tool==="move"?activeBtn:"")}  onClick={()=>set({ tool: "move" })}><Move className={ico}/></button>
+              <button className={clx(btnSq, tool==="brush"?activeBtn:"")} onClick={()=>set({ tool: "brush" })}><Brush className={ico}/></button>
+              <button className={clx(btnSq, tool==="erase"?activeBtn:"")} onClick={()=>set({ tool: "erase" })}><Eraser className={ico}/></button>
+              <button className={clx(btnSq, tool==="text" ?activeBtn:"")}  onClick={()=>{ set({ tool: "text" }); onAddText() }}><TypeIcon className={ico}/></button>
+              <button className={clx(btnSq, tool==="image"?activeBtn:"")} onClick={()=>{ set({ tool: "image" }); document.getElementById("darkroom-upload")?.dispatchEvent(new MouseEvent("click", { bubbles: true })) }}><ImageIcon className={ico}/></button>
+              <button className={clx(btnSq, tool==="shape"?activeBtn:"")} onClick={()=>set({ tool: "shape" })}><ShapesIco className={ico}/></button>
 
-              <button className={clx("h-12 px-3 border border-black ml-2", showLayers?"bg-black text-white":"bg-white")} onClick={()=>set({ showLayers: !showLayers })}>
+              <button className={clx("h-12 px-3 border border-black ml-2", showLayers?activeBtn:"bg-white")} onClick={()=>set({ showLayers: !showLayers })}>
                 <LayersIcon className={ico}/>
               </button>
               <div className="ml-auto flex gap-1">
@@ -1224,8 +1217,8 @@ export default function EditorCanvas() {
             </div>
           </div>
 
-          {/* 2-я строка: КОНТЕКСТНЫЕ НАСТРОЙКИ */}
-          <div className={clx("fixed inset-x-0 z-50", wrap)} style={{ bottom: ROW_H_M }}>
+          {/* 2-я строка: контекстные настройки */}
+          <div className={clx("fixed inset-x-0 z-50", wrap)} style={{ bottom: ROW_H }}>
             {/* Brush */}
             {tool==="brush" && (
               <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
@@ -1266,7 +1259,7 @@ export default function EditorCanvas() {
               </div>
             )}
 
-            {/* Text */}
+            {/* Text: поле ввода слева + фейдер font-size справа */}
             {tool==="text" && (
               <div className="px-2 py-1 flex items-center gap-2" {...stopAll} style={{ ['--thumb-mobile' as any]:'28px' }}>
                 <input
@@ -1289,41 +1282,30 @@ export default function EditorCanvas() {
               </div>
             )}
 
-            {/* Image */}
-            {tool==="image" && (
+            {/* Image / Shapes — мини-кнопки */}
+            {(tool==="image" || tool==="shape") && (
               <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
+                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("square")}><SquareIco className={ico}/></button>
+                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("circle")}><CircleIco className={ico}/></button>
+                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("triangle")}><TriangleIco className={ico}/></button>
                 <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
                 <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
               </div>
             )}
 
-            {/* Shapes */}
-            {tool==="shape" && (
-              <div className="px-2 py-1 flex items-center gap-1" {...stopAll}>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("square")}><Square className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("circle")}><Circle className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("triangle")}><Triangle className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("cross")}><Plus className={ico}/></button>
-                <button className="h-10 w-10 grid place-items-center border border-black bg-white" onClick={()=>onAddShape("line")}><Slash className={ico}/></button>
-              </div>
-            )}
-
-            {/* Move — placeholder */}
-            {tool==="move" && <div className="px-2 py-1 h-12" {...stopAll} />}
+            {/* Move — пустая строка высотой ROW_H, чтобы раскладка не прыгала */}
+            {tool==="move" && (<div className="px-2 py-1 h-12" {...stopAll} />)}
           </div>
 
           {/* 3-я строка: FRONT/BACK + download */}
           <div className={clx("fixed inset-x-0 z-50", wrap)} style={{ bottom: 0 }}>
             <div className="px-2 pb-2 pt-1 grid grid-cols-2 gap-2" {...stopAll}>
               <div className="flex gap-2">
-                <button className={clx("flex-1 h-10 border border-black", side==="front"?"bg-black text-white":"bg-white")} onClick={()=>set({ side:"front" })}>FRONT</button>
+                <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>set({ side:"front" })}>FRONT</button>
                 <button className="h-10 w-12 border border-black bg-white grid place-items-center" onClick={()=>downloadBoth("front")}><Download className={ico}/></button>
               </div>
               <div className="flex gap-2">
-                <button className={clx("flex-1 h-10 border border-black", side==="back"?"bg-black text-white":"bg-white")} onClick={()=>set({ side:"back" })}>BACK</button>
+                <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>set({ side:"back" })}>BACK</button>
                 <button className="h-10 w-12 border border-black bg-white grid place-items-center" onClick={()=>downloadBoth("back")}><Download className={ico}/></button>
               </div>
             </div>
