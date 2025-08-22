@@ -21,8 +21,8 @@ const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
 
 // Плавность и защита от дрожи/схлопываний
-const EPS  = 0.25               // порог «есть смысл перерисовывать»
-const DEAD = 0.006              // «мёртвая зона» против микродрожи
+const EPS  = 0.25
+const DEAD = 0.006
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 
@@ -136,21 +136,11 @@ export default function EditorCanvas() {
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
-  // снапшот текста на начало трансформа
-  const textSnap = useRef<{
-    width:number
-    height:number
-    fs:number
-    cx:number
-    cy:number
-  }|null>(null)
-
+  const textSnap = useRef<{ width:number; height:number; fs:number; cx:number; cy:number }|null>(null)
   const makeTextSnap = (t: Konva.Text) => {
-    const w0 = Math.max(1, t.width() || 1) // wrap width (важно для выравнивания)
-    // getSelfRect даёт «реальный» контентный бокс текста без stroke
+    const w0 = Math.max(1, t.width() || 1)
     let self: any = undefined
-    const hasGetSelf = typeof (t as any).getSelfRect === "function"
-    if (hasGetSelf) self = (t as any).getSelfRect()
+    if (typeof (t as any).getSelfRect === "function") self = (t as any).getSelfRect()
     const h0 = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || 1))
     const cx0 = t.x() + w0 / 2
     const cy0 = t.y() + h0 / 2
@@ -183,7 +173,6 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
-      // ——— ТЕКСТ: углы = fontSize, боковые = width ———
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -203,13 +192,13 @@ export default function EditorCanvas() {
           ? (trRef.current as any).getActiveAnchor()
           : undefined
 
-        // БОКОВЫЕ: меняем только width относительно центра
+        // БОКОВЫЕ: меняем только width
         if (active === "middle-left" || active === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, snap.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
 
           const fsNow = t.fontSize()
-          const minW  = Math.max(2, Math.round((fsNow || snap.fs) * 0.45)) // «примерно одна буква»
+          const minW  = Math.max(2, Math.round((fsNow || snap.fs) * 0.45))
           const nextW = clamp(Math.round(snap.width * ratioW), minW, TEXT_MAX_W)
 
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
@@ -218,14 +207,13 @@ export default function EditorCanvas() {
             t.x(Math.round(cx - nextW / 2))
           }
 
-          // Никаких скейлов — мы обновили ширину руками
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
           return oldBox
         }
 
-        // УГЛЫ + вертикаль: меняем только fontSize от текущего значения, удерживаем центр
+        // УГЛЫ/вертикаль: меняем только fontSize
         const ratioW = newBox.width  / Math.max(1e-6, snap.width)
         const ratioH = newBox.height / Math.max(1e-6, snap.height)
         const s = Math.max(ratioW, ratioH)
@@ -234,12 +222,10 @@ export default function EditorCanvas() {
         const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-          // пересчитать контентный бокс и вернуть центр
           let self: any = undefined
-          const hasGetSelf = typeof (t as any).getSelfRect === "function"
-          if (hasGetSelf) self = (t as any).getSelfRect()
+          if (typeof (t as any).getSelfRect === "function") self = (t as any).getSelfRect()
           const newH = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || snap.height))
-          const newW = Math.max(1, t.width() || snap.width) // wrap ширина остаётся прежней
+          const newW = Math.max(1, t.width() || snap.width)
           t.x(Math.round(snap.cx - newW/2))
           t.y(Math.round(snap.cy - newH/2))
         }
@@ -367,7 +353,7 @@ export default function EditorCanvas() {
     }
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isStrokes = true
     g.id(uid()); const id = g.id()
-    const meta = baseMeta(strokes ${seqs.strokes})
+    const meta = baseMeta(`strokes ${seqs.strokes}`)
     currentArt().add(g); g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g, meta, type: "strokes" }
     setLayers(p => [...p, newLay])
@@ -382,7 +368,7 @@ export default function EditorCanvas() {
     if (gid) return find(gid)!
     const g = new Konva.Group({ x: 0, y: 0 }); (g as any)._isErase = true
     g.id(uid()); const id = g.id()
-    const meta = baseMeta(erase ${seqs.erase})
+    const meta = baseMeta(`erase ${seqs.erase}`)
     currentArt().add(g); g.zIndex(nextTopZ())
     const newLay: AnyLayer = { id, side, node: g as AnyNode, meta, type: "erase" }
     setLayers(p => [...p, newLay])
@@ -400,6 +386,7 @@ export default function EditorCanvas() {
   const attachCommonHandlers = (k: AnyNode, id: string) => {
     ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
+    if ((k as any).draggable) (k as any).draggable(true)
   }
 
   const onUploadImage = (file: File) => {
@@ -410,10 +397,14 @@ export default function EditorCanvas() {
       img.onload = () => {
         const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
         const w = img.width * ratio, h = img.height * ratio
-        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
+        const kimg = new Konva.Image({
+          image: img,
+          x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h,
+          draggable: true
+        })
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid()); const id = kimg.id()
-        const meta = baseMeta(image ${seqs.image})
+        const meta = baseMeta(`image ${seqs.image}`)
         currentArt().add(kimg); kimg.zIndex(nextTopZ())
         attachCommonHandlers(kimg, id)
         setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
@@ -435,10 +426,10 @@ export default function EditorCanvas() {
       fontFamily: siteFont(),
       fontStyle: "bold",
       fill: brushColor, width: 600, align: "center",
-      draggable: false,
+      draggable: true,
     })
     t.id(uid()); const id = t.id()
-    const meta = baseMeta(text ${seqs.text})
+    const meta = baseMeta(`text ${seqs.text}`)
     currentArt().add(t); t.zIndex(nextTopZ())
     attachCommonHandlers(t, id)
     setLayers(p => [...p, { id, side, node: t, meta, type: "text" }])
@@ -450,20 +441,20 @@ export default function EditorCanvas() {
 
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
-    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
-    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
-    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
+    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor, draggable: true })
+    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor, draggable: true })
+    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor, draggable: true })
     else if (kind === "cross") {
-      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160 })
+      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160, draggable: true })
       g.add(new Konva.Rect({ width: 320, height: 60, y: 130, fill: brushColor }))
       g.add(new Konva.Rect({ width: 60, height: 320, x: 130, fill: brushColor }))
       n = g
     } else {
-      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
+      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round", draggable: true })
     }
     ;(n as any).id(uid())
     const id = (n as any).id ? (n as any).id() : uid()
-    const meta = baseMeta(shape ${seqs.shape})
+    const meta = baseMeta(`shape ${seqs.shape}`)
     currentArt().add(n as any); if ((n as any).zIndex) (n as any).zIndex(nextTopZ())
     attachCommonHandlers(n, id)
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
@@ -474,6 +465,9 @@ export default function EditorCanvas() {
   }
 
   // ===== Рисование =====
+  const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
+  const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
+
   const startStroke = (x: number, y: number) => {
     if (tool === "brush") {
       const lay = ensureStrokeGroup()
@@ -541,10 +535,10 @@ export default function EditorCanvas() {
     const place = () => {
       const b = stContainer.getBoundingClientRect()
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      ta.style.left   = ${b.left + r.x * scale}px
-      ta.style.top    = ${b.top  + r.y * scale}px
-      ta.style.width  = ${Math.max(2, r.width  * scale)}px
-      ta.style.height = ${Math.max(2, r.height * scale)}px
+      ta.style.left   = `${b.left + r.x * scale}px`
+      ta.style.top    = `${b.top  + r.y * scale}px`
+      ta.style.width  = `${Math.max(2, r.width  * scale)}px`
+      ta.style.height = `${Math.max(2, r.height * scale)}px`
     }
 
     const abs = t.getAbsoluteScale()
@@ -557,13 +551,13 @@ export default function EditorCanvas() {
       fontFamily: t.fontFamily(),
       fontWeight: t.fontStyle()?.includes("bold") ? "700" : "400",
       fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
-      fontSize:   ${t.fontSize() * abs.y}px,
+      fontSize:   `${t.fontSize() * abs.y}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: ${(t.letterSpacing?.() ?? 0) * abs.x}px,
+      letterSpacing: `${(((t as any).letterSpacing?.() ?? 0) * abs.x)}px`,
       whiteSpace: "pre-wrap", overflow: "hidden", outline: "none", resize: "none",
       transformOrigin: "left top", zIndex: "9999", userSelect: "text",
       caretColor: String(t.fill() || "#000"),
-      textAlign: (t.align?.() as any) || "left",
+      textAlign: (((t as any).align?.() as any) || "left"),
     } as CSSStyleDeclaration)
 
     place()
@@ -588,7 +582,6 @@ export default function EditorCanvas() {
       t.getLayer()?.batchDraw()
       set({ tool: "move" as Tool })
       requestAnimationFrame(() => {
-        // остаёмся на тексте с тем же трансформером (режим текста)
         const id = (t as any).id ? (t as any).id() : undefined
         if (id) select(id)
         attachTransformer()
@@ -611,15 +604,13 @@ export default function EditorCanvas() {
     window.addEventListener("scroll", place, true)
   }
 
-  // ===== Жесты =====
+  // ===== Жесты / клики =====
   const isTransformerChild = (t: Konva.Node | null) => {
     let p: Konva.Node | null | undefined = t
     const tr = trRef.current as unknown as Konva.Node | null
     while (p) { if (tr && p === tr) return true; p = p.getParent?.() }
     return false
   }
-  const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
-  const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
 
   const onDown = (e: any) => {
     if (isTransformerChild(e.target)) return
@@ -813,9 +804,9 @@ export default function EditorCanvas() {
     uiLayerRef.current?.visible(true)
     st.draw()
 
-    const a1 = document.createElement("a"); a1.href = withMock; a1.download = darkroom-${s}_mockup.png; a1.click()
+    const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
     await new Promise(r => setTimeout(r, 250))
-    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = darkroom-${s}_art.png; a2.click()
+    const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
   // ===== Render =====
@@ -868,6 +859,7 @@ export default function EditorCanvas() {
         </div>
       </div>
 
+      {/* ДЕСКТОПНЫЙ Toolbar — ваш прежний, без редизайна */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
