@@ -1,262 +1,359 @@
-import React, { useEffect, useMemo, useRef, useState } from "react"
+"use client"
+
+import React, { useMemo, useRef } from "react"
+import { isMobile } from "react-device-detect"
 import { Blend, ShapeKind, Side, Tool } from "./store"
 
-type SelectedTextProps = {
-  text: string
-  fontSize: number
-  fontFamily: string
-  fill: string
-  lineHeight: number
-  letterSpacing: number
-  align: "left" | "center" | "right"
+type LayerItem = {
+  id: string
+  name: string
+  type: string
+  visible: boolean
+  locked: boolean
+  blend: Blend
+  opacity: number
 }
 
-type Props = {
-  layout: "desktop-panel" | "mobile-3rows"
+type MobileLayersProps = {
+  items: LayerItem[]
+  selectedId?: string
+  onSelect: (id: string) => void
+  onToggleVisible: (id: string) => void
+  onToggleLock: (id: string) => void
+  onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
+  onChangeBlend: (id: string, b: string) => void
+  onChangeOpacity: (id: string, o: number) => void
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
+}
+
+type ToolbarProps = {
   side: Side
   setSide: (s: Side) => void
-
   tool: Tool
   setTool: (t: Tool) => void
-
   brushColor: string
-  setBrushColor: (hex: string) => void
+  setBrushColor: (v: string) => void
   brushSize: number
   setBrushSize: (n: number) => void
-
   shapeKind: ShapeKind
   setShapeKind: (k: ShapeKind) => void
-
   onUploadImage: (file: File) => void
   onAddText: () => void
   onAddShape: (k: ShapeKind) => void
-
   onDownloadFront: () => void
   onDownloadBack: () => void
   onClear: () => void
-
   toggleLayers: () => void
   layersOpen: boolean
 
-  selectedKind: "text" | "image" | "shape" | "strokes" | "erase" | null
-  selectedProps: Partial<SelectedTextProps> | {}
-
+  selectedKind: string | null
+  selectedProps: any
   setSelectedFill: (hex: string) => void
   setSelectedStroke: (hex: string) => void
-  setSelectedStrokeW: (w: number) => void
+  setSelectedStrokeW: (n: number) => void
   setSelectedText: (s: string) => void
   setSelectedFontSize: (n: number) => void
   setSelectedFontFamily: (s: string) => void
-  setSelectedColor: (hex: string) => void
-  setSelectedLineHeight: (n: number) => void
-  setSelectedLetterSpacing: (n: number) => void
-  setSelectedAlign: (a: "left" | "center" | "right") => void
+  setSelectedColor: (s: string) => void
+  setSelectedLineHeight?: (n: number) => void
+  setSelectedLetterSpacing?: (n: number) => void
+  setSelectedAlign?: (a: "left" | "center" | "right") => void
 
-  mobileTopOffset?: number
-  mobileLayers: null | {
-    items: any[]
-    selectedId?: string
-    onSelect: (id: string) => void
-    onToggleVisible: (id: string) => void
-    onToggleLock: (id: string) => void
-    onDelete: (id: string) => void
-    onDuplicate: (id: string) => void
-    onChangeBlend: (id: string, b: Blend) => void
-    onChangeOpacity: (id: string, o: number) => void
-    onMoveUp: (id: string) => void
-    onMoveDown: (id: string) => void
-  }
+  mobileTopOffset: number
+  mobileLayers: MobileLayersProps
 }
 
 const PALETTE = [
-  "#000000", "#ffffff",
-  "#ff008c", "#ff5e00", "#ffc400", "#3bd100", "#00c2ff", "#7a50ff",
-  "#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#0a84ff", "#af52de",
-  "#ff77a9", "#ffb37c", "#ffe082", "#8be28e", "#78d7ff", "#b8a9ff",
+  "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
+  "#FF0033","#FF0066","#FF0099","#FF00CC","#FF00FF","#CC00FF",
+  "#9900FF","#6600FF","#3300FF","#0000FF","#0033FF","#0066FF",
+  "#0099FF","#00CCFF","#00FFFF","#00FFCC","#00FF99","#00FF66",
+  "#00FF33","#00FF00","#33FF00","#66FF00","#99FF00","#CCFF00",
+  "#FFFF00","#FFCC00","#FF9900","#FF6600","#FF3300"
 ]
 
-const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & {active?:boolean; w?:number}> = ({active, w=28, children, ...p}) => (
-  <button {...p}
-    style={{ width:w, height:28, border:"1px solid #111", background: active ? "#111" : "#fff", color: active ? "#fff" : "#111" }}
-  >{children}</button>
-)
+const card = "bg-white border border-black/10 shadow-sm"
+const btn   = "h-8 px-2 border border-black/20 bg-white hover:bg-black/5 text-[12px] leading-8"
+const btnBlk= "h-9 px-3 border border-black text-white bg-black hover:bg-black/90 text-[12px] leading-9"
+const row   = "flex items-center gap-2"
+const col   = "flex flex-col gap-2"
+const label = "text-[11px] uppercase tracking-[0.12em] text-black/70"
+const input = "w-full h-9 px-2 border border-black/20 bg-white text-[12px]"
 
-export default function Toolbar(props: Props) {
-  const {
-    layout, side, setSide, tool, setTool,
-    brushColor, setBrushColor, brushSize, setBrushSize,
-    onUploadImage, onAddText, onAddShape,
-    onDownloadFront, onDownloadBack, onClear,
-    toggleLayers, layersOpen,
-    selectedKind, selectedProps,
-    setSelectedColor, setSelectedFontSize, setSelectedText,
-    setSelectedLineHeight, setSelectedLetterSpacing, setSelectedAlign,
-  } = props
+export default function Toolbar(props: ToolbarProps) {
+  if (isMobile) return <MobileToolbar {...props} />
+  return <DesktopToolbar {...props} />
+}
 
-  // локальные значения для ручек, подхватываются из выбранного текста
-  const sp = (selectedProps || {}) as Partial<SelectedTextProps>
-  const [fs, setFs] = useState<number>(sp.fontSize ?? 96)
-  const [lh, setLh] = useState<number>(sp.lineHeight ?? 1)
-  const [ls, setLs] = useState<number>(sp.letterSpacing ?? 0)
-  const [align, setAlign] = useState<"left"|"center"|"right">(sp.align ?? "left")
-
-  useEffect(() => { if (typeof sp.fontSize === "number") setFs(sp.fontSize) }, [sp.fontSize])
-  useEffect(() => { if (typeof sp.lineHeight === "number") setLh(sp.lineHeight) }, [sp.lineHeight])
-  useEffect(() => { if (typeof sp.letterSpacing === "number") setLs(sp.letterSpacing) }, [sp.letterSpacing])
-  useEffect(() => { if (sp.align) setAlign(sp.align) }, [sp.align])
+function DesktopToolbar({
+  side,setSide,tool,setTool,brushColor,setBrushColor,brushSize,setBrushSize,
+  onUploadImage,onAddText,onAddShape,onDownloadFront,onDownloadBack,onClear,
+  toggleLayers,layersOpen,selectedKind,selectedProps,setSelectedText,setSelectedFontSize,
+  setSelectedLineHeight,setSelectedLetterSpacing,setSelectedAlign,setSelectedColor
+}: ToolbarProps) {
 
   const fileRef = useRef<HTMLInputElement>(null)
-  const pickFile = () => fileRef.current?.click()
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (f) onUploadImage(f); e.target.value = ""
-  }
 
-  const Box: React.FC<{title?:string, children:any}> = ({title, children}) => (
-    <div style={{ border:"1px solid #111", background:"#fff", padding:8, marginBottom:8 }}>
-      {title && <div style={{ fontSize:10, letterSpacing:1, color:"#111", marginBottom:6 }}>{title}</div>}
-      {children}
+  const controlsForText = (
+    <div className={col}>
+      <div className={label}>Text</div>
+      <textarea
+        className={input}
+        rows={3}
+        value={selectedKind==="text" ? (selectedProps.text ?? "") : ""}
+        placeholder="Type here…"
+        onChange={(e)=> selectedKind==="text" && setSelectedText(e.target.value)}
+      />
+      <div className={row}>
+        <button className={btn} onClick={()=>setSelectedAlign?.("left")}>L</button>
+        <button className={btn} onClick={()=>setSelectedAlign?.("center")}>C</button>
+        <button className={btn} onClick={()=>setSelectedAlign?.("right")}>R</button>
+      </div>
+      <div className={col}>
+        <div className={row + " justify-between"}>
+          <span className={label}>Font size</span>
+          <input
+            className="w-[56px] h-7 px-1 border border-black/20 text-[12px] text-right"
+            type="number"
+            min={8} max={800}
+            value={selectedKind==="text" ? (selectedProps.fontSize ?? 96) : 96}
+            onChange={(e)=> selectedKind==="text" && setSelectedFontSize(parseInt(e.target.value||"0",10))}
+          />
+        </div>
+        <input
+          type="range" min={8} max={800} step={1}
+          value={selectedKind==="text" ? (selectedProps.fontSize ?? 96) : 96}
+          onChange={(e)=> selectedKind==="text" && setSelectedFontSize(parseInt(e.target.value,10))}
+        />
+      </div>
+
+      <div className={col}>
+        <div className={row + " justify-between"}>
+          <span className={label}>Line</span>
+          <span className="text-[11px]">{selectedKind==="text" ? (selectedProps.lineHeight ?? 1).toFixed(2) : "1.00"}</span>
+        </div>
+        <input
+          type="range" min={0.6} max={4} step={0.01}
+          value={selectedKind==="text" ? (selectedProps.lineHeight ?? 1) : 1}
+          onChange={(e)=> selectedKind==="text" && setSelectedLineHeight?.(parseFloat(e.target.value))}
+        />
+      </div>
+
+      <div className={col}>
+        <div className={row + " justify-between"}>
+          <span className={label}>Letter</span>
+          <span className="text-[11px]">{selectedKind==="text" ? (selectedProps.letterSpacing ?? 0).toFixed(2) : "0.00"}</span>
+        </div>
+        <input
+          type="range" min={-0.2} max={2} step={0.01}
+          value={selectedKind==="text" ? (selectedProps.letterSpacing ?? 0) : 0}
+          onChange={(e)=> selectedKind==="text" && setSelectedLetterSpacing?.(parseFloat(e.target.value))}
+        />
+      </div>
     </div>
   )
 
-  // ===== ЛЕВАЯ ПАНЕЛЬ (десктоп) =====
-  if (layout === "desktop-panel") {
-    return (
-      <div style={{ fontFamily:"inherit", fontSize:12 }}>
-        <Box title="TOOLS">
-          {/* верхняя строка: управление панелью и слоями */}
-          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-            <Btn onClick={()=>setTool("move")}   active={tool==="move"}>✚</Btn>
-            <Btn onClick={()=>setTool("brush")}  active={tool==="brush"}>⟡</Btn>
-            <Btn onClick={()=>setTool("erase")}  active={tool==="erase"}>⨂</Btn>
-            <Btn onClick={()=>{ onAddText(); setTool("move") }} title="Text">T</Btn>
-            <Btn onClick={pickFile} title="Image">▣</Btn>
-            <Btn onClick={()=>onAddShape("circle")} title="Layers">◌</Btn>
-            <Btn onClick={()=>toggleLayers()} title="Layers" active={layersOpen}>≡</Btn>
-            <Btn onClick={onClear} title="Clear" style={{ marginLeft:"auto" }}>✕</Btn>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={onFile}/>
-          </div>
-
-          {/* цвет + палитра */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-            <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); if(selectedKind==="text") setSelectedColor(e.target.value) }} />
-            <div style={{ width:140 }}>
-              <input type="range" min={1} max={72} value={brushSize} onChange={(e)=>props.setBrushSize?.(parseInt(e.target.value,10))}/>
-            </div>
-            <div style={{ width:24, textAlign:"right" }}>{brushSize}</div>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(12, 1fr)", gap:4, marginBottom:8 }}>
-            {PALETTE.map((c,i)=>(
-              <button key={i} onClick={()=>{ setBrushColor(c); if (selectedKind==="text" || selectedKind==="shape") setSelectedColor(c)}}
-                style={{ width:16, height:16, border:"1px solid #111", background:c }}/>
-            ))}
-          </div>
-
-          {/* фигуры */}
-          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-            <Btn onClick={()=>onAddShape("square")}>□</Btn>
-            <Btn onClick={()=>onAddShape("circle")}>○</Btn>
-            <Btn onClick={()=>onAddShape("triangle")}>△</Btn>
-            <Btn onClick={()=>onAddShape("cross")}>✚</Btn>
-            <Btn onClick={()=>onAddShape("line")}>—</Btn>
-          </div>
-
-          {/* ТЕКСТ — выравнивание */}
-          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-            <Btn active={align==="left"}   onClick={()=>{ setAlign("left");   setSelectedAlign("left") }}>≡</Btn>
-            <Btn active={align==="center"} onClick={()=>{ setAlign("center"); setSelectedAlign("center") }}>≣</Btn>
-            <Btn active={align==="right"}  onClick={()=>{ setAlign("right");  setSelectedAlign("right") }}>≡</Btn>
-          </div>
-
-          {/* font size */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-            <div style={{ width:58 }}>Font size</div>
-            <input type="range" min={8} max={800} value={fs}
-              onChange={(e)=>{ const v = parseInt(e.target.value,10); setFs(v); setSelectedFontSize(v) }} style={{ flex:1 }}/>
-            <div style={{ width:36, textAlign:"right" }}>{fs}</div>
-          </div>
-
-          {/* line height */}
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-            <div style={{ width:58 }}>Line</div>
-            <input type="range" step={0.01} min={0.5} max={3} value={lh}
-              onChange={(e)=>{ const v = parseFloat(e.target.value); setLh(v); setSelectedLineHeight(v) }} style={{ flex:1 }}/>
-            <div style={{ width:36, textAlign:"right" }}>{lh.toFixed(2)}</div>
-          </div>
-
-          {/* letter spacing */}
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <div style={{ width:58 }}>Letter</div>
-            <input type="range" step={0.1} min={-5} max={20} value={ls}
-              onChange={(e)=>{ const v = parseFloat(e.target.value); setLs(v); setSelectedLetterSpacing(v) }} style={{ flex:1 }}/>
-            <div style={{ width:36, textAlign:"right" }}>{ls.toFixed(1)}</div>
-          </div>
-
-          {/* front/back + download */}
-          <div style={{ display:"flex", gap:8, marginTop:10 }}>
-            <button onClick={()=>setSide("front")} style={{ flex:1, height:28, border:"1px solid #111", background: side==="front"?"#111":"#fff", color: side==="front"?"#fff":"#111" }}>FRONT</button>
-            <button onClick={()=>setSide("back")}  style={{ flex:1, height:28, border:"1px solid #111", background: side==="back"?"#111":"#fff",  color: side==="back"?"#fff":"#111" }}>BACK</button>
-          </div>
-          <div style={{ display:"flex", gap:8, marginTop:6 }}>
-            <button onClick={onDownloadFront} style={{ flex:1, height:28, border:"1px solid #111", background:"#fff" }}>DL FRONT</button>
-            <button onClick={onDownloadBack}  style={{ flex:1, height:28, border:"1px solid #111", background:"#fff" }}>DL BACK</button>
-          </div>
-        </Box>
-      </div>
-    )
-  }
-
-  // ===== МОБИЛЬНЫЙ 3-СТРОЧНЫЙ =====
   return (
-    <div style={{
-      position:"fixed", left:0, right:0, bottom:0, zIndex:40, background:"#fff",
-      borderTop:"1px solid #111", padding:"8px 10px"
-    }}>
-      {/* 1: инструменты */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(8, 1fr)", gap:8, marginBottom:8 }}>
-        <Btn onClick={()=>setTool("move")} active={tool==="move"}>✚</Btn>
-        <Btn onClick={()=>setTool("brush")} active={tool==="brush"}>⟡</Btn>
-        <Btn onClick={()=>setTool("erase")} active={tool==="erase"}>⨂</Btn>
-        <Btn onClick={()=>{ onAddText(); setTool("move") }}>T</Btn>
-        <Btn onClick={pickFile}>▣</Btn>
-        <Btn onClick={()=>toggleLayers()} active={props.layersOpen}>≡</Btn>
-        <Btn onClick={()=>setSide("front")} active={side==="front"}>F</Btn>
-        <Btn onClick={()=>setSide("back")}  active={side==="back"}>B</Btn>
-      </div>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={onFile}/>
-
-      {/* 2: Настройки/цвет по центру */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
-        <input type="color" value={brushColor} onChange={(e)=>{ setBrushColor(e.target.value); if (selectedKind==="text") setSelectedColor(e.target.value) }}/>
-        <input type="range" min={1} max={72} value={brushSize} onChange={(e)=>props.setBrushSize?.(parseInt(e.target.value,10))} style={{ flex:1 }}/>
-        <div style={{ width:30, textAlign:"right" }}>{brushSize}</div>
-      </div>
-
-      {/* 3: Текст — font/line/letter и загрузки */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-        <div>
-          <div style={{ display:"flex", gap:6, marginBottom:6 }}>
-            <Btn active={align==="left"}   onClick={()=>{ setAlign("left");   setSelectedAlign("left") }}>≡</Btn>
-            <Btn active={align==="center"} onClick={()=>{ setAlign("center"); setSelectedAlign("center") }}>≣</Btn>
-            <Btn active={align==="right"}  onClick={()=>{ setAlign("right");  setSelectedAlign("right") }}>≡</Btn>
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
-            <div style={{ width:52 }}>Size</div>
-            <input type="range" min={8} max={800} value={fs} onChange={(e)=>{ const v = parseInt(e.target.value,10); setFs(v); setSelectedFontSize(v) }} style={{ flex:1 }}/>
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
-            <div style={{ width:52 }}>Line</div>
-            <input type="range" step={0.01} min={0.5} max={3} value={lh} onChange={(e)=>{ const v=parseFloat(e.target.value); setLh(v); setSelectedLineHeight(v) }} style={{ flex:1 }}/>
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <div style={{ width:52 }}>Letter</div>
-            <input type="range" step={0.1} min={-5} max={20} value={ls} onChange={(e)=>{ const v=parseFloat(e.target.value); setLs(v); setSelectedLetterSpacing(v) }} style={{ flex:1 }/>
+    <div className="fixed left-4 top-[88px] z-30">
+      <div className={`w-[190px] p-2 ${card}`}>
+        {/* Заголовок + кнопки управления как на скрине */}
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] tracking-[0.12em] uppercase">Tools</div>
+          <div className="flex items-center gap-1">
+            <button className={btn} onClick={toggleLayers}>☐</button>
+            <button className={btn} onClick={onClear}>×</button>
           </div>
         </div>
-        <div>
-          <button onClick={onDownloadFront} style={{ width:"100%", height:32, border:"1px solid #111", background:"#fff", marginBottom:6 }}>DL FRONT</button>
-          <button onClick={onDownloadBack}  style={{ width:"100%", height:32, border:"1px solid #111", background:"#fff" }}>DL BACK</button>
+
+        {/* Ряд инструментов */}
+        <div className={row + " mb-2"}>
+          <button className={btn + (tool==="move"?" bg-black text-white":"")} onClick={()=>setTool("move")}>Move</button>
+          <button className={btn + (tool==="brush"?" bg-black text-white":"")} onClick={()=>setTool("brush")}>Brush</button>
+          <button className={btn + (tool==="erase"?" bg-black text-white":"")} onClick={()=>setTool("erase")}>Erase</button>
+        </div>
+        <div className={row + " mb-2"}>
+          <button className={btn} onClick={onAddText}>Text</button>
+          <button className={btn} onClick={()=>fileRef.current?.click()}>Img</button>
+          <button className={btn} onClick={()=>onAddShape("circle")}>●</button>
+          <button className={btn} onClick={()=>onAddShape("square")}>■</button>
+          <button className={btn} onClick={()=>onAddShape("triangle")}>▲</button>
+          <button className={btn} onClick={()=>onAddShape("line")}>—</button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUploadImage(f); e.currentTarget.value="" }}
+        />
+
+        {/* Цвет */}
+        <div className={col + " mb-2"}>
+          <div className={label}>Color</div>
+          <div className="grid grid-cols-6 gap-[6px]">
+            {PALETTE.map((c)=>(
+              <button
+                key={c}
+                className="h-4 w-4 border border-black/20"
+                style={{background:c}}
+                onClick={()=>{ setSelectedColor(c); setBrushColor(c) }}
+                aria-label={c}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Настройки инструмента */}
+        {tool==="brush" && (
+          <div className={col + " mb-2"}>
+            <div className={label}>Brush size</div>
+            <input type="range" min={1} max={64} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}/>
+          </div>
+        )}
+
+        {tool==="erase" && (
+          <div className={col + " mb-2"}>
+            <div className={label}>Eraser</div>
+            <input type="range" min={4} max={96} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}/>
+          </div>
+        )}
+
+        {selectedKind==="text" && <div className="mb-2">{controlsForText}</div>}
+
+        {/* Переключатель сторон и скачивание */}
+        <div className={row + " mt-2"}>
+          <button className={btnBlk + (side==="front"?"":" bg-white text-black")} onClick={()=>setSide("front")}>FRONT</button>
+          <button className={btnBlk + (side==="back" ?"":" bg-white text-black")} onClick={()=>setSide("back")}>BACK</button>
+        </div>
+
+        <div className={row + " mt-2"}>
+          <button className={btn} onClick={onDownloadFront}>DL FRONT</button>
+          <button className={btn} onClick={onDownloadBack}>DL BACK</button>
         </div>
       </div>
     </div>
+  )
+}
+
+/** ---------------- MOBILE (3 строки) ---------------- */
+function MobileToolbar({
+  side,setSide,tool,setTool,brushColor,setBrushColor,brushSize,setBrushSize,
+  onUploadImage,onAddText,onAddShape,onDownloadFront,onDownloadBack,onClear,
+  selectedKind,selectedProps,setSelectedText,setSelectedFontSize,setSelectedLineHeight,
+  setSelectedLetterSpacing,setSelectedAlign,setSelectedColor
+}: ToolbarProps) {
+
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // строка 3 — палитра всегда
+  const palette = (
+    <div className="grid grid-cols-12 gap-1 px-2 py-2">
+      {PALETTE.map((c)=>(
+        <button
+          key={c}
+          className="h-6 w-full border border-black/20"
+          style={{background:c}}
+          onClick={()=>{ setSelectedColor(c); setBrushColor(c) }}
+          aria-label={c}
+        />
+      ))}
+    </div>
+  )
+
+  // строка 2 — настройки по инструменту
+  const settings = (
+    <div className="px-2 py-2">
+      {tool==="brush" && (
+        <div className={col}>
+          <div className="flex items-center justify-between text-[11px]">
+            <span>Brush size</span><span>{brushSize}</span>
+          </div>
+          <input type="range" min={1} max={64} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}/>
+        </div>
+      )}
+      {tool==="erase" && (
+        <div className={col}>
+          <div className="flex items-center justify-between text-[11px]">
+            <span>Eraser</span><span>{brushSize}</span>
+          </div>
+          <input type="range" min={4} max={96} step={1} value={brushSize} onChange={(e)=>setBrushSize(parseInt(e.target.value,10))}/>
+        </div>
+      )}
+      {selectedKind==="text" && (
+        <div className={col}>
+          <textarea
+            className="w-full h-10 px-2 py-1 border border-black/20 text-[12px]"
+            value={selectedProps.text ?? ""}
+            placeholder="Text…"
+            onChange={(e)=>setSelectedText(e.target.value)}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button className={btn} onClick={()=>setSelectedAlign?.("left")}>L</button>
+            <button className={btn} onClick={()=>setSelectedAlign?.("center")}>C</button>
+            <button className={btn} onClick={()=>setSelectedAlign?.("right")}>R</button>
+            <input
+              type="number"
+              className="ml-auto w-[70px] h-8 px-2 border border-black/20 text-[12px]"
+              min={8} max={800}
+              value={selectedProps.fontSize ?? 96}
+              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value||"0",10))}
+            />
+          </div>
+          <input
+            type="range" min={8} max={800} step={1}
+            value={selectedProps.fontSize ?? 96}
+            onChange={(e)=>setSelectedFontSize(parseInt(e.target.value,10))}
+          />
+          <div className="mt-2">
+            <div className="flex items-center justify-between text-[11px]"><span>Line</span><span>{(selectedProps.lineHeight ?? 1).toFixed(2)}</span></div>
+            <input type="range" min={0.6} max={4} step={0.01} value={selectedProps.lineHeight ?? 1} onChange={(e)=>setSelectedLineHeight?.(parseFloat(e.target.value))}/>
+          </div>
+          <div className="mt-2">
+            <div className="flex items-center justify-between text-[11px]"><span>Letter</span><span>{(selectedProps.letterSpacing ?? 0).toFixed(2)}</span></div>
+            <input type="range" min={-0.2} max={2} step={0.01} value={selectedProps.letterSpacing ?? 0} onChange={(e)=>setSelectedLetterSpacing?.(parseFloat(e.target.value))}/>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  // строка 1 — кнопки инструментов и стороны/скачивание
+  const row1 = (
+    <div className="px-2 py-2 flex items-center gap-2 overflow-x-auto">
+      <button className={btn + (tool==="move"?" bg-black text-white":"")} onClick={()=>setTool("move")}>Move</button>
+      <button className={btn + (tool==="brush"?" bg-black text-white":"")} onClick={()=>setTool("brush")}>Brush</button>
+      <button className={btn + (tool==="erase"?" bg-black text-white":"")} onClick={()=>setTool("erase")}>Erase</button>
+      <button className={btn} onClick={onAddText}>Text</button>
+      <button className={btn} onClick={()=>fileRef.current?.click()}>Img</button>
+      <button className={btn} onClick={()=>onAddShape("circle")}>●</button>
+      <button className={btn} onClick={()=>onAddShape("square")}>■</button>
+      <button className={btn} onClick={()=>onAddShape("triangle")}>▲</button>
+      <button className={btn} onClick={()=>onAddShape("line")}>—</button>
+      <span className="mx-1" />
+      <button className={btn + (side==="front"?" bg-black text-white":"")} onClick={()=>setSide("front")}>Front</button>
+      <button className={btn + (side==="back" ?" bg-black text-white":"")} onClick={()=>setSide("back")}>Back</button>
+      <button className={btn} onClick={onDownloadFront}>DL F</button>
+      <button className={btn} onClick={onDownloadBack}>DL B</button>
+      <button className={btn} onClick={onClear}>Clear</button>
+    </div>
+  )
+
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUploadImage(f); e.currentTarget.value="" }}
+      />
+      <div className="fixed inset-x-0 bottom-0 z-30 bg-white border-t border-black/10">
+        {row1}
+        {settings}
+        {palette}
+      </div>
+    </>
   )
 }
