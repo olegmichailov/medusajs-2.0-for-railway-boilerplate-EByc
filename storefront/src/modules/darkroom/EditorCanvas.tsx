@@ -9,20 +9,18 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ==== БАЗА ====
+// ==== КОНСТАНТЫ ====
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// Текст — лимиты
+// Текст — лимиты/стабилизаторы
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = Math.floor(BASE_W * 0.95)
-
-// Плавность и защита от дрожи/схлопываний
-const EPS  = 0.25
-const DEAD = 0.006
+const EPS  = 0.25          // минимально заметная разница
+const DEAD = 0.006         // «мёртвая зона» для борьбы с дрожью
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const uid = () => "n_" + Math.random().toString(36).slice(2)
 
@@ -50,6 +48,7 @@ export default function EditorCanvas() {
     selectedId, select, showLayers, toggleLayers
   } = useDarkroom()
 
+  // на мобиле стартуем с кисти
   useEffect(() => { if (isMobile) set({ tool: "brush" as Tool }) }, [set])
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
@@ -70,32 +69,31 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // тик UI для синхры
+  // тик UI
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
   const currentStrokeId = useRef<Record<Side, string | null>>({ front: null, back: null })
   const currentEraseId  = useRef<Record<Side, string | null>>({ front: null, back: null })
   const isTransformingRef = useRef(false)
-  const isEditingTextRef  = useRef(false)
 
-  // ===== Вёрстка/масштаб =====
+  // ===== Размер холста/поля =====
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
     setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 64))
   }, [])
 
-  const ROW_H = isMobile ? 48 : 0
-  const { viewW, viewH, scale, padTop, padBottom } = useMemo(() => {
+  const { viewW, viewH, scale, padTop, padBottom, desktopLeftPad } = useMemo(() => {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
-    const padTop = headerH + (isMobile ? 4 : 8)
-    const padBottom = isMobile ? ROW_H * 3 + 6 : 72
-    const maxW = vw - (isMobile ? 8 : 24)
+    const padTop = headerH + 8
+    const padBottom = isMobile ? 140 : 48
+    const leftPanelW = isMobile ? 0 : 272 // левый TOOLS-блок на десктопе
+    const maxW = vw - leftPanelW - 32
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
-    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
+    return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom, desktopLeftPad: leftPanelW }
   }, [showLayers, headerH])
 
   useEffect(() => {
@@ -110,7 +108,7 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // НЕ меняем blend у кисти/ластика — только opacity
+  // blend/opacity (НЕ трогаем comp у ластика/кисти)
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -132,7 +130,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer / ТЕКСТ =====
+  // ===== Transformer / ТЕКСТ (углы=fontSize, бок=wrap) =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
@@ -140,8 +138,7 @@ export default function EditorCanvas() {
   const textSnap = useRef<{ width:number; height:number; fs:number; cx:number; cy:number } | null>(null)
   const makeTextSnap = (t: Konva.Text) => {
     const w0 = Math.max(1, t.width() || 1)
-    const hasGetSelf = typeof (t as any).getSelfRect === "function"
-    const self = hasGetSelf ? (t as any).getSelfRect() : undefined
+    const self = typeof (t as any).getSelfRect === "function" ? (t as any).getSelfRect() : undefined
     const h0 = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || 1))
     const cx0 = t.x() + w0 / 2
     const cy0 = t.y() + h0 / 2
@@ -174,6 +171,7 @@ export default function EditorCanvas() {
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
+      // — Текст: углы = fontSize, боковые = width (wrap) —
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -182,7 +180,6 @@ export default function EditorCanvas() {
 
       const onTextStart = () => { textSnap.current = makeTextSnap(n) }
       const onTextEnd   = () => { textSnap.current = null }
-
       n.on("transformstart.textsnap", onTextStart)
       n.on("transformend.textsnap",   onTextEnd)
 
@@ -193,13 +190,13 @@ export default function EditorCanvas() {
           ? (trRef.current as any).getActiveAnchor()
           : undefined
 
-        // БОКОВЫЕ: меняем только wrap (ширину), удерживая центр
+        // Боковые ручки — меняем wrap width относительно центра
         if (active === "middle-left" || active === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, snap.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
 
           const fsNow = t.fontSize()
-          const minW  = Math.max(2, Math.round((fsNow || snap.fs) * 0.45)) // ширина ≈ одна буква
+          const minW  = Math.max(2, Math.round((fsNow || snap.fs) * 0.45)) // «ширина одной буквы»
           const nextW = clamp(Math.round(snap.width * ratioW), minW, TEXT_MAX_W)
 
           if (Math.abs((t.width() || 0) - nextW) > EPS) {
@@ -208,13 +205,14 @@ export default function EditorCanvas() {
             t.x(Math.round(cx - nextW / 2))
           }
 
+          // никаких scale — мы меняем реальные свойства
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
           requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); bump() })
           return oldBox
         }
 
-        // УГЛЫ/вертикальные: изменяем только fontSize, удерживаем центр
+        // Углы/вертикаль — меняем fontSize, удерживаем центр
         const ratioW = newBox.width  / Math.max(1e-6, snap.width)
         const ratioH = newBox.height / Math.max(1e-6, snap.height)
         const s = Math.max(ratioW, ratioH)
@@ -223,10 +221,9 @@ export default function EditorCanvas() {
         const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-          const hasGetSelf2 = typeof (t as any).getSelfRect === "function"
-          const self2 = hasGetSelf2 ? (t as any).getSelfRect() : undefined
+          const self2 = typeof (t as any).getSelfRect === "function" ? (t as any).getSelfRect() : undefined
           const newH = Math.max(1, (self2 && typeof self2.height === "number") ? self2.height : (t.height() || snap.height))
-          const newW = Math.max(1, t.width() || snap.width)
+          const newW = Math.max(1, t.width() || snap.width) // wrap ширина остаётся прежней
           t.x(Math.round(snap.cx - newW/2))
           t.y(Math.round(snap.cy - newH/2))
         }
@@ -247,6 +244,7 @@ export default function EditorCanvas() {
 
       detachTextFix.current = () => { n.off(".textsnap"); n.off(".textnorm") }
     } else {
+      // — Не текст —
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -262,10 +260,7 @@ export default function EditorCanvas() {
         let sy = (n as any).scaleY ? (n as any).scaleY() : 1
 
         const isCorner = active === "top-left" || active === "top-right" || active === "bottom-left" || active === "bottom-right"
-        if (isCorner) {
-          const s = Math.max(Math.abs(sx), Math.abs(sy))
-          sx = s; sy = s
-        }
+        if (isCorner) { const s = Math.max(Math.abs(sx), Math.abs(sy)); sx = s; sy = s }
 
         if (isImgOrRect(n)) {
           const w = (n as any).width ? (n as any).width() : 0
@@ -297,7 +292,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // brush/erase — отключаем драг у остальных
+  // brush/erase: отключаем драг
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -311,7 +306,7 @@ export default function EditorCanvas() {
     if (tool !== "erase") currentEraseId.current[side]  = null
   }, [tool, layers, side])
 
-  // ===== хоткеи =====
+  // ===== хоткеи (desktop) =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
@@ -339,15 +334,22 @@ export default function EditorCanvas() {
   }, [selectedId, tool])
 
   // ===== Brush / Erase =====
+  const siteFont = () =>
+    (typeof window !== "undefined"
+      ? window.getComputedStyle(document.body).fontFamily
+      : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
+
+  const attachCommonHandlers = (k: AnyNode, id: string) => {
+    ;(k as any).on("click tap", () => select(id))
+    if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
+  }
+
   const ensureStrokeGroup = (): AnyLayer => {
     let gid = currentStrokeId.current[side]
     if (gid) {
       const ex = find(gid)!
       if (ex && ex.node.opacity() < 0.02) {
-        ex.node.opacity(1)
-        ex.meta.opacity = 1
-        artLayerRef.current?.batchDraw()
-        bump()
+        ex.node.opacity(1); ex.meta.opacity = 1; artLayerRef.current?.batchDraw(); bump()
       }
       return ex!
     }
@@ -378,16 +380,6 @@ export default function EditorCanvas() {
     return newLay
   }
 
-  const siteFont = () =>
-    (typeof window !== "undefined"
-      ? window.getComputedStyle(document.body).fontFamily
-      : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
-
-  const attachCommonHandlers = (k: AnyNode, id: string) => {
-    ;(k as any).on("click tap", () => select(id))
-    if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
-  }
-
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -396,7 +388,7 @@ export default function EditorCanvas() {
       img.onload = () => {
         const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
         const w = img.width * ratio, h = img.height * ratio
-        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h, draggable: true })
+        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid()); const id = kimg.id()
         const meta = baseMeta(`image ${seqs.image}`)
@@ -421,9 +413,9 @@ export default function EditorCanvas() {
       fontFamily: siteFont(),
       fontStyle: "bold",
       fill: brushColor, width: 600, align: "center",
-      draggable: true,
+      draggable: false,
       lineHeight: 1,
-      letterSpacing: 0,
+      letterSpacing: 0
     })
     t.id(uid()); const id = t.id()
     const meta = baseMeta(`text ${seqs.text}`)
@@ -438,16 +430,16 @@ export default function EditorCanvas() {
 
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
-    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor, draggable: true })
-    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor, draggable: true })
-    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor, draggable: true })
+    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
+    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
+    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
     else if (kind === "cross") {
-      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160, draggable: true })
+      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160 })
       g.add(new Konva.Rect({ width: 320, height: 60, y: 130, fill: brushColor }))
       g.add(new Konva.Rect({ width: 60, height: 320, x: 130, fill: brushColor }))
       n = g
     } else {
-      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round", draggable: true })
+      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
     }
     ;(n as any).id(uid())
     const id = (n as any).id ? (n as any).id() : uid()
@@ -517,7 +509,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // ===== Overlay-редактор текста =====
+  // ===== Overlay-редактор текста (двойной клик/тап) =====
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stContainer = stage.container()
@@ -529,6 +521,7 @@ export default function EditorCanvas() {
     const ta = document.createElement("textarea")
     ta.value = t.text()
 
+    const abs = t.getAbsoluteScale()
     const place = () => {
       const b = stContainer.getBoundingClientRect()
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
@@ -538,7 +531,6 @@ export default function EditorCanvas() {
       ta.style.height = `${Math.max(2, r.height * scale)}px`
     }
 
-    const abs = t.getAbsoluteScale()
     Object.assign(ta.style, {
       position: "absolute",
       padding: "0", margin: "0",
@@ -562,8 +554,6 @@ export default function EditorCanvas() {
     ta.focus()
     ta.setSelectionRange(ta.value.length, ta.value.length)
 
-    isEditingTextRef.current = true
-
     const onInput = () => {
       t.text(ta.value)
       t.getLayer()?.batchDraw()
@@ -580,7 +570,6 @@ export default function EditorCanvas() {
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
       set({ tool: "move" as Tool })
-      isEditingTextRef.current = false
       requestAnimationFrame(() => {
         const id = (t as any).id ? (t as any).id() : undefined
         if (id) select(id)
@@ -604,40 +593,12 @@ export default function EditorCanvas() {
     window.addEventListener("scroll", place, true)
   }
 
-  // ===== Жесты =====
+  // ===== Жесты/клики =====
   const isTransformerChild = (t: Konva.Node | null) => {
     let p: Konva.Node | null | undefined = t
     const tr = trRef.current as unknown as Konva.Node | null
     while (p) { if (tr && p === tr) return true; p = p.getParent?.() }
     return false
-  }
-
-  type PinchSnap = {
-    node: AnyNode
-    isText: boolean
-    startDist: number
-    cx0: number
-    cy0: number
-    text?: { fs0:number; wrap0:number }
-    w0?: number; h0?: number
-    r0?: number
-    sx0?: number; sy0?: number
-  }
-  const pinchRef = useRef<PinchSnap | null>(null)
-
-  const getCanvasPointFromClient = (clientX:number, clientY:number) => {
-    const st = stageRef.current
-    if (!st) return { x: 0, y: 0 }
-    const rect = st.container().getBoundingClientRect()
-    return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale }
-  }
-  const getTouchesCanvas = (evt: TouchEvent) => {
-    const arr: {x:number,y:number}[] = []
-    for (let i=0; i<evt.touches.length; i++) {
-      const t = evt.touches.item(i)!
-      arr.push(getCanvasPointFromClient(t.clientX, t.clientY))
-    }
-    return arr
   }
 
   const onDown = (e: any) => {
@@ -657,131 +618,13 @@ export default function EditorCanvas() {
     }
   }
   const onMove = (e: any) => {
-    if (isTransformingRef.current || isEditingTextRef.current) return
+    if (isTransformingRef.current) return
     if (isTransformerChild(e.target)) return
     if (!isDrawing) return
     const p = toCanvas(getStagePointer())
     appendStroke(p.x, p.y)
   }
   const onUp = () => { if (isDrawing) finishStroke() }
-
-  const onTouchStart = (e:any) => {
-    const evt: TouchEvent = e.evt
-    if (isEditingTextRef.current) return
-    const touches = getTouchesCanvas(evt)
-
-    if (touches.length >= 2 && tool === "move" && selectedId) {
-      const n = node(selectedId); if (!n) return
-      const a = touches[0], b = touches[1]
-      const startDist = Math.hypot(a.x-b.x, a.y-b.y)
-      const cx0 = (a.x + b.x) / 2
-      const cy0 = (a.y + b.y) / 2
-
-      if (isTextNode(n)) {
-        pinchRef.current = { node: n, isText: true, startDist, cx0, cy0, text: { fs0: n.fontSize(), wrap0: Math.max(1, n.width() || 1) } }
-      } else if (isImgOrRect(n)) {
-        pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, w0: (n as any).width?.() ?? 1, h0: (n as any).height?.() ?? 1 }
-      } else if (n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) {
-        pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, r0: (n as any).radius?.() ?? 1 }
-      } else {
-        pinchRef.current = { node: n, isText: false, startDist, cx0, cy0, sx0: (n as any).scaleX?.() ?? 1, sy0: (n as any).scaleY?.() ?? 1 }
-      }
-      evt.preventDefault()
-      return
-    }
-
-    if (touches.length === 1) {
-      if (tool === "brush" || tool === "erase") { const p = touches[0]; startStroke(p.x, p.y); return }
-      const st = stageRef.current!
-      const tgt = e.target as Konva.Node
-      if (tgt === st || tgt === frontBgRef.current || tgt === backBgRef.current) {
-        select(null); trRef.current?.nodes([]); uiLayerRef.current?.batchDraw(); return
-      }
-      if (tgt && tgt !== st && tgt.getParent()) {
-        const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
-        if (found && found.side === side) select(found.id)
-      }
-    }
-  }
-
-  const onTouchMove = (e:any) => {
-    const evt: TouchEvent = e.evt
-    if (isEditingTextRef.current) return
-    const touches = getTouchesCanvas(evt)
-
-    if (pinchRef.current && touches.length >= 2) {
-      const a = touches[0], b = touches[1]
-      const s = Math.hypot(a.x-b.x, a.y-b.y) / Math.max(1e-6, pinchRef.current.startDist)
-      const snap = pinchRef.current
-      const n = snap.node
-
-      if (snap.isText && isTextNode(n) && snap.text) {
-        const nextFS = clamp(Math.round(snap.text.fs0 * s), TEXT_MIN_FS, TEXT_MAX_FS)
-        if (Math.abs(n.fontSize() - nextFS) > EPS) {
-          n.fontSize(nextFS)
-          const self = (n as any).getSelfRect?.()
-          const nh = Math.max(1, (self && self.height) ? self.height : (n.height() || 1))
-          const nw = Math.max(1, n.width() || snap.text.wrap0)
-          n.x(Math.round(snap.cx0 - nw/2))
-          n.y(Math.round(snap.cy0 - nh/2))
-        }
-        n.scaleX(1); n.scaleY(1)
-        artLayerRef.current?.batchDraw()
-        evt.preventDefault(); return
-      }
-
-      if (isImgOrRect(n) && snap.w0 && snap.h0) {
-        const nw = Math.max(1, snap.w0 * s)
-        const nh = Math.max(1, snap.h0 * s)
-        ;(n as any).width(nw); (n as any).height(nh)
-        ;(n as any).x(Math.round(snap.cx0 - nw/2))
-        ;(n as any).y(Math.round(snap.cy0 - nh/2))
-        ;(n as any).scaleX && (n as any).scaleX(1)
-        ;(n as any).scaleY && (n as any).scaleY(1)
-        artLayerRef.current?.batchDraw()
-        evt.preventDefault(); return
-      }
-
-      if ((n instanceof Konva.Circle || n instanceof Konva.RegularPolygon) && snap.r0) {
-        const nr = Math.max(1, snap.r0 * s)
-        ;(n as any).radius(nr)
-        ;(n as any).x && (n as any).x(snap.cx0)
-        ;(n as any).y && (n as any).y(snap.cy0)
-        ;(n as any).scaleX && (n as any).scaleX(1)
-        ;(n as any).scaleY && (n as any).scaleY(1)
-        artLayerRef.current?.batchDraw()
-        evt.preventDefault(); return
-      }
-
-      if ("scaleX" in (n as any)) {
-        const sx = (snap.sx0 ?? 1) * s
-        const sy = (snap.sy0 ?? 1) * s
-        ;(n as any).scaleX(sx); (n as any).scaleY(sy)
-        const bbox = (n as any).getClientRect?.() || { x: (n as any).x?.() ?? 0, y: (n as any).y?.() ?? 0, width: 0, height: 0 }
-        const cx = bbox.x + bbox.width / 2
-        const cy = bbox.y + bbox.height / 2
-        if ((n as any).x && (n as any).y && isFinite(cx) && isFinite(cy)) {
-          ;(n as any).x((n as any).x() + (snap.cx0 - cx))
-          ;(n as any).y((n as any).y() + (snap.cy0 - cy))
-        }
-        artLayerRef.current?.batchDraw()
-        evt.preventDefault(); return
-      }
-    }
-
-    // одиночное рисование
-    if (!pinchRef.current && touches.length === 1 && isDrawing) {
-      const p = touches[0]
-      appendStroke(p.x, p.y)
-      evt.preventDefault()
-    }
-  }
-
-  const onTouchEnd = (e:any) => {
-    const evt: TouchEvent = e.evt
-    if (pinchRef.current && evt.touches.length < 2) pinchRef.current = null
-    if (isDrawing && evt.touches.length === 0) finishStroke()
-  }
 
   // ===== Данные для панелей =====
   const layerItems: LayerItem[] = useMemo(() => {
@@ -864,7 +707,7 @@ export default function EditorCanvas() {
     if (tool !== "move") set({ tool: "move" })
   }
 
-  // ===== Свойства выбранного узла =====
+  // ===== Свойства выбранного узла + set-хендлеры =====
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -873,9 +716,9 @@ export default function EditorCanvas() {
       fontSize: Math.round(sel.node.fontSize()),
       fontFamily: sel.node.fontFamily(),
       fill: sel.node.fill() as string,
-      lineHeight: (sel.node as any).lineHeight?.() as number | undefined,
-      letterSpacing: (sel.node as any).letterSpacing?.() as number | undefined,
-      align: (sel.node as any).align?.() as "left"|"center"|"right" | undefined,
+      lineHeight: sel.node.lineHeight?.() ?? 1,
+      letterSpacing: (sel.node as any).letterSpacing?.() ?? 0,
+      align: (sel.node as any).align?.() ?? "left",
     }
     : sel && (sel.node as any).fill ? {
       fill: (sel.node as any).fill ? (sel.node as any).fill() : "#000000",
@@ -890,9 +733,9 @@ export default function EditorCanvas() {
   const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedAlign      = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).align?.(a); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedLineHeight = (v:number)    => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).lineHeight?.(clamp(v, 0.5, 4)); artLayerRef.current?.batchDraw(); bump() }
-  const setSelectedLetter     = (v:number)    => { const n = sel?.node as Konva.Text; if (!n) return; (n as any).letterSpacing?.(clamp(v, -10, 100)); artLayerRef.current?.batchDraw(); bump() }
+  const setSelectedAlign      = (a:"left"|"center"|"right") => { const n = sel?.node as any; if (!n || !n.align) return; n.align(a); artLayerRef.current?.batchDraw(); bump() }
+  const setSelectedLineHeight = (lh:number) => { const n = sel?.node as any; if (!n || !n.lineHeight) return; n.lineHeight(clamp(lh, 0.5, 4)); artLayerRef.current?.batchDraw(); bump() }
+  const setSelectedLetter     = (ls:number) => { const n = sel?.node as any; if (!n || !n.letterSpacing) return; n.letterSpacing(clamp(ls, -10, 100)); artLayerRef.current?.batchDraw(); bump() }
 
   const setSelectedColor = (hex:string)  => {
     if (!sel) return
@@ -932,7 +775,7 @@ export default function EditorCanvas() {
     bump()
   }
 
-  // ===== Скачивание =====
+  // ===== Скачивание (две кнопки) =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -957,14 +800,19 @@ export default function EditorCanvas() {
     st.draw()
 
     const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
-    await new Promise(r => setTimeout(r, 250))
+    await new Promise(r => setTimeout(r, 200))
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ===== Render =====
+  // ===== Рендер =====
   return (
-    <div className="fixed inset-0 bg-white" style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}>
-      {/* Desktop: левый сайдбар слоёв */}
+    <div
+      className="fixed inset-0 bg-white"
+      style={{
+        paddingTop: padTop, paddingBottom: padBottom,
+        overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none"
+      }}
+    >
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -980,28 +828,14 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Desktop quick buttons (как утверждали): Layers toggle + Download Front/Back */}
-      {!isMobile && (
-        <div className="fixed top-4 right-4 flex gap-2 z-50">
-          <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>set({ showLayers: !showLayers })}>
-            <span className="text-xs">Layers</span>
-          </button>
-          <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("front")}>
-            <span className="text-xs">Download Front</span>
-          </button>
-          <button className="h-9 px-3 border border-black bg-white flex items-center gap-2" onClick={()=>downloadBoth("back")}>
-            <span className="text-xs">Download Back</span>
-          </button>
-        </div>
-      )}
-
+      {/* Левый TOOLS-блок — место под него слева на десктопе */}
       <div className="w-full h-full flex items-start justify-center">
-        <div style={{ position:"relative", touchAction:"none", width: viewW, height: viewH }}>
+        <div style={{ position:"relative", touchAction:"none", width: viewW, height: viewH, marginLeft: !isMobile ? desktopLeftPad : 0 }}>
           <Stage
             width={viewW} height={viewH} scale={{ x: scale, y: scale }}
             ref={stageRef}
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
-            onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+            onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
             <Layer ref={bgLayerRef} listening={true}>
               {frontMock && <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening={true} />}
@@ -1028,6 +862,7 @@ export default function EditorCanvas() {
       </div>
 
       <Toolbar
+        // общие
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
         brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
@@ -1041,18 +876,20 @@ export default function EditorCanvas() {
         onClear={clearArt}
         toggleLayers={toggleLayers}
         layersOpen={showLayers}
+        // выбранный
         selectedKind={selectedKind}
-        selectedProps={selectedProps as any}
+        selectedProps={selectedProps}
         setSelectedFill={setSelectedFill}
         setSelectedStroke={setSelectedStroke}
         setSelectedStrokeW={setSelectedStrokeW}
         setSelectedText={setSelectedText}
         setSelectedFontSize={setSelectedFontSize}
         setSelectedFontFamily={setSelectedFontFamily}
-        setSelectedColor={setSelectedColor}
         setSelectedAlign={setSelectedAlign}
         setSelectedLineHeight={setSelectedLineHeight}
         setSelectedLetter={setSelectedLetter}
+        setSelectedColor={setSelectedColor}
+        // мобила
         mobileTopOffset={padTop}
         mobileLayers={{
           items: layerItems,
@@ -1062,8 +899,8 @@ export default function EditorCanvas() {
           onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
           onDelete: deleteLayer,
           onDuplicate: duplicateLayer,
-          onChangeBlend: (id, b)=>updateMeta(id,{ blend: b as Blend }),
-          onChangeOpacity: (id, o)=>updateMeta(id,{ opacity: o }),
+          onChangeBlend: (id, b)=>{},
+          onChangeOpacity: (id, o)=>{},
           onMoveUp:   (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>0) reorder(id, order[i-1], "before") },
           onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
         }}
