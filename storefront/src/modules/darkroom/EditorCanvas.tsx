@@ -70,7 +70,6 @@ export default function EditorCanvas() {
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
 
-  // тик UI для синхры
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
@@ -108,7 +107,6 @@ export default function EditorCanvas() {
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
 
-  // НЕ меняем blend у кисти/ластика — только opacity
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
     if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
@@ -130,17 +128,16 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer / ТЕКСТ — антискачок + два режима хендлов =====
-
+  // ===== Transformer / ТЕКСТ =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
   const resetBBoxFunc = () => { const tr = trRef.current; if (tr) (tr as any).boundBoxFunc(null) }
 
-  const textSnap = useRef<{ width:number; height:number; fs:number; cx:number; cy:number }|null>(null)
+  const textSnap = useRef<{ width:number; height:number; fs:number; cx:number; cy:number } | null>(null)
   const makeTextSnap = (t: Konva.Text) => {
     const w0 = Math.max(1, t.width() || 1)
-    let self: any = undefined
-    if (typeof (t as any).getSelfRect === "function") self = (t as any).getSelfRect()
+    const hasGetSelf = typeof (t as any).getSelfRect === "function"
+    const self = hasGetSelf ? (t as any).getSelfRect() : undefined
     const h0 = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || 1))
     const cx0 = t.x() + w0 / 2
     const cy0 = t.y() + h0 / 2
@@ -192,7 +189,6 @@ export default function EditorCanvas() {
           ? (trRef.current as any).getActiveAnchor()
           : undefined
 
-        // БОКОВЫЕ: меняем только width
         if (active === "middle-left" || active === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, snap.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -213,7 +209,6 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // УГЛЫ/вертикаль: меняем только fontSize
         const ratioW = newBox.width  / Math.max(1e-6, snap.width)
         const ratioH = newBox.height / Math.max(1e-6, snap.height)
         const s = Math.max(ratioW, ratioH)
@@ -222,9 +217,9 @@ export default function EditorCanvas() {
         const nextFS = clamp(Math.round(snap.fs * s), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-          let self: any = undefined
-          if (typeof (t as any).getSelfRect === "function") self = (t as any).getSelfRect()
-          const newH = Math.max(1, (self && typeof self.height === "number") ? self.height : (t.height() || snap.height))
+          const hasGetSelf2 = typeof (t as any).getSelfRect === "function"
+          const self2 = hasGetSelf2 ? (t as any).getSelfRect() : undefined
+          const newH = Math.max(1, (self2 && typeof self2.height === "number") ? self2.height : (t.height() || snap.height))
           const newW = Math.max(1, t.width() || snap.width)
           t.x(Math.round(snap.cx - newW/2))
           t.y(Math.round(snap.cy - newH/2))
@@ -246,7 +241,6 @@ export default function EditorCanvas() {
 
       detachTextFix.current = () => { n.off(".textsnap"); n.off(".textnorm") }
     } else {
-      // ——— НЕ ТЕКСТ ———
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -386,7 +380,6 @@ export default function EditorCanvas() {
   const attachCommonHandlers = (k: AnyNode, id: string) => {
     ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
-    if ((k as any).draggable) (k as any).draggable(true)
   }
 
   const onUploadImage = (file: File) => {
@@ -397,11 +390,7 @@ export default function EditorCanvas() {
       img.onload = () => {
         const ratio = Math.min((BASE_W*0.9)/img.width, (BASE_H*0.9)/img.height, 1)
         const w = img.width * ratio, h = img.height * ratio
-        const kimg = new Konva.Image({
-          image: img,
-          x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h,
-          draggable: true
-        })
+        const kimg = new Konva.Image({ image: img, x: BASE_W/2-w/2, y: BASE_H/2-h/2, width: w, height: h })
         ;(kimg as any).setAttr("src", r.result as string)
         kimg.id(uid()); const id = kimg.id()
         const meta = baseMeta(`image ${seqs.image}`)
@@ -426,7 +415,7 @@ export default function EditorCanvas() {
       fontFamily: siteFont(),
       fontStyle: "bold",
       fill: brushColor, width: 600, align: "center",
-      draggable: true,
+      draggable: false,
     })
     t.id(uid()); const id = t.id()
     const meta = baseMeta(`text ${seqs.text}`)
@@ -441,16 +430,16 @@ export default function EditorCanvas() {
 
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
-    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor, draggable: true })
-    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor, draggable: true })
-    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor, draggable: true })
+    if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
+    else if (kind === "square")   n = new Konva.Rect({ x: BASE_W/2-160, y: BASE_H/2-160, width: 320, height: 320, fill: brushColor })
+    else if (kind === "triangle") n = new Konva.RegularPolygon({ x: BASE_W/2, y: BASE_H/2, sides: 3, radius: 200, fill: brushColor })
     else if (kind === "cross") {
-      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160, draggable: true })
+      const g = new Konva.Group({ x: BASE_W/2-160, y: BASE_H/2-160 })
       g.add(new Konva.Rect({ width: 320, height: 60, y: 130, fill: brushColor }))
       g.add(new Konva.Rect({ width: 60, height: 320, x: 130, fill: brushColor }))
       n = g
     } else {
-      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round", draggable: true })
+      n = new Konva.Line({ points: [BASE_W/2-200, BASE_H/2, BASE_W/2+200, BASE_H/2], stroke: brushColor, strokeWidth: 16, lineCap: "round" })
     }
     ;(n as any).id(uid())
     const id = (n as any).id ? (n as any).id() : uid()
@@ -553,11 +542,11 @@ export default function EditorCanvas() {
       fontStyle:  t.fontStyle()?.includes("italic") ? "italic" : "normal",
       fontSize:   `${t.fontSize() * abs.y}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(((t as any).letterSpacing?.() ?? 0) * abs.x)}px`,
+      letterSpacing: `${(((t as any).letterSpacing?.() ?? 0) as number) * abs.x}px`,
       whiteSpace: "pre-wrap", overflow: "hidden", outline: "none", resize: "none",
       transformOrigin: "left top", zIndex: "9999", userSelect: "text",
       caretColor: String(t.fill() || "#000"),
-      textAlign: (((t as any).align?.() as any) || "left"),
+      textAlign: ((t as any).align?.() as any) || "left",
     } as CSSStyleDeclaration)
 
     place()
@@ -604,7 +593,7 @@ export default function EditorCanvas() {
     window.addEventListener("scroll", place, true)
   }
 
-  // ===== Жесты / клики =====
+  // ===== Жесты/клики =====
   const isTransformerChild = (t: Konva.Node | null) => {
     let p: Konva.Node | null | undefined = t
     const tr = trRef.current as unknown as Konva.Node | null
@@ -859,7 +848,6 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* ДЕСКТОПНЫЙ Toolbar — ваш прежний, без редизайна */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
