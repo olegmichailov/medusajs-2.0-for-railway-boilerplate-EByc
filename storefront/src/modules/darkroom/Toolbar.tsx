@@ -1,40 +1,44 @@
 "use client"
 
-import React, { useMemo, useRef } from "react"
+import React, { ChangeEvent, useMemo } from "react"
+import { Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
-import { ShapeKind, Side, Tool } from "./store"
-import type { LayerItem } from "./LayersPanel"
 
-type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
+type LayerList = {
+  items: Array<{ id: string; name: string; type: string; visible: boolean; locked: boolean; blend: Blend; opacity: number }>
+  selectedId?: string
+  onSelect: (id: string)=>void
+  onToggleVisible: (id: string)=>void
+  onToggleLock: (id: string)=>void
+  onDelete: (id: string)=>void
+  onDuplicate: (id: string)=>void
+  onChangeBlend: (id: string, b: Blend)=>void
+  onChangeOpacity: (id: string, o: number)=>void
+  onMoveUp: (id: string)=>void
+  onMoveDown: (id: string)=>void
+}
 
-type ToolbarProps = {
+type Props = {
   side: Side
   setSide: (s: Side)=>void
-
   tool: Tool
   setTool: (t: Tool)=>void
-
   brushColor: string
-  setBrushColor: (v:string)=>void
-
+  setBrushColor: (v: string)=>void
   brushSize: number
-  setBrushSize: (n:number)=>void
-
+  setBrushSize: (v: number)=>void
   shapeKind: ShapeKind
   setShapeKind: (k: ShapeKind)=>void
-
-  onUploadImage(file: File): void
-  onAddText(): void
-  onAddShape(kind: ShapeKind): void
-  onDownloadFront(): void
-  onDownloadBack(): void
-  onClear(): void
-
-  toggleLayers(): void
+  onUploadImage: (f: File)=>void
+  onAddText: ()=>void
+  onAddShape: (k: ShapeKind)=>void
+  onDownloadFront: ()=>void
+  onDownloadBack: ()=>void
+  onClear: ()=>void
+  toggleLayers: ()=>void
   layersOpen: boolean
 
-  // selection
-  selectedKind: LayerType | null
+  selectedKind: string|null
   selectedProps: any
   setSelectedFill: (hex:string)=>void
   setSelectedStroke: (hex:string)=>void
@@ -42,257 +46,185 @@ type ToolbarProps = {
   setSelectedText: (t:string)=>void
   setSelectedFontSize: (n:number)=>void
   setSelectedFontFamily: (name:string)=>void
-  setSelectedColor: (hex:string)=>void
   setSelectedAlign: (a:"left"|"center"|"right")=>void
-  setSelectedLineHeight: (n:number)=>void
-  setSelectedLetter: (n:number)=>void
+  setSelectedLineHeight: (lh:number)=>void
+  setSelectedLetter: (ls:number)=>void
+  setSelectedColor: (hex:string)=>void
 
-  // mobile
   mobileTopOffset: number
-  mobileLayers: {
-    items: LayerItem[]
-    selectedId?: string
-    onSelect: (id:string)=>void
-    onToggleVisible: (id:string)=>void
-    onToggleLock: (id:string)=>void
-    onDelete: (id:string)=>void
-    onDuplicate: (id:string)=>void
-    onChangeBlend: (id:string, b:string)=>void
-    onChangeOpacity: (id:string, o:number)=>void
-    onMoveUp: (id:string)=>void
-    onMoveDown: (id:string)=>void
-  }
+  mobileLayers: LayerList
 }
 
 const COLORS = [
-  "#000000","#ffffff","#ff008e","#ff3b3b","#ff9900","#ffdd00",
-  "#19bf00","#00c6ff","#0066ff","#8a2be2","#ff77ff","#7a7a7a",
-  "#00ff9a","#ffaaff","#ffccaa","#c0ff00","#00ffaa","#55ddff",
+  "#000000","#ffffff",
+  "#ff3b3b","#ff7a00","#ffd400","#ffe666","#34c759","#00c7be","#32ade6","#007aff","#5856d6","#af52de",
+  "#ff2d55","#ff9f0a","#ffd60a","#64d2ff","#30d158","#a0e461","#8e8e93","#c7c7cc"
 ]
 
-export default function Toolbar(props: ToolbarProps){
-  if (isMobile) return <MobileToolbar {...props} />
-  return <DesktopTools {...props} />
-}
+export default function Toolbar(p: Props) {
+  const colorInput = (value: string, onChange:(v:string)=>void) => (
+    <input
+      type="color"
+      value={value}
+      onChange={(e)=>onChange(e.target.value)}
+      style={{ width: 24, height: 24, border: "1px solid #111", borderRadius: 2, background: "#fff" }}
+    />
+  )
 
-// ================= DESKTOP =================
+  const slider = (val:number,min:number,max:number,step:number,on:(n:number)=>void,w=140) => (
+    <input
+      type="range"
+      value={val}
+      min={min}
+      max={max}
+      step={step}
+      onChange={(e)=>on(Number(e.target.value))}
+      style={{ width: w }}
+    />
+  )
 
-function DesktopTools(p: ToolbarProps){
-  const fileRef = useRef<HTMLInputElement>(null)
+  // ============ DESKTOP ============
+  if (!isMobile) {
+    return (
+      <aside
+        style={{
+          position:"fixed", left:16, top:p.mobileTopOffset, width:256, zIndex:50,
+          border: "1px solid #111", background:"#fff", padding:8
+        }}
+      >
+        <div style={{ fontSize:10, letterSpacing:1, borderBottom:"1px solid #111", paddingBottom:6, marginBottom:8 }}>TOOLS</div>
 
-  const pickColor = (hex:string) => {
-    p.setBrushColor(hex)
-    p.setSelectedColor(hex)
+        {/* верхняя строка */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(8, 1fr)", gap:6, marginBottom:8 }}>
+          <Btn on={()=>p.setTool("move")}  active={p.tool==="move"}  label="Move" />
+          <Btn on={()=>p.setTool("brush")} active={p.tool==="brush"} label="Brush" />
+          <Btn on={()=>p.setTool("erase")} active={p.tool==="erase"} label="Erase" />
+          <Btn on={p.onAddText} label="Text" />
+          <label className="btn-like" style={btnStyle}><input type="file" accept="image/*" style={{ display:"none" }}
+                 onChange={(e)=>{ const f=e.target.files?.[0]; if (f) p.onUploadImage(f); (e.target as HTMLInputElement).value="" }} />Img</label>
+          <Btn on={()=>p.toggleLayers()} active={p.layersOpen} label="Lay" />
+          <Btn on={()=>p.onClear()} label="Clear" />
+          <div />
+        </div>
+
+        {/* цвет + размер кисти */}
+        <div style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:6, alignItems:"center", marginBottom:8 }}>
+          <span style={{ fontSize:11 }}>Color</span>
+          {slider(p.brushSize, 1, 64, 1, p.setBrushSize)}
+          {colorInput(p.brushColor, p.setBrushColor)}
+        </div>
+
+        {/* палитра */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(10, 1fr)", gap:6, marginBottom:10 }}>
+          {COLORS.map(c=>(
+            <div key={c} title={c}
+              onClick={()=>{ p.setBrushColor(c); p.setSelectedColor(c)}}
+              style={{ width:18, height:18, border:"1px solid #111", background:c, cursor:"pointer" }}/>
+          ))}
+        </div>
+
+        {/* Shapes */}
+        <div style={{ fontSize:11, marginBottom:6 }}>Shapes</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:6, marginBottom:12 }}>
+          <Btn on={()=>p.onAddShape("square")}   label="▭" />
+          <Btn on={()=>p.onAddShape("circle")}   label="◯" />
+          <Btn on={()=>p.onAddShape("triangle")} label="△" />
+          <Btn on={()=>p.onAddShape("cross")}    label="✚" />
+          <Btn on={()=>p.onAddShape("line")}     label="—" />
+          <div />
+        </div>
+
+        {/* Text */}
+        <div style={{ fontSize:11, marginBottom:6 }}>Text</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, marginBottom:6 }}>
+          <Btn on={()=>p.setSelectedAlign("left")}   label="≡" title="Align left" />
+          <Btn on={()=>p.setSelectedAlign("center")} label="=≡=" title="Align center" />
+          <Btn on={()=>p.setSelectedAlign("right")}  label="≡=" title="Align right" />
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:6, alignItems:"center", marginBottom:6 }}>
+          <span style={{ fontSize:11 }}>Font size</span>
+          {slider(p.selectedProps?.fontSize ?? 96, 8, 800, 1, p.setSelectedFontSize)}
+          <span style={{ fontSize:11 }}>{p.selectedProps?.fontSize ?? 96}</span>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:6, alignItems:"center", marginBottom:6 }}>
+          <span style={{ fontSize:11 }}>Line</span>
+          {slider(p.selectedProps?.lineHeight ?? 1, 0.5, 4, 0.01, p.setSelectedLineHeight)}
+          <span style={{ fontSize:11 }}>{(p.selectedProps?.lineHeight ?? 1).toFixed(2)}</span>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:6, alignItems:"center", marginBottom:12 }}>
+          <span style={{ fontSize:11 }}>Letter</span>
+          {slider(p.selectedProps?.letterSpacing ?? 0, -10, 100, 0.5, p.setSelectedLetter)}
+          <span style={{ fontSize:11 }}>{(p.selectedProps?.letterSpacing ?? 0).toFixed(1)}</span>
+        </div>
+
+        {/* Download + Side */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6 }}>
+          <Btn on={()=>p.setSide("front")} active={p.side==="front"} label="FRONT" />
+          <Btn on={()=>p.setSide("back")}  active={p.side==="back"}  label="BACK" />
+          <div />
+          <Btn on={p.onDownloadFront} label="DL FRONT" />
+          <Btn on={p.onDownloadBack}  label="DL BACK" />
+          <div />
+        </div>
+      </aside>
+    )
   }
 
+  // ============ MOBILE (3 строки) ============
   return (
-    <>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden"
-             onChange={(e)=>{ const f=e.target.files?.[0]; if (f) p.onUploadImage(f); (e.currentTarget as HTMLInputElement).value="" }} />
-
-      <div className="fixed left-4 top-[88px] z-40 w-[220px] select-none">
-        <div className="border border-black bg-white shadow-md">
-          <div className="px-3 py-2 text-[10px] tracking-widest uppercase text-[#333]">Tools</div>
-
-          {/* row of icons */}
-          <div className="px-2 grid grid-cols-7 gap-1">
-            <IconBtn active={p.tool==="move"} label="Move" onClick={()=>p.setTool("move")} icon="↔" />
-            <IconBtn active={p.tool==="brush"} label="Brush" onClick={()=>p.setTool("brush")} icon="✎" />
-            <IconBtn active={p.tool==="erase"} label="Erase" onClick={()=>p.setTool("erase")} icon="⌫" />
-            <IconBtn label="Text" onClick={()=>{ p.setTool("text"); p.onAddText() }} icon="T" />
-            <IconBtn label="Image" onClick={()=>{ p.setTool("image"); fileRef.current?.click() }} icon="🖼" />
-            <IconBtn active={p.layersOpen} label="Layers" onClick={p.toggleLayers} icon="≡" />
-            <IconBtn label="Clear" onClick={p.onClear} icon="✖" />
-          </div>
-
-          {/* Color + size */}
-          <div className="px-3 pt-3">
-            <div className="flex items-center gap-2">
-              <input type="color" value={p.brushColor} onChange={(e)=>pickColor(e.target.value)} className="w-8 h-8 border border-black" />
-              <div className="flex-1">
-                <Slider min={1} max={200} step={1} value={p.brushSize} onChange={n=>p.setBrushSize(n)} />
-              </div>
-              <span className="text-[10px] w-8 text-right">{p.brushSize|0}</span>
-            </div>
-          </div>
-
-          {/* palette */}
-          <div className="px-3 py-2 grid grid-cols-9 gap-1">
-            {COLORS.map(c=>(
-              <button key={c} title={c} className="h-4 w-4 border" style={{ background:c }} onClick={()=>pickColor(c)} />
-            ))}
-          </div>
-
-          {/* Shapes */}
-          <div className="px-3 pt-1 pb-2">
-            <div className="text-[10px] mb-1">Shapes</div>
-            <div className="grid grid-cols-5 gap-1">
-              <Btn onClick={()=>p.onAddShape("square")}>□</Btn>
-              <Btn onClick={()=>p.onAddShape("circle")}>○</Btn>
-              <Btn onClick={()=>p.onAddShape("triangle")}>△</Btn>
-              <Btn onClick={()=>p.onAddShape("cross")}>✚</Btn>
-              <Btn onClick={()=>p.onAddShape("line")}>／</Btn>
-            </div>
-          </div>
-
-          {/* Text controls */}
-          <div className="px-3 pb-3">
-            <div className="text-[10px] mb-1">Text</div>
-            <div className="flex gap-1 mb-2">
-              <Btn onClick={()=>p.setSelectedAlign("left")}>≡</Btn>
-              <Btn onClick={()=>p.setSelectedAlign("center")}>≣</Btn>
-              <Btn onClick={()=>p.setSelectedAlign("right")}>≡›</Btn>
-            </div>
-            <Row label="Font size">
-              <Slider min={8} max={800} step={1}
-                value={typeof p.selectedProps?.fontSize==="number"?p.selectedProps.fontSize:96}
-                onChange={n=>p.setSelectedFontSize(n)} />
-              <Val v={p.selectedProps?.fontSize ?? 96}/>
-            </Row>
-            <Row label="Line">
-              <Slider min={0.5} max={4} step={0.01}
-                value={typeof p.selectedProps?.lineHeight==="number"?p.selectedProps.lineHeight:1}
-                onChange={n=>p.setSelectedLineHeight(n)} />
-              <Val v={p.selectedProps?.lineHeight ?? 1}/>
-            </Row>
-            <Row label="Letter">
-              <Slider min={-10} max={100} step={0.5}
-                value={typeof p.selectedProps?.letterSpacing==="number"?p.selectedProps.letterSpacing:0}
-                onChange={n=>p.setSelectedLetter(n)} />
-              <Val v={p.selectedProps?.letterSpacing ?? 0}/>
-            </Row>
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
-
-// ================= MOBILE (3 строки) =================
-
-function MobileToolbar(p: ToolbarProps){
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const pickColor = (hex:string) => {
-    p.setBrushColor(hex)
-    p.setSelectedColor(hex)
-  }
-
-  const icoBtn = (label:string, onClick:()=>void, active?:boolean) => (
-    <button className={`h-12 w-12 grid place-items-center border border-black ${active?"bg-black text-white":"bg-white"}`} onClick={onClick}>{label}</button>
-  )
-
-  return (
-    <>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden"
-             onChange={(e)=>{ const f=e.target.files?.[0]; if (f) p.onUploadImage(f); (e.currentTarget as HTMLInputElement).value="" }} />
-
-      {/* 1: TOOLS + Layers + Clear */}
-      <div className="fixed inset-x-0 z-50 bg-white/90 backdrop-blur border-t border-black/10" style={{ bottom: 48*2 }}>
-        <div className="px-2 py-1 flex items-center gap-1">
-          {icoBtn("↔", ()=>p.setTool("move"), p.tool==="move")}
-          {icoBtn("✎", ()=>p.setTool("brush"), p.tool==="brush")}
-          {icoBtn("⌫", ()=>p.setTool("erase"), p.tool==="erase")}
-          {icoBtn("T", ()=>{ p.setTool("text"); p.onAddText() }, p.tool==="text")}
-          {icoBtn("🖼", ()=>{ p.setTool("image"); fileRef.current?.click() }, p.tool==="image")}
-          {icoBtn("△", ()=>p.setTool("shape"), p.tool==="shape")}
-          <button className={`h-12 px-3 border border-black ml-2 ${p.layersOpen?"bg-black text-white":"bg-white"}`} onClick={p.toggleLayers}>Layers</button>
-          <div className="ml-auto flex gap-1">
-            <button className="h-12 w-12 grid place-items-center border border-black bg-white" onClick={p.onClear}>✖</button>
-          </div>
-        </div>
+    <div style={{
+      position:"fixed", left:0, right:0, bottom:0, zIndex:60, background:"#fff",
+      borderTop:"1px solid #111", padding:"8px 8px"
+    }}>
+      {/* Ряд 1: инструменты */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(8, 1fr)", gap:6, marginBottom:8 }}>
+        <Btn on={()=>p.setTool("move")}  active={p.tool==="move"}  label="Move" />
+        <Btn on={()=>p.setTool("brush")} active={p.tool==="brush"} label="Brush" />
+        <Btn on={()=>p.setTool("erase")} active={p.tool==="erase"} label="Erase" />
+        <Btn on={p.onAddText} label="Text" />
+        <label className="btn-like" style={btnStyle}><input type="file" accept="image/*" style={{ display:"none" }}
+               onChange={(e)=>{ const f=e.target.files?.[0]; if (f) p.onUploadImage(f); (e.target as HTMLInputElement).value="" }} />Img</label>
+        <Btn on={()=>p.onAddShape("square")} label="▭" />
+        <Btn on={()=>p.toggleLayers()} active={p.layersOpen} label="Layers" />
+        <Btn on={()=>p.onClear()} label="Clear" />
       </div>
 
-      {/* 2: CONTEXT */}
-      <div className="fixed inset-x-0 z-50 bg-white/90 backdrop-blur border-t border-black/10" style={{ bottom: 48 }}>
-        {/* Brush / Erase — одинаковый слайдер размера + color */}
-        {(p.tool==="brush" || p.tool==="erase" || p.tool==="move") && (
-          <div className="px-2 py-1 flex items-center gap-2">
-            <input type="color" value={p.brushColor} onChange={(e)=>pickColor(e.target.value)} className="w-8 h-8 border border-black" />
-            <div className="relative flex-1">
-              <Slider min={1} max={200} step={1} value={p.brushSize} onChange={n=>p.setBrushSize(n)} />
-            </div>
-            <span className="text-xs w-10 text-right">{p.brushSize|0}</span>
-          </div>
-        )}
-
-        {p.tool==="text" && (
-          <div className="px-2 py-2 space-y-2">
-            <div className="flex gap-1">
-              <Btn onClick={()=>p.setSelectedAlign("left")}>≡</Btn>
-              <Btn onClick={()=>p.setSelectedAlign("center")}>≣</Btn>
-              <Btn onClick={()=>p.setSelectedAlign("right")}>≡›</Btn>
-            </div>
-            <Row label="Font">
-              <Slider min={8} max={800} step={1} value={typeof p.selectedProps?.fontSize==="number"?p.selectedProps.fontSize:96} onChange={n=>p.setSelectedFontSize(n)} />
-              <Val v={p.selectedProps?.fontSize ?? 96}/>
-            </Row>
-            <Row label="Line">
-              <Slider min={0.5} max={4} step={0.01} value={typeof p.selectedProps?.lineHeight==="number"?p.selectedProps.lineHeight:1} onChange={n=>p.setSelectedLineHeight(n)} />
-              <Val v={p.selectedProps?.lineHeight ?? 1}/>
-            </Row>
-            <Row label="Letter">
-              <Slider min={-10} max={100} step={0.5} value={typeof p.selectedProps?.letterSpacing==="number"?p.selectedProps.letterSpacing:0} onChange={n=>p.setSelectedLetter(n)} />
-              <Val v={p.selectedProps?.letterSpacing ?? 0}/>
-            </Row>
-          </div>
-        )}
-
-        {(p.tool==="image" || p.tool==="shape") && (
-          <div className="px-2 py-1 flex items-center gap-1">
-            <Btn onClick={()=>p.onAddShape("square")}>□</Btn>
-            <Btn onClick={()=>p.onAddShape("circle")}>○</Btn>
-            <Btn onClick={()=>p.onAddShape("triangle")}>△</Btn>
-            <Btn onClick={()=>p.onAddShape("cross")}>✚</Btn>
-            <Btn onClick={()=>p.onAddShape("line")}>／</Btn>
-          </div>
-        )}
+      {/* Ряд 2: Color + Size (универсальные) */}
+      <div style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:8, alignItems:"center", marginBottom:8 }}>
+        <span style={{ fontSize:12 }}>Color</span>
+        {slider(p.brushSize, 1, 64, 1, p.setBrushSize, /*w*/ undefined as any)}
+        {colorInput(p.brushColor, (c)=>{ p.setBrushColor(c); p.setSelectedColor(c) })}
       </div>
 
-      {/* 3: FRONT/BACK + downloads */}
-      <div className="fixed inset-x-0 z-50 bg-white/90 backdrop-blur border-t border-black/10" style={{ bottom: 0 }}>
-        <div className="px-2 pb-2 pt-1 grid grid-cols-2 gap-2">
-          <div className="flex gap-2">
-            <button className={`flex-1 h-10 border border-black ${p.side==="front"?"bg-black text-white":"bg-white"}`} onClick={()=>p.setSide("front")}>FRONT</button>
-            <button className="h-10 w-12 border border-black bg-white" onClick={p.onDownloadFront}>⇩</button>
-          </div>
-          <div className="flex gap-2">
-            <button className={`flex-1 h-10 border border-black ${p.side==="back"?"bg-black text-white":"bg-white"}`} onClick={()=>p.setSide("back")}>BACK</button>
-            <button className="h-10 w-12 border border-black bg-white" onClick={p.onDownloadBack}>⇩</button>
-          </div>
-        </div>
+      {/* Ряд 3: Сторона + даунлоады */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:6 }}>
+        <Btn on={()=>p.setSide("front")} active={p.side==="front"} label="FRONT" />
+        <Btn on={()=>p.setSide("back")}  active={p.side==="back"}  label="BACK" />
+        <Btn on={p.onDownloadFront} label="DL F" />
+        <Btn on={p.onDownloadBack}  label="DL B" />
       </div>
-    </>
-  )
-}
-
-// ========== UI bits ==========
-
-function IconBtn({active, onClick, label}:{active?:boolean; onClick:()=>void; label:string}){
-  return <button className={`h-10 grid place-items-center border border-black ${active?"bg-black text-white":"bg-white"}`} onClick={onClick}>{label}</button>
-}
-
-function Btn({children, onClick}:{children:React.ReactNode; onClick:()=>void}){
-  return <button className="h-9 w-9 grid place-items-center border border-black bg-white" onClick={onClick}>{children}</button>
-}
-
-function Row({label, children}:{label:string; children:React.ReactNode}){
-  return (
-    <div className="flex items-center gap-2 my-2">
-      <div className="text-[10px] w-14">{label}</div>
-      <div className="flex-1">{children}</div>
     </div>
   )
 }
 
-function Val({v}:{v:number}){
-  return <span className="text-[10px] w-10 text-right inline-block">{typeof v==="number"?Number(v).toFixed(0):""}</span>
-}
+// ============== Вспомогательные компоненты ==============
 
-function Slider({min,max,step,value,onChange}:{min:number;max:number;step:number;value:number;onChange:(v:number)=>void}){
+const btnStyle: React.CSSProperties = {
+  display:"inline-flex", alignItems:"center", justifyContent:"center",
+  height:28, border:"1px solid #111", background:"#fff",
+  fontSize:12, cursor:"pointer", userSelect:"none"
+}
+function Btn({ on, active, label, title }:{ on:()=>void; active?:boolean; label:string; title?:string }) {
   return (
-    <input type="range" min={min} max={max} step={step} value={value}
-           onChange={(e)=>onChange(parseFloat(e.currentTarget.value))}
-           className="w-full" />
+    <button type="button" onClick={on} title={title}
+      style={{
+        ...btnStyle,
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#111"
+      }}
+    >
+      {label}
+    </button>
   )
 }
