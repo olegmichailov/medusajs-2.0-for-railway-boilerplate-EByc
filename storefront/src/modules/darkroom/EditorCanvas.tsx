@@ -1,3 +1,4 @@
+// src/modules/darkroom/EditorCanvas.tsx
 "use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -9,24 +10,22 @@ import LayersPanel, { LayerItem, PhysicsRole } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ==== БАЗА МАКЕТА ====
+/* -------------------- БАЗА МАКЕТА -------------------- */
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// клампы текста
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
-// uid и утилиты
 const uid = () => Math.random().toString(36).slice(2)
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
 
-// ==== ТИПЫ ====
+/* -------------------- ТИПЫ -------------------- */
 type BaseMeta = {
   blend: Blend
   opacity: number
@@ -51,19 +50,11 @@ const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 
-// ==== RAPIER типы (ленивый импорт) ====
+/* -------------------- Rapier типы -------------------- */
 type RWorld = import("@dimforge/rapier2d-compat").World
 type RigidBody = import("@dimforge/rapier2d-compat").RigidBody
 type Collider = import("@dimforge/rapier2d-compat").Collider
 type RapierNS = typeof import("@dimforge/rapier2d-compat")
-
-type PhysHandle = {
-  role: PhysicsRole
-  bodies: RigidBody[]
-  colliders: Collider[]
-  joints?: any[]
-  anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
-}
 
 export default function EditorCanvas() {
   const {
@@ -73,11 +64,9 @@ export default function EditorCanvas() {
 
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
-  // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  // refs
   const stageRef    = useRef<Konva.Stage>(null)
   const bgLayerRef  = useRef<Konva.Layer>(null)
   const artLayerRef = useRef<Konva.Layer>(null)
@@ -88,17 +77,14 @@ export default function EditorCanvas() {
   const frontArtRef = useRef<Konva.Group>(null)
   const backArtRef  = useRef<Konva.Group>(null)
 
-  // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
-
-  // маркер «идёт трансформирование», чтобы не конфликтовать с нашими жестами
   const isTransformingRef = useRef(false)
 
-  // вёрстка/масштаб
+  /* -------------------- Вёрстка -------------------- */
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -109,14 +95,13 @@ export default function EditorCanvas() {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + 8
-    const padBottom = isMobile ? 164 : 72 // + место под моб. physics
+    const padBottom = isMobile ? 164 : 72
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // фикс скролла
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -124,7 +109,7 @@ export default function EditorCanvas() {
     return () => { document.body.style.overflow = prev }
   }, [set])
 
-  // helpers
+  /* -------------------- helpers -------------------- */
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false, physRole: "off" })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
@@ -135,7 +120,7 @@ export default function EditorCanvas() {
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
-  // показываем только активную сторону
+  /* -------------------- side visibility -------------------- */
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     frontBgRef.current?.visible(side === "front")
@@ -148,7 +133,7 @@ export default function EditorCanvas() {
     if (ph.running) resetPhysics()
   }, [side, layers]) // eslint-disable-line
 
-  // ===== Transformer / ТЕКСТ — углы=fontSize, бока=wrap =====
+  /* -------------------- Transformer + текст-особенности -------------------- */
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
   const textSnapRef   = useRef<{ fs0:number; wrap0:number; cx0:number; cy0:number }|null>(null)
@@ -179,7 +164,6 @@ export default function EditorCanvas() {
     tr.nodes([n])
     tr.rotateEnabled(true)
 
-    // guard на время трансформации
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
     n.on("transformstart.guard", onStart)
@@ -206,7 +190,6 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // БОКОВЫЕ — меняем только ширину wrap, центр сохраняем
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -222,7 +205,6 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // УГЛЫ/ВЕРТИКАЛЬ — меняем только fontSize от стартового, центр сохраняем
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -260,7 +242,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // во время brush/erase — отключаем драг
+  /* -------------------- drag guard под кисть/ластик -------------------- */
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -271,7 +253,7 @@ export default function EditorCanvas() {
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
   }, [tool, layers, side])
 
-  // ===== хоткеи =====
+  /* -------------------- хоткеи -------------------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
@@ -280,10 +262,18 @@ export default function EditorCanvas() {
       const n = node(selectedId)
       const lay = find(selectedId)
 
+      // Трансформер
       if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="t") {
         e.preventDefault()
         set({ tool: "move" as Tool })
         requestAnimationFrame(attachTransformer)
+        return
+      }
+
+      // Explode text: Ctrl/Cmd + E
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="e") {
+        e.preventDefault()
+        explodeSelectedText()
         return
       }
 
@@ -295,7 +285,6 @@ export default function EditorCanvas() {
 
       if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) e.preventDefault()
       const step = e.shiftKey ? 20 : 3
-
       ;(n as any).x && (n as any).y && (
         (e.key === "ArrowLeft"  && (n as any).x((n as any).x()-step)),
         (e.key === "ArrowRight" && (n as any).x((n as any).x()+step)),
@@ -308,7 +297,7 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  // ===== Brush / Erase (каждый DOWN — новый слой) =====
+  /* -------------------- Кисть / Ластик -------------------- */
   const startStroke = (x: number, y: number) => {
     if (tool !== "brush" && tool !== "erase") return
     if (ph.running) return
@@ -319,7 +308,7 @@ export default function EditorCanvas() {
     ;(g as any).id(uid())
     const id = (g as any).id()
     const meta = baseMeta(tool === "brush" ? `strokes ${seqs.strokes}` : `erase ${seqs.erase}`)
-    if (tool === "brush") meta.physRole = "rope" // авто: brush = rope
+    if (tool === "brush") meta.physRole = "rope"
     currentArt().add(g); (g as any).moveToTop()
     const newLay: AnyLayer = { id, side, node: g, meta, type: tool === "brush" ? "strokes" : "erase" }
     setLayers(p => [...p, newLay])
@@ -350,7 +339,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // утилита: шрифт сайта из body
+  /* -------------------- Вспом. шрифт сайта -------------------- */
   const siteFont = () =>
     (typeof window !== "undefined"
       ? window.getComputedStyle(document.body).fontFamily
@@ -361,7 +350,7 @@ export default function EditorCanvas() {
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
   }
 
-  // ===== Добавление: Image =====
+  /* -------------------- Добавления -------------------- */
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -388,7 +377,6 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // ===== Добавление: Text =====
   const onAddText = () => {
     const t = new Konva.Text({
       text: "GMORKL",
@@ -413,7 +401,6 @@ export default function EditorCanvas() {
     set({ tool: "move" })
   }
 
-  // ===== Добавление: Shape =====
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
@@ -434,7 +421,7 @@ export default function EditorCanvas() {
     set({ tool: "move" })
   }
 
-  // ===== Overlay-редактор текста =====
+  /* -------------------- Overlay-редактор текста -------------------- */
   const startTextOverlayEdit = (t: Konva.Text) => {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
@@ -531,7 +518,7 @@ export default function EditorCanvas() {
     vv?.addEventListener("scroll", place as any)
   }
 
-  // ===== Жесты (мобилка) =====
+  /* -------------------- Моб. жесты -------------------- */
   type G = {
     active: boolean
     two: boolean
@@ -706,7 +693,7 @@ export default function EditorCanvas() {
     requestAnimationFrame(attachTransformer)
   }
 
-  // ===== Данные для панелей/toolbar =====
+  /* -------------------- Layers data для панелей -------------------- */
   const layerItems: LayerItem[] = useMemo(() => {
     void uiTick
     return layers
@@ -789,7 +776,7 @@ export default function EditorCanvas() {
     if (tool !== "move") set({ tool: "move" })
   }
 
-  // ===== Снимки свойств выбранного узла для Toolbar =====
+  /* -------------------- Свойства выбранного -------------------- */
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -819,7 +806,77 @@ export default function EditorCanvas() {
   const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump() }
 
-  // ===== Clear All =====
+  /* -------------------- Explode текста на буквы -------------------- */
+  const explodeSelectedText = () => {
+    const L = find(selectedId)
+    if (!L || L.type !== "text") return
+    const t = L.node as Konva.Text
+    const raw = t.text() || ""
+    if (!raw || raw.length <= 1) return // нечего взрывать
+
+    const fontFamily = t.fontFamily()
+    const fontSize = t.fontSize()
+    const fontStyle = t.fontStyle()
+    const fill = t.fill()
+    const lineHeight = t.lineHeight()
+    const letterSpacing = (t as any).letterSpacing?.() ?? 0
+    const align = (t.align?.() as "left"|"center"|"right") || "left"
+    const wrapW = Math.max(2, t.width() || 0)
+
+    // canvas для измерения глифов
+    const cvs = document.createElement("canvas")
+    const ctx = cvs.getContext("2d")!
+    ctx.font = `${fontStyle?.includes("italic") ? "italic " : ""}${fontStyle?.includes("bold") ? "700 " : "400 "}${fontSize}px ${fontFamily}`
+
+    // разбиваем по строкам
+    const lines = raw.split("\n")
+    const letters: { ch:string; x:number; y:number }[] = []
+
+    let y = t.y()
+    for (const line of lines) {
+      // ширина строки
+      const widths = [...line].map(ch => ctx.measureText(ch).width)
+      const lineW = widths.reduce((a,b)=>a+b, 0) + Math.max(0, (line.length-1)) * letterSpacing
+
+      let x = t.x()
+      if (align === "center") x += (wrapW - lineW) / 2
+      if (align === "right")  x += (wrapW - lineW)
+
+      for (let i=0;i<line.length;i++) {
+        const ch = line[i]
+        letters.push({ ch, x, y })
+        x += widths[i] + letterSpacing
+      }
+      y += fontSize * lineHeight
+    }
+
+    // создаём узлы-буквы
+    const newLayers: AnyLayer[] = []
+    const parentSide = L.side
+    letters.forEach((g) => {
+      const n = new Konva.Text({
+        text: g.ch, x: g.x, y: g.y,
+        fontSize, fontFamily, fontStyle,
+        fill: fill as any, width: undefined
+      })
+      ;(n as any).id(uid())
+      const id = (n as any).id()
+      const meta = baseMeta(`char "${g.ch}"`)
+      meta.physRole = "rigid"
+      currentArt().add(n); (n as any).moveToTop()
+      attachCommonHandlers(n, id)
+      newLayers.push({ id, side: parentSide, node: n, meta, type: "text" })
+    })
+
+    // удаляем исходный текстовый слой
+    L.node.destroy()
+    setLayers(prev => [...prev.filter(x=>x.id!==L.id), ...newLayers])
+    select(newLayers[0]?.id ?? null)
+    artLayerRef.current?.batchDraw()
+    bump()
+  }
+
+  /* -------------------- Clear / Download -------------------- */
   const clearArt = () => {
     const g = currentArt(); if (!g) return
     g.removeChildren()
@@ -830,7 +887,6 @@ export default function EditorCanvas() {
     if (ph.running) rebuildWorldIfRunning()
   }
 
-  // ===== Скачивание (mockup + art) =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -859,42 +915,36 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ====================== PHYSICS ======================
+  /* -------------------- PHYSICS -------------------- */
   const rapierRef = useRef<RapierNS | null>(null)
   const worldRef  = useRef<RWorld | null>(null)
-  const handlesRef = useRef<Record<string, PhysHandle>>({})
+  const handlesRef = useRef<Record<string, {
+    role: PhysicsRole
+    bodies: RigidBody[]
+    colliders: Collider[]
+    joints?: any[]
+    anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
+  }>>({})
   const rafRef = useRef<number | null>(null)
-  const [ph, setPh] = useState({
-    running: false,
-    angleDeg: 90, // вниз
-    strength: 1200, // px/s^2
-    autoRoles: true,
-  })
+  const [ph, setPh] = useState({ running: false, angleDeg: 90, strength: 1200, autoRoles: true })
 
-  // util: bbox → центр
-  const getAnchor = (n: AnyNode): PhysHandle["anchor"] => {
+  const getAnchor = (n: AnyNode) => {
     const rect = (n as any).getClientRect?.({ skipStroke: false }) || { x:(n as any).x?.()||0, y:(n as any).y?.()||0, width:(n as any).width?.()||0, height:(n as any).height?.()||0 }
     const cx = rect.x + rect.width/2
     const cy = rect.y + rect.height/2
     const kind = n instanceof Konva.Circle ? "center" : "topleft"
-    return { cx, cy, w: rect.width, h: rect.height, kind }
+    return { cx, cy, w: rect.width, h: rect.height, kind } as const
   }
 
-  // snapshot baseline (для Reset)
   const takeBaseline = (l: AnyLayer) => {
     const n:any = l.node as any
-    const base = {
-      x: n.x?.() ?? 0, y: n.y?.() ?? 0, rot: n.rotation?.() ?? 0,
-      sx: n.scaleX?.() ?? 1, sy: n.scaleY?.() ?? 1
-    } as BaseMeta["baseline"]
+    const base = { x: n.x?.() ?? 0, y: n.y?.() ?? 0, rot: n.rotation?.() ?? 0, sx: n.scaleX?.() ?? 1, sy: n.scaleY?.() ?? 1 } as BaseMeta["baseline"]
     if (l.type === "strokes") {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (line) base.points = [...line.points()]
     }
     updateMeta(l.id, { baseline: base })
   }
-
-  // apply baseline
   const restoreBaseline = (l: AnyLayer) => {
     const b = l.meta.baseline
     if (!b) return
@@ -906,8 +956,28 @@ export default function EditorCanvas() {
     }
   }
 
-  // build bodies
-  const buildForLayer = (R: RapierNS, l: AnyLayer): PhysHandle | null => {
+  const ensureRapier = async (): Promise<RapierNS> => {
+    if (rapierRef.current) return rapierRef.current
+    const mod = await import("@dimforge/rapier2d-compat")
+    // совместимость разных бандлов
+    // @ts-ignore
+    const R: any = (mod as any).default ?? mod
+    if (typeof R.init === "function") {
+      try { await R.init() } catch (e) {
+        console.error("[physics] Rapier init failed", e)
+        throw e
+      }
+    }
+    if (!R.World) {
+      const err = new Error("Rapier not ready: R.World is undefined")
+      console.error(err)
+      throw err
+    }
+    rapierRef.current = R as RapierNS
+    return rapierRef.current
+  }
+
+  const buildForLayer = (R: RapierNS, l: AnyLayer) => {
     const role = l.meta.physRole || "off"
     if (role === "off" || l.type === "erase") return null
 
@@ -945,11 +1015,10 @@ export default function EditorCanvas() {
     }
 
     if (role === "rope" && l.type === "strokes") {
-      // строим цепочку шариков по точкам линии
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const RSEG = 22 // сегмент ~22px
+        const RSEG = 22
         let acc = 0
         const samples: {x:number;y:number}[] = [{ x: pts[0], y: pts[1] }]
         for (let i=2;i<pts.length;i+=2) {
@@ -964,7 +1033,6 @@ export default function EditorCanvas() {
             acc = 0
           }
         }
-        // тела
         const prevs: RigidBody[] = []
         const radius = Math.max(3, (line?.strokeWidth()||12)/2)
         samples.forEach((p) => {
@@ -1017,6 +1085,20 @@ export default function EditorCanvas() {
     artLayerRef.current?.batchDraw()
   }
 
+  const createBounds = (R: RapierNS) => {
+    // невидимые границы вокруг сцены, чтобы было куда падать и во что биться
+    const w = BASE_W, h = BASE_H, thick = 60
+    const world = worldRef.current!
+    const mk = (cx:number, cy:number, ww:number, hh:number) => {
+      const rb = world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy))
+      world.createCollider(R.ColliderDesc.cuboid(ww/2, hh/2), rb)
+    }
+    mk(w/2, h + thick/2, w + thick*2, thick) // floor
+    mk(w/2, -thick/2,   w + thick*2, thick) // ceiling
+    mk(-thick/2, h/2,   thick,       h + thick*2) // left
+    mk(w + thick/2, h/2,thick,       h + thick*2) // right
+  }
+
   const killWorld = () => {
     const R = rapierRef.current
     if (!R) return
@@ -1041,36 +1123,35 @@ export default function EditorCanvas() {
     rafRef.current = requestAnimationFrame(stepLoop)
   }
 
-  // === SAFE init Rapier + старт симуляции ===
   const startPhysics = async () => {
-    if (ph.running) return
+    try {
+      console.debug("[physics] start...")
+      const R = await ensureRapier()
+      const a = (ph.angleDeg*Math.PI)/180
+      const world = new (R as any).World({ x: Math.cos(a) * ph.strength, y: Math.sin(a) * ph.strength }) as RWorld
+      worldRef.current = world
 
-    const Rmod = await import("@dimforge/rapier2d-compat")
-    // совместимость с разными типами экспорта
-    // @ts-ignore
-    const R: any = (Rmod as any).default ?? Rmod
-    if (typeof R.init === "function") {
-      await R.init()
+      createBounds(R) // границы
+
+      const currentSide = side
+      layers.filter(l=>l.side===currentSide && !l.meta.locked && l.meta.visible).forEach(l=>{
+        if (ph.autoRoles && (l.meta.physRole||"off")==="off") {
+          if (l.type==="strokes") updateMeta(l.id, { physRole: "rope" })
+          else if (l.type==="text"||l.type==="image"||l.type==="shape") updateMeta(l.id, { physRole: "rigid" })
+        }
+        takeBaseline(l)
+        const h = buildForLayer(R, l)
+        if (h) handlesRef.current[l.id] = h
+      })
+
+      setPh(s=>({ ...s, running: true }))
+      stepLoop()
+      console.debug("[physics] running")
+    } catch (e) {
+      console.error("[physics] failed to start:", e)
+      setPh(s=>({ ...s, running: false }))
+      killWorld()
     }
-    rapierRef.current = R as RapierNS
-
-    const a = (ph.angleDeg*Math.PI)/180
-    const world = new (rapierRef.current as any).World({ x: Math.cos(a) * ph.strength, y: Math.sin(a) * ph.strength }) as RWorld
-    worldRef.current = world
-
-    const currentSide = side
-    layers.filter(l=>l.side===currentSide && !l.meta.locked && l.meta.visible).forEach(l=>{
-      if (ph.autoRoles && (l.meta.physRole||"off")==="off") {
-        if (l.type==="strokes") updateMeta(l.id, { physRole: "rope" })
-        else if (l.type==="text"||l.type==="image"||l.type==="shape") updateMeta(l.id, { physRole: "rigid" })
-      }
-      takeBaseline(l)
-      const h = buildForLayer(rapierRef.current!, l)
-      if (h) handlesRef.current[l.id] = h
-    })
-
-    setPh(s=>({ ...s, running: true }))
-    stepLoop()
   }
 
   const pausePhysics = () => {
@@ -1089,32 +1170,22 @@ export default function EditorCanvas() {
   const applyNewGravity = () => {
     const w = worldRef.current; if (!w) return
     const a = (ph.angleDeg*Math.PI)/180
-    const gx = Math.cos(a)*ph.strength
-    const gy = Math.sin(a)*ph.strength
-    // у Rapier это обычное свойство Vec2; достаточно присвоить:
-    ;(w as any).gravity = { x: gx, y: gy }
+    ;(w as any).gravity = { x: Math.cos(a)*ph.strength, y: Math.sin(a)*ph.strength }
   }
 
-  useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
+  useEffect(() => () => { pausePhysics(); killWorld() }, [])
 
-  // ===== Render =====
+  /* -------------------- Render -------------------- */
   return (
     <div
       className="fixed inset-0 bg-white"
-      style={{
-        paddingTop: padTop,
-        paddingBottom: padBottom,
-        overscrollBehavior: "none",
-        WebkitUserSelect: "none",
-        userSelect: "none",
-      }}
+      style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}
     >
-      {/* Desktop-панель слоёв */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
           selectId={selectedId}
-          onSelect={onLayerSelect}
+          onSelect={(id)=>{ onLayerSelect(id) }}
           onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
           onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
           onDelete={deleteLayer}
@@ -1126,7 +1197,6 @@ export default function EditorCanvas() {
         />
       )}
 
-      {/* Сцена */}
       <div className="w-full h-full flex items-start justify-center">
         <div style={{ position:"relative", touchAction:"none", width: viewW, height: viewH }}>
           <Stage
@@ -1135,19 +1205,16 @@ export default function EditorCanvas() {
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
           >
-            {/* Фон */}
-            <Layer ref={bgLayerRef} listening={true}>
-              {frontMock && <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening={true} />}
-              {backMock  && <KImage ref={backBgRef}  image={backMock}  visible={side==="back"}  width={BASE_W} height={BASE_H} listening={true} />}
+            <Layer ref={bgLayerRef} listening>
+              {frontMock && <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening />}
+              {backMock  && <KImage ref={backBgRef}  image={backMock}  visible={side==="back"}  width={BASE_W} height={BASE_H} listening />}
             </Layer>
 
-            {/* Арт: две группы (front/back) */}
-            <Layer ref={artLayerRef} listening={true}>
+            <Layer ref={artLayerRef} listening>
               <KGroup ref={frontArtRef} visible={side==="front"} />
               <KGroup ref={backArtRef}  visible={side==="back"}  />
             </Layer>
 
-            {/* UI-слой для рамки трансформера */}
             <Layer ref={uiLayerRef}>
               <Transformer
                 ref={trRef}
@@ -1162,7 +1229,6 @@ export default function EditorCanvas() {
         </div>
       </div>
 
-      {/* Toolbar */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
         tool={tool} setTool={(t: Tool)=>set({ tool: t })}
@@ -1209,7 +1275,6 @@ export default function EditorCanvas() {
         mobileTopOffset={padTop}
       />
 
-      {/* ===== Physics panel (desktop) */}
       {!isMobile && (
         <div className="fixed right-6 bottom-6 w-[420px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3">
           <div className="text-[11px] uppercase tracking-widest">Physics</div>
@@ -1264,7 +1329,6 @@ export default function EditorCanvas() {
         </div>
       )}
 
-      {/* ===== Physics (mobile) */}
       {isMobile && (
         <>
           <button
