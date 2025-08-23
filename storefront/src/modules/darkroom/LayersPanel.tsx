@@ -4,6 +4,8 @@ import React, { useMemo, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
+export type PhysicsRole = "off" | "collider" | "rigid" | "rope"
+
 export type LayerItem = {
   id: string
   name: string
@@ -13,8 +15,7 @@ export type LayerItem = {
   blend: string
   opacity: number
   thumb?: string | null
-  role?: "off" | "collider" | "rigid" | "rope"
-  exploded?: boolean
+  physRole?: PhysicsRole
 }
 
 type Props = {
@@ -28,36 +29,37 @@ type Props = {
   onReorder: (srcId: string, destId: string, place: "before" | "after") => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
-  onChangeRole?: (id: string, role: "off" | "collider" | "rigid" | "rope") => void
-  onExplodeText?: (id: string) => void
+  onChangePhysicsRole?: (id: string, role: PhysicsRole) => void
   getPreview?: (id: string) => string | null
 }
 
 const blends = [
-  "source-over","multiply","screen","overlay","darken","lighten","xor",
+  "source-over", "multiply", "screen", "overlay", "darken", "lighten", "xor",
 ] as const
 
-const sliderCss = `
-input[type="range"].lp{
-  -webkit-appearance:none; appearance:none;
-  width:100%; height:18px; background:transparent; color:currentColor; margin:0; padding:0;
+const TYPE_LABEL: Record<LayerItem["type"], string> = {
+  image: "IMG",
+  shape: "SHP",
+  text: "TXT",
+  strokes: "BR",
+  erase: "ER",
 }
+
+// центр-трек + квадратный бегунок
+const sliderCss = `
+input[type="range"].lp{ -webkit-appearance:none; appearance:none; width:100%; height:18px; background:transparent; color:currentColor; margin:0; padding:0; }
 input[type="range"].lp::-webkit-slider-runnable-track{ height:2px; background:transparent; }
 input[type="range"].lp::-moz-range-track{ height:2px; background:transparent; }
 input[type="range"].lp::-webkit-slider-thumb{
-  -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0;
-  margin-top:-6px;
+  -webkit-appearance:none; appearance:none; width:14px; height:14px; background:currentColor; border:0; border-radius:0; margin-top:-6px;
 }
 input[type="range"].lp::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
 `
 
-const typeBadge = (t: LayerItem["type"]) =>
-  t === "text" ? "TXT" : t === "shape" ? "SHP" : t === "image" ? "IMG" : t === "strokes" ? "BR" : "ER"
-
 export default function LayersPanel(props: Props) {
   const {
     items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate,
-    onReorder, onChangeBlend, onChangeOpacity, onChangeRole, onExplodeText, getPreview
+    onReorder, onChangeBlend, onChangeOpacity, onChangePhysicsRole, getPreview
   } = props
 
   const [dragId, setDragId] = useState<string | null>(null)
@@ -76,6 +78,7 @@ export default function LayersPanel(props: Props) {
     setDragId(id)
     e.dataTransfer.effectAllowed = "move"
     e.dataTransfer.setData("text/plain", id)
+
     const src = byId[id]?.thumb ?? (typeof getPreview === "function" ? getPreview(id) : null)
     if (src) {
       const img = new Image()
@@ -113,8 +116,7 @@ export default function LayersPanel(props: Props) {
     const src = dragId || e.dataTransfer.getData("text/plain")
     if (!src || src === destId) { cancelDrag(); return }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
-    const place: "before" | "after" =
-      rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
+    const place: "before" | "after" = rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
     onReorder(src, destId, place)
     cancelDrag()
   }
@@ -122,19 +124,18 @@ export default function LayersPanel(props: Props) {
   const cancelDrag = () => { setDragId(null); setDragOver(null) }
 
   return (
-    <div className="fixed right-6 top-40 z-40 w-[380px] border border-black bg-white shadow-xl rounded-none">
+    <div className="fixed right-6 top-40 z-40 w-[420px] border border-black bg-white shadow-xl rounded-none">
       <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase tracking-widest">Layers</div>
 
       <div className="max-h-[64vh] overflow-auto p-2 space-y-1">
         {items.map((it) => {
           const isActive = selectId === it.id
-          const hl =
-            dragOver && dragOver.id === it.id
-              ? dragOver.place === "before"
-                ? "outline outline-2 outline-blue-500 -mt-[1px]"
-                : "outline outline-2 outline-blue-500 -mb-[1px]"
-              : ""
+          const hl = dragOver && dragOver.id === it.id
+            ? (dragOver.place === "before"
+              ? "outline outline-2 outline-blue-500 -mt-[1px]"
+              : "outline outline-2 outline-blue-500 -mb-[1px]")
+            : ""
 
           return (
             <div
@@ -152,10 +153,11 @@ export default function LayersPanel(props: Props) {
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
+              {/* drag handle */}
               <div
                 ref={(el)=>handleRefs.current[it.id]=el}
                 data-handle="1"
-                className="w-7 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
+                className="w-8 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
                 draggable
                 onDragStart={(e)=>startDrag(e, it.id)}
                 onDragEnd={cancelDrag}
@@ -164,36 +166,33 @@ export default function LayersPanel(props: Props) {
                 <GripVertical className="w-4 h-4 opacity-70" />
               </div>
 
-              <div className="text-[10px] px-1 py-0.5 border border-current/40">{typeBadge(it.type)}</div>
+              {/* type label */}
+              <div className={clx(
+                "text-[10px] min-w-[30px] h-6 grid place-items-center border rounded-none",
+                isActive ? "border-white/40" : "border-black/20"
+              )}>
+                {TYPE_LABEL[it.type] || "?"}
+              </div>
+
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
-              {onChangeRole && (
-                <select
-                  className={clx(
-                    "h-8 px-2 border rounded-none text-xs",
-                    isActive ? "bg-black text-white border-white/40" : "bg-white border-black/20"
-                  )}
-                  value={it.role ?? "off"}
-                  onChange={(e)=>onChangeRole(it.id, e.target.value as any)}
-                  title="Physics role"
-                >
-                  <option value="off">off</option>
-                  <option value="collider">collider</option>
-                  <option value="rigid">rigid</option>
-                  <option value="rope">rope</option>
-                </select>
-              )}
+              {/* Physics role */}
+              <select
+                className={clx(
+                  "h-8 px-2 border rounded-none text-xs",
+                  isActive ? "bg-black text-white border-white/40" : "bg-white border-black/20"
+                )}
+                value={it.physRole || "off"}
+                onChange={(e) => onChangePhysicsRole?.(it.id, e.target.value as any)}
+                title="Physics role"
+              >
+                <option value="off">off</option>
+                <option value="collider">collider</option>
+                <option value="rigid">rigid</option>
+                <option value="rope">rope</option>
+              </select>
 
-              {onExplodeText && it.type==="text" && (
-                <button
-                  className={clx("px-2 h-8 border text-xs", isActive ? "border-white/40" : "border-black/20")}
-                  onClick={(e)=>{ e.stopPropagation(); onExplodeText(it.id) }}
-                  title="Explode text to letters"
-                >
-                  Explode
-                </button>
-              )}
-
+              {/* Blend */}
               <select
                 className={clx(
                   "h-8 px-2 border rounded-none text-xs",
@@ -205,6 +204,7 @@ export default function LayersPanel(props: Props) {
                 {blends.map((b) => (<option key={b} value={b}>{b}</option>))}
               </select>
 
+              {/* Opacity */}
               <div className="relative w-24">
                 <input
                   type="range" min={5} max={100} step={1}
