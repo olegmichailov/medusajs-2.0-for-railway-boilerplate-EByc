@@ -93,6 +93,7 @@ const btn  =
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
 
 const activeBtn = "bg-black text-white"
+
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -105,6 +106,7 @@ const inputStop = {
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
 
+// Квадратный «ползунок» и чёрная линия-трек
 const Slider = ({
   value, onChange, min=0, max=1, step=0.01, title
 }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; title?: string }) => {
@@ -157,16 +159,12 @@ export default function Toolbar(props: ToolbarProps) {
     mobileLayers, mobileTopOffset
   } = props
 
+  // общий color-picker (desktop/mobile)
   const colorRef = useRef<HTMLInputElement>(null)
-  const openColor = (e?: React.SyntheticEvent) => {
-    e?.stopPropagation()
-    colorRef.current?.click()
-  }
-  const onPickColor = (hex: string) => {
-    setBrushColor(hex)
-    if (selectedKind) setSelectedColor(hex)
-  }
+  const openColor = (e?: React.SyntheticEvent) => { e?.stopPropagation(); colorRef.current?.click() }
+  const onPickColor = (hex: string) => { setBrushColor(hex); if (selectedKind) setSelectedColor(hex) }
 
+  // =================== DESKTOP ===================
   if (!isMobile) {
     const [open, setOpen] = useState(true)
     const [pos, setPos] = useState({ x: 24, y: 120 })
@@ -177,16 +175,14 @@ export default function Toolbar(props: ToolbarProps) {
       window.addEventListener("mousemove", onDragMove)
       window.addEventListener("mouseup", onDragEnd)
     }
-    const onDragMove = (e: MouseEvent) => {
-      if (!drag.current) return
-      setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy })
-    }
+    const onDragMove = (e: MouseEvent) => { if (!drag.current) return; setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy }) }
     const onDragEnd = () => {
       drag.current = null
       window.removeEventListener("mousemove", onDragMove)
       window.removeEventListener("mouseup", onDragEnd)
     }
 
+    // upload
     const fileRef = useRef<HTMLInputElement>(null)
     const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       e.stopPropagation()
@@ -195,29 +191,26 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
+    // local state for textarea
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
     const isText = selectedKind === "text"
 
     return (
-      <div
-        className={clx("fixed", wrap)}
-        style={{ left: pos.x, top: pos.y, width: 260 }}
-        onMouseDown={(e)=>e.stopPropagation()}
-      >
+      <div className={clx("fixed", wrap)} style={{ left: pos.x, top: pos.y, width: 260 }} onMouseDown={(e)=>e.stopPropagation()}>
+        {/* header */}
         <div className="flex items-center justify-between border-b border-black/10">
           <div className="px-2 py-1 text-[10px] tracking-widest">TOOLS</div>
           <div className="flex">
-            <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>
-              {open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}
-            </button>
+            <button className={btn} onClick={(e)=>{e.stopPropagation(); setOpen(!open)}}>{open ? <PanelRightClose className={ico}/> : <PanelRightOpen className={ico}/>}</button>
             <button className={btn} onMouseDown={onDragStart}><Move className={ico}/></button>
           </div>
         </div>
 
         {open && (
           <div className="p-2 space-y-2">
+            {/* row 1 — инструменты + layers + clear */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -229,53 +222,32 @@ export default function Toolbar(props: ToolbarProps) {
               ].map((b)=>(
                 <button
                   key={b.t}
-                  className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
+                  className={clx(btn, (tool===b.t) ? activeBtn : "bg-white")}
                   onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") props.setShapeKind("square"); else setTool(b.t as Tool) }}
                   title={b.t}
                 >{b.icon}</button>
               ))}
-              <button className={clx(btn, "ml-2 bg-white")} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear all">
-                <Trash2 className={ico}/>
-              </button>
-              <button className={clx(btn, layersOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}} title="Layers">
-                <Layers className={ico}/>
-              </button>
+              <button className={clx(btn, "ml-2 bg-white")} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear all"><Trash2 className={ico}/></button>
+              <button className={clx(btn, layersOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}} title="Layers"><Layers className={ico}/></button>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
             </div>
 
+            {/* row 2 — кисть */}
             <div className="flex items-center gap-3">
               <button className="text-[10px] w-8 text-left underline" onClick={openColor}>Color</button>
-              <div
-                className="w-6 h-6 border border-black cursor-pointer"
-                style={{ background: brushColor }}
-                onClick={openColor}
-                title={brushColor}
-              />
-              <div className="flex-1">
-                <Slider value={brushSize} min={1} max={200} step={1} onChange={setBrushSize} />
-              </div>
-              <input
-                ref={colorRef}
-                type="color"
-                value={brushColor}
-                onChange={(e)=>onPickColor(e.target.value)}
-                className="hidden"
-                {...inputStop}
-              />
+              <div className="w-6 h-6 border border-black cursor-pointer" style={{ background: brushColor }} onClick={openColor} title={brushColor}/>
+              <div className="flex-1"><Slider value={brushSize} min={1} max={200} step={1} onChange={setBrushSize} /></div>
+              <input ref={colorRef} type="color" value={brushColor} onChange={(e)=>onPickColor(e.target.value)} className="hidden" {...inputStop}/>
             </div>
 
+            {/* палитра */}
             <div className="grid grid-cols-12 gap-1" {...inputStop}>
               {PALETTE.map((c)=>(
-                <button
-                  key={c}
-                  className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
-                  style={{ background: c }}
-                  onClick={(e)=>{ e.stopPropagation(); onPickColor(c) }}
-                  title={c}
-                />
+                <button key={c} className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")} style={{ background: c }} onClick={(e)=>{ e.stopPropagation(); onPickColor(c) }} title={c}/>
               ))}
             </div>
 
+            {/* shapes */}
             <div className="pt-1">
               <div className="text-[10px] mb-1">Shapes</div>
               <div className="flex">
@@ -287,32 +259,22 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
+            {/* text props */}
             <div className="pt-1 space-y-2">
               <div className="text-[10px]">Text</div>
-
-              <textarea
-                value={textValue}
-                onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-                className="w-full h-16 border border-black p-1 text-sm"
-                placeholder="Enter text"
-                {...inputStop}
-              />
-
+              <textarea value={textValue} onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }} className="w-full h-16 border border-black p-1 text-sm" placeholder="Enter text" {...inputStop}/>
               <div className="flex items-center gap-2">
                 <div className="text-[10px] w-16">Font size</div>
                 <Slider value={Math.round(selectedProps.fontSize ?? 96)} min={8} max={800} step={1} onChange={setSelectedFontSize} />
               </div>
-
               <div className="flex items-center gap-2">
                 <div className="text-[10px] w-16">Line height</div>
                 <Slider value={Number(selectedProps.lineHeight ?? 1)} min={0.6} max={3} step={0.01} onChange={setSelectedLineHeight} />
               </div>
-
               <div className="flex items-center gap-2">
                 <div className="text-[10px] w-16">Letter space</div>
                 <Slider value={Number(selectedProps.letterSpacing ?? 0)} min={-5} max={30} step={0.1} onChange={setSelectedLetterSpacing} />
               </div>
-
               <div className="flex gap-1">
                 <button className={clx(btn, (isText && selectedProps.align==="left") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("left")}><AlignLeft className={ico}/></button>
                 <button className={clx(btn, (isText && selectedProps.align==="center") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("center")}><AlignCenter className={ico}/></button>
@@ -320,6 +282,7 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
+            {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
               <button className={clx("h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("front")}}>FRONT</button>
               <button className={clx("h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={(e)=>{e.stopPropagation(); setSide("back")}}>BACK</button>
@@ -336,6 +299,7 @@ export default function Toolbar(props: ToolbarProps) {
     )
   }
 
+  // =================== MOBILE ===================
   const [layersOpenM, setLayersOpenM] = useState(false)
 
   const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
@@ -357,6 +321,7 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
+      {/* LAYERS шторка */}
       {layersOpenM && (
         <div className="fixed inset-x-0" style={{ bottom: (mobileTopOffset ?? 0) + 36, zIndex: 40 }}>
           <div className={clx(wrap, "p-2 mx-3")}>
@@ -382,7 +347,9 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
+      {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
+        {/* row 1 — инструменты + layers */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -396,6 +363,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
+        {/* row 2 — настройки */}
         <div className="px-2 py-1 flex items-center gap-2">
           <button className="text-[10px] underline" onClick={openColor}>Color</button>
           <div className="w-8 h-8 border border-black" style={{ background: brushColor }} onClick={openColor}/>
@@ -405,24 +373,18 @@ export default function Toolbar(props: ToolbarProps) {
               <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}} onClick={(e)=>{e.stopPropagation(); onPickColor(c)}}/>
             ))}
           </div>
-          <input
-            ref={colorRef}
-            type="color"
-            value={brushColor}
-            onChange={(e)=>onPickColor(e.target.value)}
-            className="hidden"
-            {...inputStop}
-          />
+          <input ref={colorRef} type="color" value={brushColor} onChange={(e)=>onPickColor(e.target.value)} className="hidden" {...inputStop}/>
         </div>
 
+        {/* row 3 — FRONT/BACK + downloads */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
           </div>
           <div className="flex gap-2">
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadFront}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadBack}><Download className={ico}/>DL</button>
           </div>
         </div>
       </div>
