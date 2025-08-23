@@ -1045,7 +1045,6 @@ export default function EditorCanvas() {
     if (ph.running) return
 
     const Rmod = await import("@dimforge/rapier2d-compat")
-    // совместимость с ESM/CJS
     // @ts-ignore
     const R: any = (Rmod as any).default ?? Rmod
     if (typeof R.init === "function") {
@@ -1053,11 +1052,11 @@ export default function EditorCanvas() {
     }
     rapierRef.current = R as RapierNS
 
-    // гравитация: вниз = отрицательный Y в Rapier
+    // Гравитация: вниз = положительный Y (как в Konva)
     const a = (ph.angleDeg*Math.PI)/180
     const world = new (rapierRef.current as any).World({
       x:  Math.cos(a) * ph.strength,
-      y: -Math.sin(a) * ph.strength,
+      y:  Math.sin(a) * ph.strength,
     }) as RWorld
     worldRef.current = world
 
@@ -1072,7 +1071,6 @@ export default function EditorCanvas() {
         const roleToUse: PhysicsRole =
           ph.autoRoles && (l.meta.physRole||"off")==="off" ? inferAutoRole(l) : (l.meta.physRole||"off")
 
-        // для UI обновим мету, но строим тело по roleToUse прямо сейчас
         if (ph.autoRoles && (l.meta.physRole||"off")==="off" && roleToUse!=="off") {
           updateMeta(l.id, { physRole: roleToUse })
         }
@@ -1103,7 +1101,7 @@ export default function EditorCanvas() {
     const w = worldRef.current; if (!w) return
     const a = (ph.angleDeg*Math.PI)/180
     const gx =  Math.cos(a)*ph.strength
-    const gy = -Math.sin(a)*ph.strength // инверсия Y для Rapier
+    const gy =  Math.sin(a)*ph.strength
     ;(w as any).gravity = { x: gx, y: gy }
   }
 
