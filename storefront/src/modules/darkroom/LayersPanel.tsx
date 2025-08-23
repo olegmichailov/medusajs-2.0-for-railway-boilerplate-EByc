@@ -13,7 +13,6 @@ export type LayerItem = {
   blend: string
   opacity: number
   thumb?: string | null
-  // НОВОЕ:
   role?: "off" | "collider" | "rigid" | "rope"
   exploded?: boolean
 }
@@ -29,7 +28,6 @@ type Props = {
   onReorder: (srcId: string, destId: string, place: "before" | "after") => void
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
-  // НОВОЕ (опционально — если не передали, UI скрыт):
   onChangeRole?: (id: string, role: "off" | "collider" | "rigid" | "rope") => void
   onExplodeText?: (id: string) => void
   getPreview?: (id: string) => string | null
@@ -78,11 +76,7 @@ export default function LayersPanel(props: Props) {
     setDragId(id)
     e.dataTransfer.effectAllowed = "move"
     e.dataTransfer.setData("text/plain", id)
-
-    const src =
-      byId[id]?.thumb ??
-      (typeof getPreview === "function" ? getPreview(id) : null)
-
+    const src = byId[id]?.thumb ?? (typeof getPreview === "function" ? getPreview(id) : null)
     if (src) {
       const img = new Image()
       img.src = src
@@ -158,7 +152,6 @@ export default function LayersPanel(props: Props) {
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
-              {/* dnd handle */}
               <div
                 ref={(el)=>handleRefs.current[it.id]=el}
                 data-handle="1"
@@ -171,11 +164,9 @@ export default function LayersPanel(props: Props) {
                 <GripVertical className="w-4 h-4 opacity-70" />
               </div>
 
-              {/* тип + имя */}
               <div className="text-[10px] px-1 py-0.5 border border-current/40">{typeBadge(it.type)}</div>
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
-              {/* Физ-роль */}
               {onChangeRole && (
                 <select
                   className={clx(
@@ -193,7 +184,6 @@ export default function LayersPanel(props: Props) {
                 </select>
               )}
 
-              {/* Explode для текста */}
               {onExplodeText && it.type==="text" && (
                 <button
                   className={clx("px-2 h-8 border text-xs", isActive ? "border-white/40" : "border-black/20")}
@@ -204,7 +194,6 @@ export default function LayersPanel(props: Props) {
                 </button>
               )}
 
-              {/* Blend */}
               <select
                 className={clx(
                   "h-8 px-2 border rounded-none text-xs",
@@ -216,7 +205,6 @@ export default function LayersPanel(props: Props) {
                 {blends.map((b) => (<option key={b} value={b}>{b}</option>))}
               </select>
 
-              {/* Opacity */}
               <div className="relative w-24">
                 <input
                   type="range" min={5} max={100} step={1}
