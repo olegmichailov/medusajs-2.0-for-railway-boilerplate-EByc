@@ -51,17 +51,16 @@ const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._is
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 
-// ==== RAPIER типы (ленивый импорт) ====
-type RWorld = import("@dimforge/rapier2d-compat").World
-type RigidBody = import("@dimforge/rapier2d-compat").RigidBody
-type Collider = import("@dimforge/rapier2d-compat").Collider
-type RapierNS = typeof import("@dimforge/rapier2d-compat")
+// ==== PLANCK/Box2D типы (ленивый импорт) ====
+type PLNS = typeof import("planck-js")
+type PLWorld = import("planck-js").World
+type PLBody = import("planck-js").Body
+type PLJoint = import("planck-js").Joint
 
 type PhysHandle = {
   role: PhysicsRole
-  bodies: RigidBody[]
-  colliders: Collider[]
-  joints?: any[]
+  bodies: PLBody[]
+  joints?: PLJoint[]
   anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
 }
 
@@ -858,17 +857,24 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ====================== PHYSICS ======================
-  const rapierRef = useRef<RapierNS | null>(null)
-  const worldRef  = useRef<RWorld | null>(null)
+  // ====================== PHYSICS (Box2D / planck-js) ======================
+  const plRef = useRef<PLNS | null>(null)
+  const worldRef  = useRef<PLWorld | null>(null)
   const handlesRef = useRef<Record<string, PhysHandle>>({})
   const rafRef = useRef<number | null>(null)
   const [ph, setPh] = useState({
     running: false,
-    angleDeg: 90,      // вниз
-    strength: 1200,    // px/s^2
+    angleDeg: 90,      // 90° = вниз
+    strength: 1200,    // px/s^2 (мы конвертим в м/с^2)
     autoRoles: true,
   })
+
+  // масштаб мира (рекомендуется Box2D)
+  const PPM = 30 // pixels per meter
+  const toM = (px:number) => px / PPM
+  const toPx = (m:number) => m * PPM
+  const deg2rad = (d:number) => d * Math.PI / 180
+  const rad2deg = (r:number) => r * 180 / Math.PI
 
   // util: bbox → центр
   const getAnchor = (n: AnyNode): PhysHandle["anchor"] => {
@@ -893,7 +899,6 @@ export default function EditorCanvas() {
     updateMeta(l.id, { baseline: base })
   }
 
-  // apply baseline
   const restoreBaseline = (l: AnyLayer) => {
     const b = l.meta.baseline
     if (!b) return
@@ -905,41 +910,35 @@ export default function EditorCanvas() {
     }
   }
 
-  // build bodies — с возможным override роли
-  const buildForLayer = (R: RapierNS, l: AnyLayer, roleOverride?: PhysicsRole): PhysHandle | null => {
+  // строим тела
+  const buildForLayer = (pl: PLNS, l: AnyLayer, roleOverride?: PhysicsRole): PhysHandle | null => {
     const role = roleOverride ?? (l.meta.physRole || "off")
     if (role === "off" || l.type === "erase") return null
 
     const anchor = getAnchor(l.node)
     const world = worldRef.current!
-    const bodies: RigidBody[] = []
-    const colliders: Collider[] = []
-    const joints: any[] = []
+    const bodies: PLBody[] = []
+    const joints: PLJoint[] = []
 
-    const addRect = (cx:number, cy:number, w:number, h:number, rotDeg:number, dynamic:boolean) => {
-      const rbDesc = dynamic ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
-      rbDesc.setTranslation(cx, cy).setRotation((rotDeg*Math.PI)/180)
-      const rb = world.createRigidBody(rbDesc)
-      const cl = world.createCollider(R.ColliderDesc.cuboid(w/2, h/2), rb)
-      cl.setFriction(0.35); cl.setRestitution(0.05)
-      ;(rb as any).setLinearDamping?.(1.1); (rb as any).setAngularDamping?.(0.9)
-      bodies.push(rb); colliders.push(cl)
-      return rb
-    }
+    const mkBody = (type:"dynamic"|"static", cx:number, cy:number, angleDeg:number) =>
+      world.createBody({
+        type,
+        position: pl.Vec2(toM(cx), toM(cy)),
+        angle: deg2rad(angleDeg)
+      })
 
     if (role === "collider" || role === "rigid") {
       const dyn = role === "rigid"
       if (l.node instanceof Konva.Circle) {
-        const r = (l.node as Konva.Circle).radius()
-        const rbDesc = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
-        rbDesc.setTranslation(l.node.x(), l.node.y()).setRotation(((l.node.rotation?.()||0)*Math.PI)/180)
-        const rb = world.createRigidBody(rbDesc)
-        const cl = world.createCollider(R.ColliderDesc.ball(r), rb)
-        cl.setFriction(0.35); cl.setRestitution(0.05)
-        ;(rb as any).setLinearDamping?.(1.1); (rb as any).setAngularDamping?.(0.9)
-        bodies.push(rb); colliders.push(cl)
+        const rpx = (l.node as Konva.Circle).radius()
+        const cx = l.node.x(), cy = l.node.y()
+        const b = mkBody(dyn ? "dynamic" : "static", cx, cy, (l.node.rotation?.()||0))
+        b.createFixture(pl.Circle(toM(rpx)), { density: 1, friction: 0.35, restitution: 0.05 })
+        bodies.push(b)
       } else {
-        addRect(anchor.cx, anchor.cy, Math.max(1, anchor.w), Math.max(1, anchor.h), (l.node as any).rotation?.()||0, dyn)
+        const b = mkBody(dyn ? "dynamic" : "static", anchor.cx, anchor.cy, (l.node as any).rotation?.()||0)
+        b.createFixture(pl.Box(toM(anchor.w/2), toM(anchor.h/2)), { density: 1, friction: 0.35, restitution: 0.05 })
+        bodies.push(b)
       }
     }
 
@@ -947,7 +946,7 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const RSEG = 22
+        const SEG = 22 // px: шаг дискретизации
         let acc = 0
         const samples: {x:number;y:number}[] = [{ x: pts[0], y: pts[1] }]
         for (let i=2;i<pts.length;i+=2) {
@@ -956,54 +955,49 @@ export default function EditorCanvas() {
           const dx = x1-x0, dy=y1-y0
           const dist = Math.hypot(dx,dy)
           acc += dist
-          if (acc >= RSEG) { const k = RSEG/dist; samples.push({ x: x0+dx*k, y: y0+dy*k }); acc = 0 }
+          if (acc >= SEG) { const k = SEG/dist; samples.push({ x: x0+dx*k, y: y0+dy*k }); acc = 0 }
         }
-        const prevs: RigidBody[] = []
         const radius = Math.max(3, (line?.strokeWidth()||12)/2)
-        samples.forEach((p) => {
-          const rb = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(p.x, p.y))
-          const cl = world.createCollider(R.ColliderDesc.ball(radius), rb)
-          cl.setFriction(0.2); cl.setRestitution(0.05)
-          ;(rb as any).setLinearDamping?.(2.5); (rb as any).setAngularDamping?.(2.0)
-          bodies.push(rb); colliders.push(cl)
-          const prev = prevs.at(-1)
+        let prev: PLBody | null = null
+        samples.forEach((p, idx) => {
+          const b = world.createBody({ type:"dynamic", position: pl.Vec2(toM(p.x), toM(p.y)) })
+          b.createFixture(pl.Circle(toM(radius)), { density: 0.6, friction: 0.2, restitution: 0.05 })
+          bodies.push(b)
           if (prev) {
-            const j = world.createImpulseJoint(
-              R.JointData.revolute({ x: 0, y: 0}, { x: 0, y: 0 }),
-              prev, rb, true
-            )
+            const j = world.createJoint(pl.RevoluteJoint({}, prev, b, prev.getPosition()))
             joints.push(j)
           }
-          prevs.push(rb)
+          prev = b
         })
       }
     }
 
-    return { role, bodies, colliders, joints, anchor }
+    return { role, bodies, joints, anchor }
   }
 
-  const syncFromBodies = (R: RapierNS) => {
+  // синк из физики → в Konva
+  const syncFromBodies = (pl: PLNS) => {
     Object.entries(handlesRef.current).forEach(([id, h]) => {
       const l = layers.find(x=>x.id===id); if (!l) return
       if (h.role === "collider" || h.role === "rigid") {
         const b = h.bodies[0]; if (!b) return
-        const t = b.translation(), rot = b.rotation()
-        const cx = t.x, cy = t.y
+        const p = b.getPosition(), ang = b.getAngle()
+        const cx = toPx(p.x), cy = toPx(p.y)
         if (l.node instanceof Konva.Circle) {
-          l.node.x(cx); l.node.y(cy); l.node.rotation((rot*180)/Math.PI)
+          l.node.x(cx); l.node.y(cy); l.node.rotation(rad2deg(ang))
         } else {
           const x = cx - h.anchor.w/2
           const y = cy - h.anchor.h/2
           ;(l.node as any).x?.(x)
           ;(l.node as any).y?.(y)
-          ;(l.node as any).rotation?.((rot*180)/Math.PI)
+          ;(l.node as any).rotation?.(rad2deg(ang))
         }
       }
       if (h.role === "rope" && l.type === "strokes") {
         const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
         if (!line) return
         const pts:number[] = []
-        h.bodies.forEach((b) => { const p = b.translation(); pts.push(p.x, p.y) })
+        h.bodies.forEach((b) => { const p = b.getPosition(); pts.push(toPx(p.x), toPx(p.y)) })
         if (pts.length>=4) { line.points(pts) }
       }
     })
@@ -1011,58 +1005,46 @@ export default function EditorCanvas() {
   }
 
   const killWorld = () => {
-    const R = rapierRef.current
-    if (!R) return
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
     const w = worldRef.current
     if (w) {
-      Object.values(handlesRef.current).forEach(h=>{
-        h.joints?.forEach((j:any)=> w.removeImpulseJoint(j, true))
-        h.colliders.forEach(c=> w.removeCollider(c, true))
-        h.bodies.forEach(b=> w.removeRigidBody(b))
-      })
+      // planck сам очищает при GC; явная разборка не обязательна
     }
     handlesRef.current = {}
     worldRef.current = null
   }
 
   const stepLoop = () => {
-    const R = rapierRef.current, w = worldRef.current
-    if (!R || !w) return
-    w.step()
-    syncFromBodies(R)
+    const pl = plRef.current, w = worldRef.current
+    if (!pl || !w) return
+    w.step(1/60, 8, 3)
+    syncFromBodies(pl)
     rafRef.current = requestAnimationFrame(stepLoop)
   }
 
-  // helper для авто-ролей
   const inferAutoRole = (l: AnyLayer): PhysicsRole =>
     l.type === "strokes" ? "rope"
     : (l.type === "text" || l.type === "image" || l.type === "shape") ? "rigid"
     : "off"
 
-  // === init Rapier + старт симуляции ===
   const startPhysics = async () => {
     if (ph.running) return
+    const mod = await import("planck-js")
+    const pl: PLNS = (mod as any).default ?? (mod as any)
+    plRef.current = pl
 
-    const Rmod = await import("@dimforge/rapier2d-compat")
-    // @ts-ignore
-    const R: any = (Rmod as any).default ?? Rmod
-    if (typeof R.init === "function") {
-      await R.init()
-    }
-    rapierRef.current = R as RapierNS
-
-    // Гравитация: вниз = положительный Y (как в Konva)
+    // гравитация: Y вниз по экрану -> положительный gy
     const a = (ph.angleDeg*Math.PI)/180
-    const world = new (rapierRef.current as any).World({
-      x:  Math.cos(a) * ph.strength,
-      y:  Math.sin(a) * ph.strength,
-    }) as RWorld
+    const gx_m = (Math.cos(a) * ph.strength) / PPM
+    const gy_m = (Math.sin(a) * ph.strength) / PPM
+    const world = new pl.World(pl.Vec2(gx_m, gy_m))
     worldRef.current = world
 
-    // невидимый пол
-    const groundRB = world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(BASE_W/2, BASE_H - 8))
-    world.createCollider(R.ColliderDesc.cuboid(BASE_W/2, 8), groundRB)
+    // «пол»
+    {
+      const b = world.createBody({ type:"static", position: pl.Vec2(toM(BASE_W/2), toM(BASE_H - 8)) })
+      b.createFixture(pl.Box(toM(BASE_W/2), toM(8)))
+    }
 
     const currentSide = side
     layers
@@ -1076,7 +1058,7 @@ export default function EditorCanvas() {
         }
 
         takeBaseline(l)
-        const h = buildForLayer(rapierRef.current!, l, roleToUse)
+        const h = buildForLayer(pl, l, roleToUse)
         if (h) handlesRef.current[l.id] = h
       })
 
@@ -1098,11 +1080,12 @@ export default function EditorCanvas() {
   }
 
   const applyNewGravity = () => {
-    const w = worldRef.current; if (!w) return
+    const w = worldRef.current; const pl = plRef.current
+    if (!w || !pl) return
     const a = (ph.angleDeg*Math.PI)/180
-    const gx =  Math.cos(a)*ph.strength
-    const gy =  Math.sin(a)*ph.strength
-    ;(w as any).gravity = { x: gx, y: gy }
+    const gx_m = (Math.cos(a) * ph.strength) / PPM
+    const gy_m = (Math.sin(a) * ph.strength) / PPM
+    w.setGravity(pl.Vec2(gx_m, gy_m))
   }
 
   useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
@@ -1210,7 +1193,7 @@ export default function EditorCanvas() {
       {/* ===== Physics panel (desktop) */}
       {!isMobile && (
         <div className="fixed right-6 bottom-6 w-[420px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3">
-          <div className="text-[11px] uppercase tracking-widest">Physics</div>
+          <div className="text-[11px] uppercase tracking-widest">Physics (Box2D)</div>
 
           <div className="flex items-center gap-2">
             {!ph.running ? (
