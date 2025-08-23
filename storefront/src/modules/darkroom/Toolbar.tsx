@@ -69,6 +69,8 @@ type ToolbarProps = {
     stroke?: string
     strokeWidth?: number
     align?: "left" | "center" | "right" | "justify"
+    lineHeight?: number
+    letterSpacing?: number
   }
 
   setSelectedFill: (hex: string) => void
@@ -79,6 +81,10 @@ type ToolbarProps = {
   setSelectedFontFamily: (f: string) => void
   setSelectedColor: (hex: string) => void
   setSelectedAlign: (a: "left" | "center" | "right") => void
+  setSelectedLineHeight: (lh: number) => void
+  setSelectedLetterSpacing: (ls: number) => void
+
+  onClear: () => void
 
   mobileLayers: MobileLayersProps
 }
@@ -88,8 +94,8 @@ const ico  = "w-4 h-4"
 const btn  =
   "w-10 h-10 grid place-items-center border border-black text-[11px] rounded-none " +
   "hover:bg-black hover:text-white transition -ml-[1px] first:ml-0 select-none"
-
 const activeBtn = "bg-black text-white"
+
 const inputStop = {
   onPointerDown: (e: any) => e.stopPropagation(),
   onPointerMove: (e: any) => e.stopPropagation(),
@@ -102,6 +108,7 @@ const inputStop = {
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
 
+// компактная палитра оставляем только на десктопе (мобилка — без паттернов)
 const PALETTE = [
   "#000000","#333333","#666666","#999999","#CCCCCC","#FFFFFF",
   "#FF007A","#FF4D00","#FFB300","#FFD400","#FFE800","#CCFF00",
@@ -124,8 +131,9 @@ export default function Toolbar(props: ToolbarProps) {
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedColor,
+    setSelectedAlign, setSelectedLineHeight, setSelectedLetterSpacing,
+    onClear,
     mobileLayers,
-    setSelectedAlign
   } = props
 
   // =================== DESKTOP ===================
@@ -158,7 +166,7 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
-    // Текст: локальный state для input
+    // локальный state для text input
     const [textValue, setTextValue] = useState<string>(selectedProps?.text ?? "")
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
@@ -181,7 +189,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers */}
+            {/* row 1 — инструменты + layers + clear */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -198,6 +206,9 @@ export default function Toolbar(props: ToolbarProps) {
                   title={b.t}
                 >{b.icon}</button>
               ))}
+              <button className={clx(btn, "ml-2 bg-white")} title="Clear all" onClick={(e)=>{e.stopPropagation(); onClear()}}>
+                <Trash2 className={ico}/>
+              </button>
               <button className={clx(btn, layersOpen ? activeBtn : "bg-white ml-2")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}}>
                 <Layers className={ico}/>
               </button>
@@ -219,14 +230,14 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* палитра */}
+            {/* палитра — только десктоп */}
             <div className="grid grid-cols-12 gap-1" {...inputStop}>
               {PALETTE.map((c)=>(
                 <button
                   key={c}
                   className={clx("h-5 w-5 border", brushColor===c ? "border-black" : "border-black/40")}
                   style={{ background: c }}
-                  onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) props.setSelectedColor(c) }}
+                  onClick={(e)=>{ e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c) }}
                 />
               ))}
             </div>
@@ -254,36 +265,53 @@ export default function Toolbar(props: ToolbarProps) {
                 {...inputStop}
               />
 
-              {/* align — без редизайна, наши квадратные кнопки */}
+              {/* align */}
               <div className="flex gap-1">
-                <button
-                  className={clx(btn, (selectedProps.align ?? "left")==="left" ? activeBtn : "bg-white")}
-                  title="Align Left"
-                  onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("left") }}
-                ><AlignLeft className={ico}/></button>
-                <button
-                  className={clx(btn, selectedProps.align==="center" ? activeBtn : "bg-white")}
-                  title="Align Center"
-                  onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("center") }}
-                ><AlignCenter className={ico}/></button>
-                <button
-                  className={clx(btn, selectedProps.align==="right" ? activeBtn : "bg-white")}
-                  title="Align Right"
-                  onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("right") }}
-                ><AlignRight className={ico}/></button>
+                <button className={clx(btn, (selectedProps.align ?? "left")==="left" ? activeBtn : "bg-white")}  title="Align Left"   onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("left") }}><AlignLeft className={ico}/></button>
+                <button className={clx(btn, selectedProps.align==="center" ? activeBtn : "bg-white")}         title="Align Center" onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("center") }}><AlignCenter className={ico}/></button>
+                <button className={clx(btn, selectedProps.align==="right" ? activeBtn : "bg-white")}          title="Align Right"  onClick={(e)=>{ e.stopPropagation(); setSelectedAlign("right") }}><AlignRight className={ico}/></button>
               </div>
 
+              {/* font size */}
               <div className="flex items-center gap-2">
                 <div className="text-[10px] w-12">Font size</div>
                 <input
                   type="range" min={8} max={800} step={1}
                   value={selectedProps.fontSize ?? 96}
-                  onChange={(e)=>props.setSelectedFontSize(parseInt(e.target.value))}
+                  onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
                   className="flex-1"
                   style={{ accentColor: "#000" }}
                   {...inputStop}
                 />
                 <div className="text-xs w-10 text-right">{selectedProps.fontSize ?? 96}</div>
+              </div>
+
+              {/* line-height */}
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] w-16">Line height</div>
+                <input
+                  type="range" min={0.6} max={2.0} step={0.02}
+                  value={selectedProps.lineHeight ?? 1.0}
+                  onChange={(e)=>setSelectedLineHeight(parseFloat(e.target.value))}
+                  className="flex-1"
+                  style={{ accentColor: "#000" }}
+                  {...inputStop}
+                />
+                <div className="text-xs w-10 text-right">{(selectedProps.lineHeight ?? 1).toFixed(2)}</div>
+              </div>
+
+              {/* letter-spacing */}
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] w-20">Letter spacing</div>
+                <input
+                  type="range" min={-4} max={20} step={0.2}
+                  value={selectedProps.letterSpacing ?? 0}
+                  onChange={(e)=>setSelectedLetterSpacing(parseFloat(e.target.value))}
+                  className="flex-1"
+                  style={{ accentColor: "#000" }}
+                  {...inputStop}
+                />
+                <div className="text-xs w-10 text-right">{(selectedProps.letterSpacing ?? 0).toFixed(1)}</div>
               </div>
             </div>
 
@@ -310,7 +338,7 @@ export default function Toolbar(props: ToolbarProps) {
   const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
     <button
       className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? props.onAddText() : t==="shape" ? props.setTool("shape") : props.setTool(t as Tool)}}
+      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
     >
       {icon}
     </button>
@@ -320,13 +348,13 @@ export default function Toolbar(props: ToolbarProps) {
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
     const f = e.target.files?.[0]
-    if (f) onUploadImage(f)
+    if (f) props.onUploadImage(f)
     e.currentTarget.value = ""
   }
 
   return (
     <>
-      {/* Шторка LAYERS */}
+      {/* LAYERS сверху шторкой */}
       {layersOpenM && (
         <div className="fixed inset-x-0 bottom-36 z-40 px-3">
           <div className={clx(wrap, "p-2")}>
@@ -335,16 +363,16 @@ export default function Toolbar(props: ToolbarProps) {
               <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
             </div>
             <div className="space-y-2 max-h-64 overflow-auto">
-              {mobileLayers.items.map((l)=>(
+              {props.mobileLayers.items.map((l)=>(
                 <div key={l.id} className="flex items-center gap-2 border border-black px-2 py-1 bg-white">
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}><ArrowDown className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveUp(l.id)}><ArrowUp className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveDown(l.id)}><ArrowDown className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>props.mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
                 </div>
               ))}
             </div>
@@ -352,9 +380,9 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* Нижняя панель — 3 строки */}
+      {/* Нижняя панель: ряд инструментов, ниже — настройки (без палитр-паттернов), третья — FRONT/BACK + DL */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers */}
+        {/* row 1 */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -365,14 +393,17 @@ export default function Toolbar(props: ToolbarProps) {
           <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
             <Layers className={ico}/>
           </button>
+          <button className={clx("h-12 px-3 border border-black ml-2 bg-white")} onClick={onClear} title="Clear all">
+            <Trash2 className={ico}/>
+          </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — настройки */}
-        <div className="px-2 py-1 flex items-center gap-2">
+        {/* row 2 — настройки (всегда виден) */}
+        <div className="px-2 py-1 flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="text-[10px]">Color</div>
-            <div className="w-8 h-8 border border-black" style={{ background: brushColor }} />
+            <div className="w-7 h-7 border border-black" style={{ background: brushColor }} />
           </div>
           <div className="flex-1">
             <input
@@ -383,15 +414,9 @@ export default function Toolbar(props: ToolbarProps) {
               {...inputStop}
             />
           </div>
-          {/* мини-палитра */}
-          <div className="grid grid-cols-10 gap-1" {...inputStop}>
-            {PALETTE.slice(0,20).map((c)=>(
-              <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}} onClick={(e)=>{e.stopPropagation(); setBrushColor(c); if (selectedKind) setSelectedColor(c)}}/>
-            ))}
-          </div>
         </div>
 
-        {/* row 3 — FRONT/BACK + downloads */}
+        {/* row 3 */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
