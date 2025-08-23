@@ -259,8 +259,17 @@ export default function EditorCanvas() {
       const ae = document.activeElement as HTMLElement | null
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
 
-      const n = node(selectedId); if (!n) return
-      const lay = find(selectedId); if (!lay) return
+      const n = node(selectedId)
+      const lay = find(selectedId)
+      // Cmd/Ctrl + T — включить Move/Transformer
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="t") {
+        e.preventDefault()
+        set({ tool: "move" as Tool })
+        requestAnimationFrame(attachTransformer)
+        return
+      }
+
+      if (!n || !lay) return
       if (tool !== "move") return
 
       if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(lay.id); return }
@@ -419,8 +428,20 @@ export default function EditorCanvas() {
     const place = () => {
       // строго по клиентскому bbox
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
-      const left = stBox.left + r.x * scale
-      const top  = stBox.top  + r.y * scale
+
+      // учёт visualViewport (iOS/Android клавиатура)
+      const vv = typeof window !== "undefined" && (window as any).visualViewport
+        ? (window as any).visualViewport as VisualViewport
+        : null
+
+      let left = stBox.left + r.x * scale
+      let top  = stBox.top  + r.y * scale
+
+      if (vv) {
+        left += vv.offsetLeft
+        top  += vv.offsetTop
+      }
+
       ta.style.left   = `${left}px`
       ta.style.top    = `${top}px`
       ta.style.width  = `${Math.max(2, r.width  * scale)}px`
@@ -428,7 +449,7 @@ export default function EditorCanvas() {
     }
 
     Object.assign(ta.style, {
-      position: "absolute",
+      position: "fixed",
       padding: "0",
       margin: "0",
       border: "1px solid #111",
@@ -464,6 +485,11 @@ export default function EditorCanvas() {
     const commit = (apply: boolean) => {
       window.removeEventListener("resize", place)
       window.removeEventListener("scroll", place, true)
+      // отписка от visualViewport
+      const vv = (window as any).visualViewport as VisualViewport | undefined
+      vv?.removeEventListener("resize", place as any)
+      vv?.removeEventListener("scroll", place as any)
+
       ta.removeEventListener("input", onInput)
       ta.removeEventListener("keydown", onKey as any)
       if (apply) t.text(ta.value)
@@ -471,7 +497,6 @@ export default function EditorCanvas() {
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
       requestAnimationFrame(() => {
-        // остаёмся на тексте
         select((t as any).id())
         attachTransformer()
         trRef.current?.nodes([t])
@@ -489,6 +514,10 @@ export default function EditorCanvas() {
     ta.addEventListener("keydown", onKey as any)
     window.addEventListener("resize", place)
     window.addEventListener("scroll", place, true)
+    // подписка на visualViewport
+    const vv = (window as any).visualViewport as VisualViewport | undefined
+    vv?.addEventListener("resize", place as any)
+    vv?.addEventListener("scroll", place as any)
   }
 
   // ===== Жесты (мобилка): 1 палец — drag, 2 пальца — scale+rotate =====
