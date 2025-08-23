@@ -66,8 +66,18 @@ type PhysHandle = {
 }
 
 export default function EditorCanvas() {
-  const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select, showLayers, toggleLayers } =
-    useDarkroom()
+  const {
+    side,
+    set,
+    tool,
+    brushColor,
+    brushSize,
+    shapeKind,
+    selectedId,
+    select,
+    showLayers,
+    toggleLayers,
+  } = useDarkroom()
 
   useEffect(() => {
     ;(Konva as any).hitOnDragEnabled = true
@@ -95,13 +105,15 @@ export default function EditorCanvas() {
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick((v) => (v + 1) | 0)
 
-  // маркер «идёт трансформирование»
+  // маркер «идёт трансформирование», чтобы не конфликтовать с нашими жестями
   const isTransformingRef = useRef(false)
 
   // вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
-    const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
+    const el =
+      (document.querySelector("header") ||
+        document.getElementById("site-header")) as HTMLElement | null
     setHeaderH(Math.ceil(el?.getBoundingClientRect().height ?? 64))
   }, [])
 
@@ -109,7 +121,7 @@ export default function EditorCanvas() {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + 8
-    const padBottom = isMobile ? 164 : 72
+    const padBottom = isMobile ? 164 : 72 // + место под моб. physics
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
@@ -139,7 +151,8 @@ export default function EditorCanvas() {
   const node = (id: string | null) => find(id)?.node || null
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
     n.opacity(meta.opacity)
-    if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
+    if (!isEraseGroup(n) && !isStrokeGroup(n))
+      ;(n as any).globalCompositeOperation = meta.blend
   }
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
@@ -161,11 +174,16 @@ export default function EditorCanvas() {
   // ===== Transformer / ТЕКСТ — углы=fontSize, бока=wrap =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard = useRef<(() => void) | null>(null)
-  const textSnapRef = useRef<{ fs0: number; wrap0: number; cx0: number; cy0: number } | null>(null)
+  const textSnapRef =
+    useRef<{ fs0: number; wrap0: number; cx0: number; cy0: number } | null>(null)
 
   const captureTextSnap = (t: Konva.Text) => {
     const wrap0 = Math.max(1, t.width() || 1)
-    const self = (t as any).getSelfRect?.() || { width: wrap0, height: Math.max(1, t.height() || 1) }
+    const self =
+      (t as any).getSelfRect?.() || {
+        width: wrap0,
+        height: Math.max(1, t.height() || 1),
+      }
     const cx0 = Math.round(t.x() + wrap0 / 2)
     const cy0 = Math.round(t.y() + Math.max(1, self.height) / 2)
     textSnapRef.current = { fs0: t.fontSize(), wrap0, cx0, cy0 }
@@ -174,7 +192,8 @@ export default function EditorCanvas() {
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
-    const disabled = !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
+    const disabled =
+      !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
 
     if (detachTextFix.current) {
       detachTextFix.current()
@@ -202,9 +221,9 @@ export default function EditorCanvas() {
     const onEndT = () => {
       isTransformingRef.current = false
     }
-    n.on("transformstart.guard", onStart)
-    n.on("transformend.guard", onEndT)
-    detachGuard.current = () => n.off(".guard")
+    ;(n as any).on("transformstart.guard", onStart)
+    ;(n as any).on("transformend.guard", onEndT)
+    detachGuard.current = () => (n as any).off(".guard")
 
     if (isTextNode(n)) {
       const t = n as Konva.Text
@@ -229,9 +248,12 @@ export default function EditorCanvas() {
       t.on("transformend.textsnap", onTextEnd)
 
       ;(tr as any).boundBoxFunc((oldBox: any, newBox: any) => {
-        if (!textSnapRef.current) captureTextSnap(t)
+        const snap = textSnapRef.current
+        if (!snap) captureTextSnap(t)
         const s = textSnapRef.current!
-        const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
+        const getActive = (trRef.current as any)?.getActiveAnchor?.() as
+          | string
+          | undefined
 
         // БОКОВЫЕ — меняем только ширину wrap, центр сохраняем
         if (getActive === "middle-left" || getActive === "middle-right") {
@@ -262,10 +284,11 @@ export default function EditorCanvas() {
         const nextFS = clamp(Math.round(s.fs0 * scaleK), TEXT_MIN_FS, TEXT_MAX_FS)
         if (Math.abs(t.fontSize() - nextFS) > EPS) {
           t.fontSize(nextFS)
-          const self = (t as any).getSelfRect?.() || {
-            width: Math.max(1, t.width() || s.wrap0),
-            height: Math.max(1, t.height() || 1),
-          }
+          const self =
+            (t as any).getSelfRect?.() || {
+              width: Math.max(1, t.width() || s.wrap0),
+              height: Math.max(1, t.height() || 1),
+            }
           const nw = Math.max(1, t.width() || self.width)
           const nh = Math.max(1, self.height)
           t.x(Math.round(s.cx0 - nw / 2))
@@ -304,9 +327,11 @@ export default function EditorCanvas() {
   }
   useEffect(() => {
     attachTransformer()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, side])
   useEffect(() => {
     attachTransformer()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool])
 
   // во время brush/erase — отключаем драг
@@ -327,7 +352,11 @@ export default function EditorCanvas() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
-      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || (ae as any).isContentEditable)) return
+      if (
+        ae &&
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)
+      )
+        return
 
       const n = node(selectedId)
       const lay = find(selectedId)
@@ -353,20 +382,21 @@ export default function EditorCanvas() {
         return
       }
 
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) e.preventDefault()
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key))
+        e.preventDefault()
       const step = e.shiftKey ? 20 : 3
 
       ;(n as any).x &&
         (n as any).y &&
         ((e.key === "ArrowLeft" && (n as any).x((n as any).x() - step)),
-        (e.key === "ArrowRight" && (n as any).x((n as any).x() + step)),
-        (e.key === "ArrowUp" && (n as any).y((n as any).y() - step)),
-        (e.key === "ArrowDown" && (n as any).y((n as any).y() + step)))
+        e.key === "ArrowRight" && (n as any).x((n as any).x() + step),
+        e.key === "ArrowUp" && (n as any).y((n as any).y() - step),
+        e.key === "ArrowDown" && (n as any).y((n as any).y() + step))
       n.getLayer()?.batchDraw()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId, tool])
+  }, [selectedId, tool, set])
 
   // ===== Brush / Erase (каждый DOWN — новый слой) =====
   const startStroke = (x: number, y: number) => {
@@ -382,9 +412,17 @@ export default function EditorCanvas() {
     if (tool === "brush") meta.physRole = "rope" // авто: brush = rope
     currentArt().add(g)
     ;(g as any).moveToTop()
-    const newLay: AnyLayer = { id, side, node: g, meta, type: tool === "brush" ? "strokes" : "erase" }
+    const newLay: AnyLayer = {
+      id,
+      side,
+      node: g,
+      meta,
+      type: tool === "brush" ? "strokes" : "erase",
+    }
     setLayers((p) => [...p, newLay])
-    setSeqs((s) => (tool === "brush" ? { ...s, strokes: s.strokes + 1 } : { ...s, erase: s.erase + 1 }))
+    setSeqs((s) =>
+      tool === "brush" ? { ...s, strokes: s.strokes + 1 } : { ...s, erase: s.erase + 1 }
+    )
     select(id)
 
     const line = new Konva.Line({
@@ -393,7 +431,8 @@ export default function EditorCanvas() {
       strokeWidth: brushSize,
       lineCap: "round",
       lineJoin: "round",
-      globalCompositeOperation: tool === "brush" ? ("source-over" as any) : ("destination-out" as any),
+      globalCompositeOperation:
+        tool === "brush" ? "source-over" : ("destination-out" as any),
     })
     g.add(line)
     setIsDrawing(true)
@@ -404,7 +443,8 @@ export default function EditorCanvas() {
     const lay = find(selectedId)
     const g = lay?.node as Konva.Group
     const last = g?.getChildren().at(-1)
-    const line = last instanceof Konva.Line ? last : (last as Konva.Group)?.getChildren().at(-1)
+    const line =
+      last instanceof Konva.Line ? last : (last as Konva.Group)?.getChildren().at(-1)
     if (!(line instanceof Konva.Line)) return
     line.points(line.points().concat([x, y]))
     artLayerRef.current?.batchDraw()
@@ -429,7 +469,11 @@ export default function EditorCanvas() {
       const img = new window.Image()
       img.crossOrigin = "anonymous"
       img.onload = () => {
-        const ratio = Math.min((BASE_W * 0.9) / img.width, (BASE_H * 0.9) / img.height, 1)
+        const ratio = Math.min(
+          (BASE_W * 0.9) / img.width,
+          (BASE_H * 0.9) / img.height,
+          1
+        )
         const w = img.width * ratio,
           h = img.height * ratio
         const kimg = new Konva.Image({
@@ -490,11 +534,24 @@ export default function EditorCanvas() {
   // ===== Добавление: Shape =====
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
-    if (kind === "circle") n = new Konva.Circle({ x: BASE_W / 2, y: BASE_H / 2, radius: 160, fill: brushColor })
+    if (kind === "circle")
+      n = new Konva.Circle({ x: BASE_W / 2, y: BASE_H / 2, radius: 160, fill: brushColor })
     else if (kind === "square")
-      n = new Konva.Rect({ x: BASE_W / 2 - 160, y: BASE_H / 2 - 160, width: 320, height: 320, fill: brushColor })
+      n = new Konva.Rect({
+        x: BASE_W / 2 - 160,
+        y: BASE_H / 2 - 160,
+        width: 320,
+        height: 320,
+        fill: brushColor,
+      })
     else if (kind === "triangle")
-      n = new Konva.RegularPolygon({ x: BASE_W / 2, y: BASE_H / 2, sides: 3, radius: 200, fill: brushColor })
+      n = new Konva.RegularPolygon({
+        x: BASE_W / 2,
+        y: BASE_H / 2,
+        sides: 3,
+        radius: 200,
+        fill: brushColor,
+      })
     else if (kind === "cross") {
       const g = new Konva.Group({ x: BASE_W / 2 - 160, y: BASE_H / 2 - 160 })
       g.add(new Konva.Rect({ width: 320, height: 60, y: 130, fill: brushColor }))
@@ -663,7 +720,8 @@ export default function EditorCanvas() {
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: { x: number; y: number }) => ({ x: p.x / scale, y: p.y / scale })
 
-  const isBgTarget = (t: Konva.Node | null) => !!t && (t === frontBgRef.current || t === backBgRef.current)
+  const isBgTarget = (t: Konva.Node | null) =>
+    !!t && (t === frontBgRef.current || t === backBgRef.current)
 
   const isTransformerChild = (t: Konva.Node | null) => {
     let p: Konva.Node | null | undefined = t
@@ -675,7 +733,12 @@ export default function EditorCanvas() {
     return false
   }
 
-  const applyAround = (node: Konva.Node, stagePoint: { x: number; y: number }, newScale: number, newRotation: number) => {
+  const applyAround = (
+    node: Konva.Node,
+    stagePoint: { x: number; y: number },
+    newScale: number,
+    newRotation: number
+  ) => {
     const tr = node.getAbsoluteTransform().copy()
     const inv = tr.invert()
     const local = inv.point(stagePoint)
@@ -716,7 +779,9 @@ export default function EditorCanvas() {
       }
 
       if (tgt && tgt !== st && tgt.getParent()) {
-        const found = layers.find((l) => l.node === tgt || l.node === (tgt.getParent() as any))
+        const found = layers.find(
+          (l) => l.node === tgt || l.node === (tgt.getParent() as any)
+        )
         if (found && found.side === side) select(found.id)
       }
       const lay = find(selectedId)
@@ -726,7 +791,10 @@ export default function EditorCanvas() {
           active: true,
           two: false,
           nodeId: lay.id,
-          startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
+          startPos: {
+            x: (lay.node as any).x?.() ?? 0,
+            y: (lay.node as any).y?.() ?? 0,
+          },
           lastPointer: toCanvas(getStagePointer()),
           centerCanvas: toCanvas(getStagePointer()),
           startDist: 0,
@@ -762,7 +830,10 @@ export default function EditorCanvas() {
         startScaleX: (lay.node as any).scaleX?.() ?? 1,
         startScaleY: (lay.node as any).scaleY?.() ?? 1,
         startRot: (lay.node as any).rotation?.() ?? 0,
-        startPos: { x: (lay.node as any).x?.() ?? 0, y: (lay.node as any).y?.() ?? 0 },
+        startPos: {
+          x: (lay.node as any).x?.() ?? 0,
+          y: (lay.node as any).y?.() ?? 0,
+        },
         centerCanvas: toCanvas({ x: cx, y: cy }),
         lastPointer: undefined,
       }
@@ -812,7 +883,8 @@ export default function EditorCanvas() {
 
       const baseScale = gestureRef.current.startScaleX
       const newScale = baseScale * s
-      const newRot = gestureRef.current.startRot + ((ang - gestureRef.current.startAngle) * 180) / Math.PI
+      const newRot =
+        gestureRef.current.startRot + ((ang - gestureRef.current.startAngle) * 180) / Math.PI
 
       const c = gestureRef.current.centerCanvas
       const sp = { x: c.x * scale, y: c.y * scale }
@@ -886,7 +958,10 @@ export default function EditorCanvas() {
     setLayers((prev) => {
       const current = prev.filter((l) => l.side === side)
       const others = prev.filter((l) => l.side !== side)
-      const orderTopToBottom = current.slice().sort((a, b) => a.node.zIndex() - b.node.zIndex()).reverse()
+      const orderTopToBottom = current
+        .slice()
+        .sort((a, b) => a.node.zIndex() - b.node.zIndex())
+        .reverse()
 
       const srcIdx = orderTopToBottom.findIndex((l) => l.id === srcId)
       const dstIdx = orderTopToBottom.findIndex((l) => l.id === destId)
@@ -926,7 +1001,7 @@ export default function EditorCanvas() {
         applyMeta(l.node, meta)
         if (patch.visible !== undefined) l.node.visible(meta.visible && l.side === side)
         return { ...l, meta }
-      }),
+      })
     )
     artLayerRef.current?.batchDraw()
     bump()
@@ -1144,7 +1219,14 @@ export default function EditorCanvas() {
     const colliders: Collider[] = []
     const joints: any[] = []
 
-    const addRect = (cx: number, cy: number, w: number, h: number, rotDeg: number, dynamic: boolean) => {
+    const addRect = (
+      cx: number,
+      cy: number,
+      w: number,
+      h: number,
+      rotDeg: number,
+      dynamic: boolean
+    ) => {
       const rbDesc = dynamic ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
       rbDesc.setTranslation(cx, cy).setRotation((rotDeg * Math.PI) / 180)
       const rb = world.createRigidBody(rbDesc)
@@ -1163,7 +1245,9 @@ export default function EditorCanvas() {
       if (l.node instanceof Konva.Circle) {
         const r = (l.node as Konva.Circle).radius()
         const rbDesc = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
-        rbDesc.setTranslation(l.node.x(), l.node.y()).setRotation(((l.node.rotation?.() || 0) * Math.PI) / 180)
+        rbDesc
+          .setTranslation(l.node.x(), l.node.y())
+          .setRotation(((l.node.rotation?.() || 0) * Math.PI) / 180)
         const rb = world.createRigidBody(rbDesc)
         const cl = world.createCollider(R.ColliderDesc.ball(r), rb)
         cl.setFriction(0.35)
@@ -1173,7 +1257,14 @@ export default function EditorCanvas() {
         bodies.push(rb)
         colliders.push(cl)
       } else {
-        addRect(anchor.cx, anchor.cy, Math.max(1, anchor.w), Math.max(1, anchor.h), (l.node as any).rotation?.() || 0, dyn)
+        addRect(
+          anchor.cx,
+          anchor.cy,
+          Math.max(1, anchor.w),
+          Math.max(1, anchor.h),
+          (l.node as any).rotation?.() || 0,
+          dyn
+        )
       }
     }
 
@@ -1200,7 +1291,7 @@ export default function EditorCanvas() {
             acc = 0
           }
         }
-        // тела
+        // тела + револьв. суставы (2D)
         const prevs: RigidBody[] = []
         const radius = Math.max(3, (line?.strokeWidth() || 12) / 2)
         samples.forEach((p) => {
@@ -1214,7 +1305,12 @@ export default function EditorCanvas() {
           colliders.push(cl)
           const prev = prevs.at(-1)
           if (prev) {
-            const j = world.createImpulseJoint(R.JointData.ball({ x: 0, y: 0 }, { x: 0, y: 0 }), prev, rb, true)
+            const j = world.createImpulseJoint(
+              R.JointData.revolute({ x: 0, y: 0 }, { x: 0, y: 0 }),
+              prev,
+              rb,
+              true
+            )
             joints.push(j)
           }
           prevs.push(rb)
@@ -1297,7 +1393,7 @@ export default function EditorCanvas() {
     if (ph.running) return
 
     const Rmod = await import("@dimforge/rapier2d-compat")
-    // совместимость с разными типами экспорта
+    // совместимость с ESM/CJS
     // @ts-ignore
     const R: any = (Rmod as any).default ?? Rmod
     if (typeof R.init === "function") {
@@ -1318,7 +1414,8 @@ export default function EditorCanvas() {
       .forEach((l) => {
         if (ph.autoRoles && (l.meta.physRole || "off") === "off") {
           if (l.type === "strokes") updateMeta(l.id, { physRole: "rope" })
-          else if (l.type === "text" || l.type === "image" || l.type === "shape") updateMeta(l.id, { physRole: "rigid" })
+          else if (l.type === "text" || l.type === "image" || l.type === "shape")
+            updateMeta(l.id, { physRole: "rigid" })
         }
         takeBaseline(l)
         const h = buildForLayer(rapierRef.current!, l)
@@ -1359,20 +1456,6 @@ export default function EditorCanvas() {
     killWorld()
   }, [])
 
-  // ===== стили для чёрных слайдеров с квадратным бегунком
-  const sliderCss = `
-  input[type="range"].blk{
-    -webkit-appearance:none; appearance:none;
-    width:100%; height:18px; background:transparent; margin:0; padding:0;
-  }
-  input[type="range"].blk::-webkit-slider-runnable-track{ height:2px; background:#000; }
-  input[type="range"].blk::-moz-range-track{ height:2px; background:#000; }
-  input[type="range"].blk::-webkit-slider-thumb{
-    -webkit-appearance:none; appearance:none; width:14px; height:14px; background:#000; border:0; border-radius:0; margin-top:-6px;
-  }
-  input[type="range"].blk::-moz-range-thumb{ width:14px; height:14px; background:#000; border:0; border-radius:0; }
-  `
-
   // ===== Render =====
   return (
     <div
@@ -1385,8 +1468,6 @@ export default function EditorCanvas() {
         userSelect: "none",
       }}
     >
-      <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
-
       {/* Desktop-панель слоёв */}
       {!isMobile && showLayers && (
         <LayersPanel
@@ -1539,20 +1620,29 @@ export default function EditorCanvas() {
 
       {/* ===== Physics panel (desktop) */}
       {!isMobile && (
-        <div className="fixed right-6 bottom-6 w-[520px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3">
+        <div className="fixed right-6 bottom-6 w-[420px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3">
           <div className="text-[11px] uppercase tracking-widest">Physics</div>
 
           <div className="flex items-center gap-2">
             {!ph.running ? (
-              <button className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white" onClick={startPhysics}>
+              <button
+                className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white"
+                onClick={startPhysics}
+              >
                 ▸ Play
               </button>
             ) : (
-              <button className="h-9 px-3 border border-black bg-black text-white hover:bg-white hover:text-black" onClick={pausePhysics}>
+              <button
+                className="h-9 px-3 border border-black bg-black text-white hover:bg-white hover:text-black"
+                onClick={pausePhysics}
+              >
                 ■ Pause
               </button>
             )}
-            <button className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white" onClick={resetPhysics}>
+            <button
+              className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white"
+              onClick={resetPhysics}
+            >
               ⟲ Reset
             </button>
 
@@ -1579,7 +1669,7 @@ export default function EditorCanvas() {
                 setPh((s) => ({ ...s, angleDeg: v }))
                 applyNewGravity()
               }}
-              className="blk w-full"
+              className="w-full"
             />
             <div className="w-10 text-xs text-right">{ph.angleDeg}°</div>
           </div>
@@ -1597,7 +1687,7 @@ export default function EditorCanvas() {
                 setPh((s) => ({ ...s, strength: v }))
                 applyNewGravity()
               }}
-              className="blk w-full"
+              className="w-full"
             />
             <div className="w-12 text-xs text-right">{ph.strength}</div>
           </div>
@@ -1657,7 +1747,7 @@ export default function EditorCanvas() {
                   setPh((s) => ({ ...s, angleDeg: v }))
                   applyNewGravity()
                 }}
-                className="blk w-full"
+                className="w-full"
               />
             </div>
             <div className="mt-2">
@@ -1676,7 +1766,7 @@ export default function EditorCanvas() {
                   setPh((s) => ({ ...s, strength: v }))
                   applyNewGravity()
                 }}
-                className="blk w-full"
+                className="w-full"
               />
             </div>
           </div>
