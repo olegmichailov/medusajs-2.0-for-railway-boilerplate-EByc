@@ -5,9 +5,10 @@ import { Stage, Layer, Image as KImage, Transformer, Group as KGroup } from "rea
 import Konva from "konva"
 import useImage from "use-image"
 import Toolbar from "./Toolbar"
-import LayersPanel, { LayerItem } from "./LayersPanel"
+import LayersPanel, { LayerItem, PhysicsRole } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
+import { Play, Pause, RotateCw, Loader2 } from "lucide-react"
 
 // ==== БАЗА МАКЕТА ====
 const BASE_W = 2400
@@ -20,15 +21,30 @@ const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
-// uid
+// uid / utils
 const uid = () => Math.random().toString(36).slice(2)
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
 
+// ==== Physics: лёгкий рантайм для прототипа ====
+type Vec = { x:number; y:number }
+const vadd = (a:Vec,b:Vec):Vec=>({x:a.x+b.x,y:a.y+b.y})
+const vscale = (a:Vec,k:number):Vec=>({x:a.x*k,y:a.y*k})
+
 // ==== ТИПЫ ====
-type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
+type BaseMeta = {
+  blend: Blend
+  opacity: number
+  name: string
+  visible: boolean
+  locked: boolean
+  physRole?: PhysicsRole // "none" | "rigid" | "collider" | "rope"
+  t0?: { x:number; y:number; rot:number; sx:number; sy:number }
+}
+
 type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
+
 type AnyNode =
   | Konva.Image
   | Konva.Line
@@ -37,12 +53,60 @@ type AnyNode =
   | Konva.Rect
   | Konva.Circle
   | Konva.RegularPolygon
+
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
 
+// ===== AABB helpers (для прототипного физика) =====
+function getAABB(n: AnyNode) {
+  if (n instanceof Konva.Text) {
+    const self = (n as any).getSelfRect?.() || { width: Math.max(1, n.width() || 1), height: Math.max(1, n.height() || 1) }
+    return { x: n.x(), y: n.y(), w: Math.max(1, n.width() || self.width), h: Math.max(1, self.height), kind: "t" as const }
+  }
+  if (n instanceof Konva.Rect) return { x: n.x(), y: n.y(), w: n.width(), h: n.height(), kind: "r" as const }
+  if (n instanceof Konva.Circle) return { x: n.x()-n.radius(), y: n.y()-n.radius(), w: n.radius()*2, h: n.radius()*2, kind: "c" as const }
+  if (n instanceof Konva.RegularPolygon) return { x: n.x()-n.radius(), y: n.y()-n.radius(), w: n.radius()*2, h: n.radius()*2, kind: "p" as const }
+  if (n instanceof Konva.Image) return { x: n.x(), y: n.y(), w: n.width(), h: n.height(), kind: "i" as const }
+  if (n instanceof Konva.Group) {
+    const r = (n as any).getClientRect?.() || { x: n.x(), y: n.y(), width: (n as any).width?.()||40, height:(n as any).height?.()||40 }
+    return { x: r.x, y: r.y, w: r.width, h: r.height, kind: "g" as const }
+  }
+  // line и т.д. — грубая оценка
+  const r = (n as any).getClientRect?.() || { x: (n as any).x?.()||0, y:(n as any).y?.()||0, width:40, height:40 }
+  return { x: r.x, y: r.y, w: r.width, h: r.height, kind: "o" as const }
+}
+
+function setTopLeft(n: AnyNode, x:number, y:number) {
+  if (n instanceof Konva.Circle) { n.x(x + n.radius()); n.y(y + n.radius()); return }
+  if (n instanceof Konva.Text) { n.x(Math.round(x)); n.y(Math.round(y)); return }
+  if (n instanceof Konva.Rect || n instanceof Konva.Image || n instanceof Konva.Group || n instanceof Konva.Line || n instanceof Konva.RegularPolygon) {
+    ;(n as any).x?.(Math.round(x)); (n as any).y?.(Math.round(y)); return
+  }
+}
+
+function saveT0(m: BaseMeta, n: AnyNode) {
+  m.t0 = {
+    x: (n as any).x?.() ?? 0,
+    y: (n as any).y?.() ?? 0,
+    rot: (n as any).rotation?.() ?? 0,
+    sx: (n as any).scaleX?.() ?? 1,
+    sy: (n as any).scaleY?.() ?? 1,
+  }
+}
+
+function restoreT0(m: BaseMeta, n: AnyNode) {
+  if (!m.t0) return
+  ;(n as any).x?.(m.t0.x)
+  ;(n as any).y?.(m.t0.y)
+  ;(n as any).rotation?.(m.t0.rot)
+  ;(n as any).scaleX?.(m.t0.sx)
+  ;(n as any).scaleY?.(m.t0.sy)
+}
+
+// ===== Компонент =====
 export default function EditorCanvas() {
   const {
     side, set, tool, brushColor, brushSize, shapeKind,
@@ -76,6 +140,97 @@ export default function EditorCanvas() {
   // маркер «идёт трансформирование», чтобы не конфликтовать с нашими жестями
   const isTransformingRef = useRef(false)
 
+  // ===== Лёгкий физик =====
+  const vel = useRef(new WeakMap<Konva.Node, { v:Vec; w:number }>())
+  const [phys, setPhys] = useState({ running:false, g: { x: 0, y: 1200 } as Vec, last: 0 })
+  const rafRef = useRef<number | null>(null)
+
+  const physStep = (t:number) => {
+    const st = stageRef.current; if (!st) { rafRef.current = requestAnimationFrame(physStep); return }
+    const last = phys.last || t
+    const dt = Math.min(0.033, Math.max(0.001, (t - last) / 1000))
+
+    // сбор статичных AABB коллайдеров — только активная сторона
+    const colliders = layers.filter(l => l.side===side && l.meta.visible && l.meta.physRole === "collider").map(l => ({ l, a: getAABB(l.node) }))
+
+    // динамика
+    layers.forEach(l => {
+      if (l.side!==side || !l.meta.visible) return
+      if (l.meta.physRole !== "rigid" && l.meta.physRole !== "rope") return
+      if (l.meta.locked) return
+
+      const n = l.node
+      // скорость
+      const e = vel.current.get(n) || { v: { x: 0, y: 0 }, w: 0 }
+      e.v = vadd(e.v, vscale(phys.g, dt)) // гравитация/ветер
+
+      // интеграция положения (очень упрощённо)
+      const a = getAABB(n)
+      let nx = a.x + e.v.x * dt
+      let ny = a.y + e.v.y * dt
+
+      // столкновения с рамкой макета
+      if (nx < 0) { nx = 0; e.v.x *= -0.25 }
+      if (ny < 0) { ny = 0; e.v.y *= -0.25 }
+      if (nx + a.w > BASE_W) { nx = BASE_W - a.w; e.v.x *= -0.25 }
+      if (ny + a.h > BASE_H) { ny = BASE_H - a.h; e.v.y *= -0.25 }
+
+      // простые столкновения с коллайдерами (AABB против AABB)
+      for (const c of colliders) {
+        const b = c.a
+        const overlapX = Math.max(0, Math.min(nx + a.w, b.x + b.w) - Math.max(nx, b.x))
+        const overlapY = Math.max(0, Math.min(ny + a.h, b.y + b.h) - Math.max(ny, b.y))
+        if (overlapX > 0 && overlapY > 0) {
+          if (overlapX < overlapY) {
+            // отталкиваем по X
+            if (a.x < b.x) nx -= overlapX; else nx += overlapX
+            e.v.x *= -0.2
+          } else {
+            // по Y
+            if (a.y < b.y) ny -= overlapY; else ny += overlapY
+            e.v.y *= -0.2
+          }
+        }
+      }
+
+      setTopLeft(n as AnyNode, nx, ny)
+      vel.current.set(n, e)
+    })
+
+    artLayerRef.current?.batchDraw()
+    setPhys(p => ({ ...p, last: t }))
+    rafRef.current = requestAnimationFrame(physStep)
+  }
+
+  const startPhys = () => {
+    if (phys.running) return
+    // сохранить T0 для всех слоёв активной стороны (однократно)
+    setLayers(prev => prev.map(l => {
+      if (l.side!==side) return l
+      const clone = { ...l, meta: { ...l.meta } }
+      if (!clone.meta.t0) saveT0(clone.meta, clone.node)
+      return clone
+    }))
+    setPhys(p => ({ ...p, running: true, last: performance.now() }))
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(physStep)
+  }
+  const pausePhys = () => { setPhys(p => ({ ...p, running:false })) }
+  const resetPhys = () => {
+    // остановить, вернуть T0
+    setPhys(p => ({ ...p, running:false }))
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    layers.forEach(l => { if (l.side===side && l.meta.t0) restoreT0(l.meta, l.node) })
+    vel.current = new WeakMap()
+    artLayerRef.current?.batchDraw()
+  }
+
+  useEffect(() => {
+    if (!phys.running) return
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(physStep)
+    return () => { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phys.running, side])
+
   // вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
@@ -87,7 +242,7 @@ export default function EditorCanvas() {
     const vw = typeof window !== "undefined" ? window.innerWidth : 1200
     const vh = typeof window !== "undefined" ? window.innerHeight : 800
     const padTop = headerH + 8
-    const padBottom = isMobile ? 144 : 72
+    const padBottom = isMobile ? 184 : 72 // + место для Physics HUD на мобилке
     const maxW = vw - 24
     const maxH = vh - (padTop + padBottom)
     const s = Math.min(maxW / BASE_W, maxH / BASE_H, 1)
@@ -103,7 +258,7 @@ export default function EditorCanvas() {
   }, [set])
 
   // helpers
-  const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
+  const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false, physRole: "none" })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
   const applyMeta = (n: AnyNode, meta: BaseMeta) => {
@@ -572,6 +727,16 @@ export default function EditorCanvas() {
 
     if (isTransformerChild(e.target)) return
 
+    // если симуляция идёт — клики только выбирают
+    if (phys.running) {
+      const st = stageRef.current!
+      const tgt = e.target as Konva.Node
+      if (tgt === st || isBgTarget(tgt)) { select(null); trRef.current?.nodes([]); uiLayerRef.current?.batchDraw(); return }
+      const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
+      if (found && found.side === side) select(found.id)
+      return
+    }
+
     // brush/erase — новый слой и сразу рисуем
     if (tool === "brush" || tool === "erase") {
       const p = toCanvas(getStagePointer())
@@ -713,6 +878,7 @@ export default function EditorCanvas() {
         id: l.id, name: l.meta.name, type: l.type,
         visible: l.meta.visible, locked: l.meta.locked,
         blend: l.meta.blend, opacity: l.meta.opacity,
+        physicsRole: l.meta.physRole ?? "none"
       }))
   }, [layers, side, uiTick])
 
@@ -776,9 +942,20 @@ export default function EditorCanvas() {
     bump()
   }
 
+  const setPhysicsRole = (id: string, role: PhysicsRole) => {
+    updateMeta(id, { physRole: role })
+  }
+
   const onLayerSelect = (id: string) => {
     select(id)
     if (tool !== "move") set({ tool: "move" })
+  }
+
+  const cyclePhysics = (id: string) => {
+    const l = layers.find(x=>x.id===id); if (!l) return
+    const order: PhysicsRole[] = ["none","rigid","collider","rope"]
+    const next = order[(order.indexOf(l.meta.physRole ?? "none") + 1) % order.length]
+    setPhysicsRole(id, next)
   }
 
   // ===== Снимки свойств выбранного узла для Toolbar =====
@@ -851,6 +1028,88 @@ export default function EditorCanvas() {
   }
 
   // ===== Render =====
+  const PhysicsHUD = () => (
+    <div className="fixed right-6 bottom-24 z-40 w-[360px] border border-black bg-white shadow-xl rounded-none">
+      <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase tracking-widest">Physics</div>
+      <div className="p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <button
+            className="h-10 px-3 border border-black bg-white flex items-center gap-2"
+            onClick={phys.running ? pausePhys : startPhys}
+          >
+            {phys.running ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4"/>}
+            <span className="text-sm">{phys.running ? "Pause" : "Play"}</span>
+          </button>
+          <button className="h-10 px-3 border border-black bg-white flex items-center gap-2" onClick={resetPhys}>
+            <RotateCw className="w-4 h-4"/>
+            <span className="text-sm">Reset</span>
+          </button>
+          {!phys.running && <span className="text-[11px] opacity-60">Bake = Pause</span>}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[10px]">Gravity / Wind</div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] w-10">Dir</label>
+            <input
+              type="range" min={0} max={360} step={1}
+              value={(Math.atan2(phys.g.y, phys.g.x) * 180/Math.PI + 360) % 360}
+              onChange={(e)=>{
+                const ang = Number(e.target.value) * Math.PI/180
+                const len = Math.hypot(phys.g.x, phys.g.y) || 1200
+                setPhys(p=>({ ...p, g: { x: Math.cos(ang)*len, y: Math.sin(ang)*len } }))
+              }}
+            />
+            <label className="text-[10px] w-10">Str</label>
+            <input
+              type="range" min={100} max={3000} step={50}
+              value={Math.round(Math.hypot(phys.g.x, phys.g.y))}
+              onChange={(e)=>{
+                const len = Number(e.target.value)
+                const ang = Math.atan2(phys.g.y, phys.g.x)
+                setPhys(p=>({ ...p, g: { x: Math.cos(ang)*len, y: Math.sin(ang)*len } }))
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            className="h-8 px-2 border border-black bg-white text-[12px]"
+            onClick={()=>{
+              // простая авто-разметка ролей: текст = rigid, shape = collider, strokes = rope
+              setLayers(prev => prev.map(l => {
+                if (l.side!==side) return l
+                const role: PhysicsRole =
+                  l.type === "text" ? "rigid" :
+                  l.type === "shape" ? "collider" :
+                  l.type === "strokes" ? "rope" : "none"
+                return { ...l, meta: { ...l.meta, physRole: role } }
+              }))
+              bump()
+            }}
+          >Auto roles</button>
+
+          {selectedId && (
+            <>
+              <span className="text-[11px] opacity-60">for selected:</span>
+              <select
+                className="h-8 px-2 border border-black bg-white text-[12px]"
+                value={find(selectedId)?.meta.physRole ?? "none"}
+                onChange={(e)=>setPhysicsRole(selectedId!, e.target.value as PhysicsRole)}
+              >
+                <option value="none">none</option>
+                <option value="rigid">rigid</option>
+                <option value="collider">collider</option>
+                <option value="rope">rope</option>
+              </select>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div
       className="fixed inset-0 bg-white"
@@ -875,6 +1134,7 @@ export default function EditorCanvas() {
           onReorder={reorder}
           onChangeBlend={(id, b)=>updateMeta(id,{ blend: b as Blend })}
           onChangeOpacity={(id, o)=>updateMeta(id,{ opacity: o })}
+          onCyclePhysics={cyclePhysics}
         />
       )}
 
@@ -960,6 +1220,9 @@ export default function EditorCanvas() {
         }}
         mobileTopOffset={padTop}
       />
+
+      {/* Physics HUD (desktop & mobile) */}
+      <PhysicsHUD />
     </div>
   )
 }
