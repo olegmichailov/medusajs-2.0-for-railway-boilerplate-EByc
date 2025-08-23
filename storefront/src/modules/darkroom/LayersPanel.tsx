@@ -4,8 +4,6 @@ import React, { useMemo, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
-export type PhysicsRole = "none" | "rigid" | "collider" | "rope"
-
 export type LayerItem = {
   id: string
   name: string
@@ -15,7 +13,6 @@ export type LayerItem = {
   blend: string
   opacity: number
   thumb?: string | null
-  physicsRole?: PhysicsRole
 }
 
 type Props = {
@@ -30,11 +27,16 @@ type Props = {
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
   getPreview?: (id: string) => string | null
-  onCyclePhysics?: (id: string) => void // new, optional
 }
 
 const blends = [
-  "source-over","multiply","screen","overlay","darken","lighten","xor",
+  "source-over",
+  "multiply",
+  "screen",
+  "overlay",
+  "darken",
+  "lighten",
+  "xor",
 ] as const
 
 // трек по центру + квадратный бегунок (по центру)
@@ -52,17 +54,20 @@ input[type="range"].lp::-webkit-slider-thumb{
 input[type="range"].lp::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
 `
 
-const roleBadge = (r?: PhysicsRole) => {
-  switch (r) {
-    case "rigid": return "RB"
-    case "collider": return "CL"
-    case "rope": return "RP"
-    default: return "–"
-  }
-}
-
 export default function LayersPanel(props: Props) {
-  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate, onReorder, onChangeBlend, onChangeOpacity, getPreview, onCyclePhysics } = props
+  const {
+    items,
+    selectId,
+    onSelect,
+    onToggleVisible,
+    onToggleLock,
+    onDelete,
+    onDuplicate,
+    onReorder,
+    onChangeBlend,
+    onChangeOpacity,
+    getPreview,
+  } = props
 
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
@@ -71,7 +76,9 @@ export default function LayersPanel(props: Props) {
 
   const byId = useMemo(() => {
     const m: Record<string, LayerItem> = {}
-    items.forEach(i => { m[i.id] = i })
+    items.forEach((i) => {
+      m[i.id] = i
+    })
     return m
   }, [items])
 
@@ -82,9 +89,7 @@ export default function LayersPanel(props: Props) {
     e.dataTransfer.effectAllowed = "move"
     e.dataTransfer.setData("text/plain", id)
 
-    const src =
-      byId[id]?.thumb ??
-      (typeof getPreview === "function" ? getPreview(id) : null)
+    const src = byId[id]?.thumb ?? (typeof getPreview === "function" ? getPreview(id) : null)
 
     if (src) {
       const img = new Image()
@@ -93,7 +98,8 @@ export default function LayersPanel(props: Props) {
         const w = Math.min(160, img.width)
         const h = Math.max(1, Math.round((img.height * w) / img.width))
         const c = document.createElement("canvas")
-        c.width = w; c.height = h
+        c.width = w
+        c.height = h
         const ctx = c.getContext("2d")!
         ctx.drawImage(img, 0, 0, w, h)
         e.dataTransfer.setDragImage(c, w / 2, h / 2)
@@ -103,7 +109,9 @@ export default function LayersPanel(props: Props) {
       if (row) {
         row.style.opacity = "0.85"
         e.dataTransfer.setDragImage(row, row.clientWidth / 2, row.clientHeight / 2)
-        setTimeout(() => { row.style.opacity = "" }, 0)
+        setTimeout(() => {
+          row.style.opacity = ""
+        }, 0)
       }
     }
   }
@@ -120,18 +128,23 @@ export default function LayersPanel(props: Props) {
   const drop = (e: React.DragEvent, destId: string) => {
     e.preventDefault()
     const src = dragId || e.dataTransfer.getData("text/plain")
-    if (!src || src === destId) { cancelDrag(); return }
+    if (!src || src === destId) {
+      cancelDrag()
+      return
+    }
     const rect = rowRefs.current[destId]?.getBoundingClientRect()
-    const place: "before" | "after" =
-      rect && e.clientY < (rect.top + rect.height / 2) ? "before" : "after"
+    const place: "before" | "after" = rect && e.clientY < rect.top + rect.height / 2 ? "before" : "after"
     onReorder(src, destId, place)
     cancelDrag()
   }
 
-  const cancelDrag = () => { setDragId(null); setDragOver(null) }
+  const cancelDrag = () => {
+    setDragId(null)
+    setDragOver(null)
+  }
 
   return (
-    <div className="fixed right-6 top-40 z-40 w-[380px] border border-black bg-white shadow-xl rounded-none">
+    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black bg-white shadow-xl rounded-none">
       <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase tracking-widest">Layers</div>
 
@@ -154,41 +167,25 @@ export default function LayersPanel(props: Props) {
                 isActive ? "bg-black text-white" : "bg-white text-black hover:bg-black/[0.04]",
                 hl
               )}
-              onDragOver={(e)=>over(e, it.id)}
-              onDragEnter={(e)=>over(e, it.id)}
-              onDrop={(e)=>drop(e, it.id)}
+              onDragOver={(e) => over(e, it.id)}
+              onDragEnter={(e) => over(e, it.id)}
+              onDrop={(e) => drop(e, it.id)}
               onDragEnd={cancelDrag}
               onClick={() => onSelect(it.id)}
               title={it.name}
             >
               {/* хэндл для dnd */}
               <div
-                ref={(el)=>handleRefs.current[it.id]=el}
+                ref={(el) => (handleRefs.current[it.id] = el)}
                 data-handle="1"
                 className="w-8 h-8 grid place-items-center cursor-grab active:cursor-grabbing"
                 draggable
-                onDragStart={(e)=>startDrag(e, it.id)}
+                onDragStart={(e) => startDrag(e, it.id)}
                 onDragEnd={cancelDrag}
                 title="Drag to reorder"
               >
                 <GripVertical className="w-4 h-4 opacity-70" />
               </div>
-
-              {/* physics role badge */}
-              <button
-                className={clx(
-                  "w-8 h-8 grid place-items-center border text-[10px]",
-                  isActive ? "border-white/40" : "border-black/20",
-                  it.physicsRole === "rigid" ? "bg-emerald-600 text-white" :
-                  it.physicsRole === "collider" ? "bg-sky-600 text-white" :
-                  it.physicsRole === "rope" ? "bg-amber-600 text-white" :
-                  "bg-white"
-                )}
-                onClick={(e)=>{ e.stopPropagation(); onCyclePhysics?.(it.id) }}
-                title={`Physics: ${it.physicsRole ?? "none"} (click to cycle)`}
-              >
-                {roleBadge(it.physicsRole)}
-              </button>
 
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
@@ -202,15 +199,22 @@ export default function LayersPanel(props: Props) {
                 onChange={(e) => onChangeBlend(it.id, e.target.value)}
                 data-no-drag="1"
               >
-                {blends.map((b) => (<option key={b} value={b}>{b}</option>))}
+                {blends.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
               </select>
 
               {/* Opacity */}
               <div className="relative w-24" data-no-drag="1">
                 <input
-                  type="range" min={5} max={100} step={1}
+                  type="range"
+                  min={5}
+                  max={100}
+                  step={1}
                   value={Math.round(it.opacity * 100)}
-                  onChange={(e)=> onChangeOpacity(it.id, Math.max(5, parseInt(e.target.value,10))/100)}
+                  onChange={(e) => onChangeOpacity(it.id, Math.max(5, parseInt(e.target.value, 10)) / 100)}
                   className="lp"
                 />
                 <div
@@ -222,39 +226,63 @@ export default function LayersPanel(props: Props) {
               </div>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
-                onClick={(e) => { e.stopPropagation(); onToggleVisible(it.id) }}
+                className={clx(
+                  "w-8 h-8 grid place-items-center border bg-transparent",
+                  isActive ? "border-white/40" : "border-black/20"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleVisible(it.id)
+                }}
                 title={it.visible ? "Hide" : "Show"}
                 data-no-drag="1"
               >
-                {it.visible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}
+                {it.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
-                onClick={(e) => { e.stopPropagation(); onToggleLock(it.id) }}
+                className={clx(
+                  "w-8 h-8 grid place-items-center border bg-transparent",
+                  isActive ? "border-white/40" : "border-black/20"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleLock(it.id)
+                }}
                 title={it.locked ? "Unlock" : "Lock"}
                 data-no-drag="1"
               >
-                {it.locked ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+                {it.locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
-                onClick={(e) => { e.stopPropagation(); onDuplicate(it.id) }}
+                className={clx(
+                  "w-8 h-8 grid place-items-center border bg-transparent",
+                  isActive ? "border-white/40" : "border-black/20"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDuplicate(it.id)
+                }}
                 title="Duplicate"
                 data-no-drag="1"
               >
-                <Copy className="w-4 h-4"/>
+                <Copy className="w-4 h-4" />
               </button>
 
               <button
-                className={clx("w-8 h-8 grid place-items-center border bg-transparent", isActive ? "border-white/40" : "border-black/20")}
-                onClick={(e) => { e.stopPropagation(); onDelete(it.id) }}
+                className={clx(
+                  "w-8 h-8 grid place-items-center border bg-transparent",
+                  isActive ? "border-white/40" : "border-black/20"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(it.id)
+                }}
                 title="Delete"
                 data-no-drag="1"
               >
-                <Trash2 className="w-4 h-4"/>
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           )
