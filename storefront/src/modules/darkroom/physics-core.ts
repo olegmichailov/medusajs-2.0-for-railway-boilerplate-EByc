@@ -1,31 +1,33 @@
 "use client"
 
 import Matter, {
-  Engine, World, Bodies, Body, Composite, Composites, Constraint, Runner, Vertices
+  Engine, World, Bodies, Body, Runner, Constraint
 } from "matter-js"
+import decomp from "poly-decomp"
 
-// ВАЖНО: юниты = пиксели макета (BASE_W/BASE_H). Никаких viewport-скейлов.
+// enable concave decomposition for fromVertices
+;(window as any).decomp = decomp
+
 export type PhysRole = "off" | "collider" | "rigid" | "rope"
 
 export type LayerGeom =
   | { kind:"rect"; x:number; y:number; w:number; h:number; angle:number }
   | { kind:"circle"; x:number; y:number; r:number }
   | { kind:"polygon"; x:number; y:number; angle:number; points:{x:number;y:number}[] }
-  | { kind:"rope"; points:{x:number;y:number}[] } // для brush: семплированный путь
+  | { kind:"rope"; points:{x:number;y:number}[] }
 
 export type PhysItem = {
   id: string
   role: PhysRole
   geom: LayerGeom
-  // исходное положение для reset-броска:
   initial?: { x:number; y:number; angle:number }
 }
 
-export type Gravity = { dirRad:number; strength:number } // strength ~ 0..1
+export type Gravity = { dirRad:number; strength:number }
 
 type Mapped = {
   id: string
-  bodies: Matter.Body[]          // rope = множество; остальное 1
+  bodies: Matter.Body[]
   constraints?: Matter.Constraint[]
 }
 
@@ -34,9 +36,8 @@ export type PhysCore = {
   pause(): void
   reset(): void
   setGravity(g: Gravity): void
-  upsert(items: PhysItem[]): void      // полная синхронизация со слоем
+  upsert(items: PhysItem[]): void
   remove(ids: string[]): void
-  // «пуш» координат в Konva (на каждом тике ты заберёшь позы)
   readPositions(): Record<string, { x:number; y:number; angle:number }[]>
   isPlaying(): boolean
   destroy(): void
@@ -45,21 +46,15 @@ export type PhysCore = {
 export function makePhysics(): PhysCore {
   const engine = Engine.create({ enableSleeping: true })
   const world  = engine.world
-  world.gravity.scale = 0.001   // нежная гравитация, нормируем силой
+  world.gravity.scale = 0.001
 
   const runner = Runner.create({ isFixed: true, delta: 1000/60 })
   let playing = false
-
-  const mapped = new Map<string, Mapped>()    // layerId -> bodies
-
-  const byId = (id:string) => mapped.get(id)
+  const mapped = new Map<string, Mapped>()
 
   const setGravity = (g: Gravity) => {
-    const gx = Math.cos(g.dirRad) * g.strength
-    const gy = Math.sin(g.dirRad) * g.strength
-    // Matter использует g.x/g.y как ускорение в «g», а scale как коэффициент:
-    world.gravity.x = gx
-    world.gravity.y = gy
+    world.gravity.x = Math.cos(g.dirRad) * g.strength
+    world.gravity.y = Math.sin(g.dirRad) * g.strength
   }
 
   const clearFor = (id:string) => {
@@ -72,8 +67,6 @@ export function makePhysics(): PhysCore {
 
   const makeFor = (it: PhysItem): Mapped | null => {
     if (it.role === "off") return null
-
-    // collider => isStatic
     const isStatic = it.role === "collider"
 
     if (it.geom.kind === "rect") {
@@ -92,29 +85,25 @@ export function makePhysics(): PhysCore {
     }
 
     if (it.geom.kind === "polygon") {
-      const {x,y,angle,points} = it.geom
-      // points — в локальных коордах? Здесь — абсолютные. Центрируем:
-      const verts = points.map(p => ({ x: p.x, y: p.y }))
-      // Matter умеет из «многоугольника» (в т.ч. невыпуклого) через decomp (poly-decomp)
-      const body = Bodies.fromVertices(x, y, verts as any, { isStatic }, true)
-      if (!body) return null
-      Body.setAngle(body, angle)
-      World.add(world, body)
-      return { id: it.id, bodies: Array.isArray(body) ? body : [body] }
+      const {points, x, y, angle} = it.geom
+      const body = Bodies.fromVertices(x, y, points as any, { isStatic }, true) as any
+      const bodies = Array.isArray(body) ? body : [body]
+      bodies.forEach(b => { Body.setAngle(b, angle) })
+      World.add(world, bodies)
+      return { id: it.id, bodies }
     }
 
     if (it.geom.kind === "rope") {
-      // делаем «верёвку» из маленьких кругов, связанных constraints
       const pts = it.geom.points
       if (pts.length < 2) return null
+      const nodes: Matter.Body[] = []
       const segLen = Math.max(4, Math.min(24, Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y)))
       const count  = Math.max(3, Math.min(60, Math.round(pts.length * 0.75)))
-      const nodes: Matter.Body[] = []
       for (let i=0;i<count;i++){
         const t = i/(count-1)
         const idx = Math.round(t*(pts.length-1))
         const p = pts[idx]
-        nodes.push(Bodies.circle(p.x, p.y, Math.max(2, segLen*0.3), { isStatic: false, frictionAir: 0.02 }))
+        nodes.push(Bodies.circle(p.x, p.y, Math.max(2, segLen*0.3), { isStatic:false, frictionAir:0.02 }))
       }
       World.add(world, nodes)
       const cons: Matter.Constraint[] = []
@@ -132,13 +121,10 @@ export function makePhysics(): PhysCore {
   }
 
   const upsert = (items: PhysItem[]) => {
-    // простая стратегия: по id пересобираем
     const incoming = new Set(items.map(i => i.id))
-    // удалить исчезнувшее
     Array.from(mapped.keys()).forEach(id => {
       if (!incoming.has(id)) clearFor(id)
     })
-    // вставить/обновить
     items.forEach(it => {
       clearFor(it.id)
       const m = makeFor(it)
@@ -148,23 +134,9 @@ export function makePhysics(): PhysCore {
 
   const remove = (ids: string[]) => { ids.forEach(clearFor) }
 
-  const play = () => {
-    if (playing) return
-    playing = true
-    Runner.start(runner, engine)
-  }
-
-  const pause = () => {
-    playing = false
-    Runner.stop(runner)
-  }
-
-  const reset = () => {
-    pause()
-    // удалить все тела
-    Array.from(mapped.keys()).forEach(id => clearFor(id))
-  }
-
+  const play = () => { if (!playing) { playing = true; Runner.start(runner, engine) } }
+  const pause = () => { playing = false; Runner.stop(runner) }
+  const reset = () => { pause(); Array.from(mapped.keys()).forEach(id => clearFor(id)) }
   const readPositions = () => {
     const out: Record<string, {x:number;y:number;angle:number}[]> = {}
     mapped.forEach((m, id) => {
@@ -172,9 +144,7 @@ export function makePhysics(): PhysCore {
     })
     return out
   }
-
   const isPlaying = () => playing
-
   const destroy = () => { reset() }
 
   return { play, pause, reset, setGravity, upsert, remove, readPositions, isPlaying, destroy }
