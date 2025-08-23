@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import React, { useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
@@ -49,6 +49,7 @@ type ToolbarProps = {
 
   onUploadImage: (file: File) => void
   onAddText: () => void
+  onEditSelectedText: () => void
   onAddShape: (k: ShapeKind) => void
 
   onDownloadFront: () => void
@@ -71,6 +72,9 @@ type ToolbarProps = {
   setSelectedLetterSpacing: (n: number) => void
   setSelectedAlign: (a: "left" | "center" | "right") => void
   setSelectedColor: (hex: string) => void
+
+  onAdjustStart: () => void
+  onAdjustEnd: () => void
 
   mobileLayers: MobileLayersProps
   mobileTopOffset?: number
@@ -111,11 +115,12 @@ export default function Toolbar(props: ToolbarProps) {
     tool, setTool,
     brushColor, setBrushColor,
     brushSize, setBrushSize,
-    onUploadImage, onAddText, onAddShape,
+    onUploadImage, onAddText, onEditSelectedText, onAddShape,
     onDownloadFront, onDownloadBack, onClear,
     toggleLayers, layersOpen,
     selectedKind, selectedProps,
     setSelectedFontSize, setSelectedLineHeight, setSelectedLetterSpacing, setSelectedAlign, setSelectedColor,
+    onAdjustStart, onAdjustEnd,
     mobileLayers, mobileTopOffset = 64,
   } = props
 
@@ -149,13 +154,18 @@ export default function Toolbar(props: ToolbarProps) {
       e.currentTarget.value = ""
     }
 
+    const faderEvents = {
+      onMouseDown: onAdjustStart, onTouchStart: onAdjustStart,
+      onMouseUp: onAdjustEnd, onTouchEnd: onAdjustEnd, onTouchCancel: onAdjustEnd,
+    } as any
+
     return (
       <div
         className={clx("fixed", wrap)}
         style={{ left: pos.x, top: pos.y, width: 280 }}
         onMouseDown={(e)=>e.stopPropagation()}
       >
-        {/* css для фейдеров */}
+        {/* css для «квадратных» фейдеров */}
         <style jsx global>{`
           .fader { -webkit-appearance:none; appearance:none; }
           .fader::-webkit-slider-runnable-track { height: 3px; background:#000; border:none; }
@@ -177,7 +187,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers + clear */}
+            {/* инструменты + слои + clear */}
             <div className="flex items-center">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -190,7 +200,13 @@ export default function Toolbar(props: ToolbarProps) {
                 <button
                   key={b.t}
                   className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
-                  onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") props.setShapeKind("square" as ShapeKind); else setTool(b.t as Tool) }}
+                  onClick={(e)=>{ 
+                    e.stopPropagation()
+                    if (b.t==="image") fileRef.current?.click()
+                    else if(b.t==="text") { selectedKind==="text" ? onEditSelectedText() : onAddText() }
+                    else if(b.t==="shape") props.setShapeKind("square" as ShapeKind)
+                    else setTool(b.t as Tool)
+                  }}
                   title={b.t}
                 >{b.icon}</button>
               ))}
@@ -203,7 +219,7 @@ export default function Toolbar(props: ToolbarProps) {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
             </div>
 
-            {/* row 2 — кисть */}
+            {/* кисть */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <div className="w-6 h-6 border border-black" style={{ background: brushColor }} />
@@ -212,7 +228,7 @@ export default function Toolbar(props: ToolbarProps) {
                   type="range" min={1} max={200} step={1} value={brushSize}
                   onChange={(e)=>setBrushSize(parseInt(e.target.value))}
                   className={FADER_CLASS}
-                  {...inputStop}
+                  {...inputStop} {...faderEvents}
                 />
               </div>
             </div>
@@ -239,7 +255,7 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* text props — только фейдеры и выравнивание */}
+            {/* TEXT — фейдеры + выравнивание (без числовых инпутов) */}
             <div className="pt-1 space-y-2">
               <div className="text-[10px]">Text</div>
 
@@ -250,7 +266,7 @@ export default function Toolbar(props: ToolbarProps) {
                   value={selectedProps.fontSize ?? 96}
                   onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
                   className={FADER_CLASS}
-                  {...inputStop}
+                  {...inputStop} {...faderEvents}
                 />
               </div>
 
@@ -258,10 +274,10 @@ export default function Toolbar(props: ToolbarProps) {
                 <div className="text-[10px] w-16">Line height</div>
                 <input
                   type="range" min={80} max={300} step={1}
-                  value={Math.round((selectedProps.lineHeight ?? 1.2) * 100)}
+                  value={Math.round((selectedProps.lineHeight ?? 120))}
                   onChange={(e)=>setSelectedLineHeight(parseInt(e.target.value)/100)}
                   className={FADER_CLASS}
-                  {...inputStop}
+                  {...inputStop} {...faderEvents}
                 />
               </div>
 
@@ -272,7 +288,7 @@ export default function Toolbar(props: ToolbarProps) {
                   value={Math.round(selectedProps.letterSpacing ?? 0)}
                   onChange={(e)=>setSelectedLetterSpacing(parseInt(e.target.value))}
                   className={FADER_CLASS}
-                  {...inputStop}
+                  {...inputStop} {...faderEvents}
                 />
               </div>
 
@@ -302,16 +318,6 @@ export default function Toolbar(props: ToolbarProps) {
 
   // === MOBILE ===
   const [layersOpenM, setLayersOpenM] = useState(false)
-
-  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
-    <button
-      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? setTool("shape") : setTool(t as Tool)}}
-    >
-      {icon}
-    </button>
-  )
-
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
@@ -319,6 +325,25 @@ export default function Toolbar(props: ToolbarProps) {
     if (f) onUploadImage(f)
     e.currentTarget.value = ""
   }
+
+  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
+    <button
+      className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
+      onClick={(e)=>{ 
+        e.stopPropagation()
+        if (onPress) onPress()
+        else if (t==="image") fileRef.current?.click()
+        else if (t==="text") { selectedKind==="text" ? onEditSelectedText() : onAddText() }
+        else if (t==="shape") setTool("shape")
+        else setTool(t as Tool)
+      }}
+    >{icon}</button>
+  )
+
+  const faderEvents = {
+    onMouseDown: onAdjustStart, onTouchStart: onAdjustStart,
+    onMouseUp: onAdjustEnd, onTouchEnd: onAdjustEnd, onTouchCancel: onAdjustEnd,
+  } as any
 
   return (
     <>
@@ -335,8 +360,7 @@ export default function Toolbar(props: ToolbarProps) {
                 <div
                   key={l.id}
                   className={clx(
-                    "flex items-center gap-2 border border-black px-2 py-1",
-                    "bg-white",
+                    "flex items-center gap-2 border border-black px-2 py-1 bg-white",
                     mobileLayers.selectedId===l.id ? "ring-2 ring-black" : ""
                   )}
                 >
@@ -355,8 +379,16 @@ export default function Toolbar(props: ToolbarProps) {
         </div>
       )}
 
-      {/* Нижняя панель — 2 строки (без «паттернов» цвета) */}
+      {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
+        <style jsx global>{`
+          .fader { -webkit-appearance:none; appearance:none; }
+          .fader::-webkit-slider-runnable-track { height: 3px; background:#000; border:none; }
+          .fader::-moz-range-track { height: 3px; background:#000; border:none; }
+          .fader::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; background:#000; border:1px solid #000; margin-top:-5.5px; }
+          .fader::-moz-range-thumb { width:14px; height:14px; background:#000; border:1px solid #000; }
+        `}</style>
+
         {/* row 1 — инструменты + layers */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
@@ -371,15 +403,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — настройки (фейдеры) */}
-        <style jsx global>{`
-          .fader { -webkit-appearance:none; appearance:none; }
-          .fader::-webkit-slider-runnable-track { height: 3px; background:#000; border:none; }
-          .fader::-moz-range-track { height: 3px; background:#000; border:none; }
-          .fader::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; background:#000; border:1px solid #000; margin-top:-5.5px; }
-          .fader::-moz-range-thumb { width:14px; height:14px; background:#000; border:1px solid #000; }
-        `}</style>
-
+        {/* row 2 — фейдеры */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <div className="text-[10px]">Brush</div>
@@ -389,39 +413,33 @@ export default function Toolbar(props: ToolbarProps) {
                 type="range" min={1} max={200} step={1} value={brushSize}
                 onChange={(e)=>setBrushSize(parseInt(e.target.value))}
                 className={FADER_CLASS}
-                {...inputStop}
+                {...inputStop} {...faderEvents}
               />
             </div>
           </div>
           <div className="space-y-1">
             <div className="text-[10px]">Text</div>
-            <div className="flex items-center gap-2">
-              <input
-                type="range" min={8} max={800} step={1}
-                value={selectedProps.fontSize ?? 96}
-                onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
-                className={FADER_CLASS}
-                {...inputStop}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="range" min={80} max={300} step={1}
-                value={Math.round((selectedProps.lineHeight ?? 1.2) * 100)}
-                onChange={(e)=>setSelectedLineHeight(parseInt(e.target.value)/100)}
-                className={FADER_CLASS}
-                {...inputStop}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="range" min={-5} max={50} step={1}
-                value={Math.round(selectedProps.letterSpacing ?? 0)}
-                onChange={(e)=>setSelectedLetterSpacing(parseInt(e.target.value))}
-                className={FADER_CLASS}
-                {...inputStop}
-              />
-            </div>
+            <input
+              type="range" min={8} max={800} step={1}
+              value={selectedProps.fontSize ?? 96}
+              onChange={(e)=>setSelectedFontSize(parseInt(e.target.value))}
+              className={FADER_CLASS}
+              {...inputStop} {...faderEvents}
+            />
+            <input
+              type="range" min={80} max={300} step={1}
+              value={Math.round((selectedProps.lineHeight ?? 120))}
+              onChange={(e)=>setSelectedLineHeight(parseInt(e.target.value)/100)}
+              className={FADER_CLASS}
+              {...inputStop} {...faderEvents}
+            />
+            <input
+              type="range" min={-5} max={50} step={1}
+              value={Math.round(selectedProps.letterSpacing ?? 0)}
+              onChange={(e)=>setSelectedLetterSpacing(parseInt(e.target.value))}
+              className={FADER_CLASS}
+              {...inputStop} {...faderEvents}
+            />
           </div>
         </div>
       </div>
