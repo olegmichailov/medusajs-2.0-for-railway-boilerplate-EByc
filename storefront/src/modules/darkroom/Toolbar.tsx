@@ -19,6 +19,7 @@ type MobileLayersItem = {
   blend: string
   opacity: number
 }
+
 type MobileLayersProps = {
   items: MobileLayersItem[]
   selectedId?: string
@@ -383,7 +384,7 @@ export default function Toolbar(props: ToolbarProps) {
             </div>
             <div className="space-y-2 max-h-64 overflow-auto">
               {mobileLayers.items.map((l)=>(
-                <div key={l.id} className={clx("flex items-center gap-2 border border-black px-2 py-1", l.id===mobileLayers.selectedId ? "bg-black text-white" : "bg-white")}>
+                <div key={l.id} className={clx("flex items-center gap-2 border border-black px-2 py-1", l.id===mobileLayers.selectedId ? "bg-black text-white" : "bg-white") }>
                   <button className="border border-black w-6 h-6 grid place-items-center bg-white text-black" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
                   <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}>&uarr;</button>
