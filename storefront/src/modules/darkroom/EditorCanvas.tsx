@@ -17,7 +17,7 @@ const BACK_SRC = "/mockups/MOCAP_BACK.png"
 
 // клампы текста
 const TEXT_MIN_FS = 8
-theconst TEXT_MAX_FS = 800
+const TEXT_MAX_FS = 800
 const TEXT_MAX_W = BASE_W
 
 // uid и утилиты
