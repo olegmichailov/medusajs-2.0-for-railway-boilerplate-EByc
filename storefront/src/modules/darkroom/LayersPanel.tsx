@@ -4,6 +4,8 @@ import React, { useMemo, useRef, useState } from "react"
 import { clx } from "@medusajs/ui"
 import { Eye, EyeOff, Lock, Unlock, Copy, Trash2, GripVertical } from "lucide-react"
 
+export type PhysicsRole = "none" | "rigid" | "collider" | "rope"
+
 export type LayerItem = {
   id: string
   name: string
@@ -13,6 +15,7 @@ export type LayerItem = {
   blend: string
   opacity: number
   thumb?: string | null
+  physicsRole?: PhysicsRole
 }
 
 type Props = {
@@ -27,6 +30,7 @@ type Props = {
   onChangeBlend: (id: string, blend: string) => void
   onChangeOpacity: (id: string, opacity: number) => void
   getPreview?: (id: string) => string | null
+  onCyclePhysics?: (id: string) => void // new, optional
 }
 
 const blends = [
@@ -48,8 +52,17 @@ input[type="range"].lp::-webkit-slider-thumb{
 input[type="range"].lp::-moz-range-thumb{ width:14px; height:14px; background:currentColor; border:0; border-radius:0; }
 `
 
+const roleBadge = (r?: PhysicsRole) => {
+  switch (r) {
+    case "rigid": return "RB"
+    case "collider": return "CL"
+    case "rope": return "RP"
+    default: return "–"
+  }
+}
+
 export default function LayersPanel(props: Props) {
-  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate, onReorder, onChangeBlend, onChangeOpacity, getPreview } = props
+  const { items, selectId, onSelect, onToggleVisible, onToggleLock, onDelete, onDuplicate, onReorder, onChangeBlend, onChangeOpacity, getPreview, onCyclePhysics } = props
 
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<{ id: string; place: "before" | "after" } | null>(null)
@@ -118,7 +131,7 @@ export default function LayersPanel(props: Props) {
   const cancelDrag = () => { setDragId(null); setDragOver(null) }
 
   return (
-    <div className="fixed right-6 top-40 z-40 w-[360px] border border-black bg-white shadow-xl rounded-none">
+    <div className="fixed right-6 top-40 z-40 w-[380px] border border-black bg-white shadow-xl rounded-none">
       <style dangerouslySetInnerHTML={{ __html: sliderCss }} />
       <div className="px-3 py-2 border-b border-black/10 text-[11px] uppercase tracking-widest">Layers</div>
 
@@ -160,6 +173,22 @@ export default function LayersPanel(props: Props) {
               >
                 <GripVertical className="w-4 h-4 opacity-70" />
               </div>
+
+              {/* physics role badge */}
+              <button
+                className={clx(
+                  "w-8 h-8 grid place-items-center border text-[10px]",
+                  isActive ? "border-white/40" : "border-black/20",
+                  it.physicsRole === "rigid" ? "bg-emerald-600 text-white" :
+                  it.physicsRole === "collider" ? "bg-sky-600 text-white" :
+                  it.physicsRole === "rope" ? "bg-amber-600 text-white" :
+                  "bg-white"
+                )}
+                onClick={(e)=>{ e.stopPropagation(); onCyclePhysics?.(it.id) }}
+                title={`Physics: ${it.physicsRole ?? "none"} (click to cycle)`}
+              >
+                {roleBadge(it.physicsRole)}
+              </button>
 
               <div className="text-xs flex-1 truncate">{it.name}</div>
 
