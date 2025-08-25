@@ -125,9 +125,9 @@ export default function EditorCanvas() {
   // helpers
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false, physRole: "off" })
 
-  // ✅ корректно ставим blend (не перезаписывая метод Konva!)
+  // === корректная установка blend, не затираем методы Konva ===
   const setBlend = (n: AnyNode, blend: Blend) => {
-    const node: any = n as any
+    const node = n as any
     if (typeof node.setAttr === "function") {
       node.setAttr("globalCompositeOperation", blend)
       return
@@ -136,7 +136,6 @@ export default function EditorCanvas() {
       node.globalCompositeOperation(blend)
       return
     }
-    // запасной вариант — напрямую в attrs (на случай экзотики)
     node.attrs = node.attrs || {}
     node.attrs.globalCompositeOperation = blend
   }
@@ -164,16 +163,15 @@ export default function EditorCanvas() {
     if (ph.running) resetPhysics()
   }, [side, layers]) // eslint-disable-line
 
-  // — одноразовая «починка» на случай, если раньше кто-то присвоил строку в globalCompositeOperation
+  // одноразовая «починка», если кто-то присваивал строку в globalCompositeOperation
   useEffect(() => {
     layers.forEach((l) => {
-      const node: any = l.node
-      if (!isEraseGroup(node) && !isStrokeGroup(node) && typeof node.globalCompositeOperation !== "function") {
-        try { delete node.globalCompositeOperation } catch {}
-        setBlend(node, l.meta.blend)
+      const n: any = l.node
+      if (!isEraseGroup(n) && !isStrokeGroup(n) && typeof n.globalCompositeOperation !== "function") {
+        try { delete n.globalCompositeOperation } catch {}
+        setBlend(n, l.meta.blend)
       }
     })
-    // один раз при монтировании
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -190,23 +188,32 @@ export default function EditorCanvas() {
     textSnapRef.current = { fs0: t.fontSize(), wrap0, cx0, cy0 }
   }
 
+  const clearBoundBox = () => {
+    const tr = trRef.current
+    if (!tr) return
+    // сбрасываем boundBoxFunc, чтобы кастомная логика для текста не влияла на другие типы
+    ;(tr as any).boundBoxFunc(null)
+  }
+
   const attachTransformer = () => {
     const lay = find(selectedId)
     const n = lay?.node
+    const tr = trRef.current!
     const disabled = !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
 
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
 
-    const tr = trRef.current!
     if (disabled) {
       tr.nodes([])
+      clearBoundBox()
       uiLayerRef.current?.batchDraw()
       return
     }
 
     tr.nodes([n])
     tr.rotateEnabled(true)
+    clearBoundBox() // по умолчанию — без ограничений
 
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
@@ -229,12 +236,11 @@ export default function EditorCanvas() {
       t.on("transformend.textsnap",   onTextEnd)
 
       ;(tr as any).boundBoxFunc((oldBox:any, newBox:any) => {
-        const snap = textSnapRef.current
-        if (!snap) captureTextSnap(t)
+        if (!textSnapRef.current) captureTextSnap(t)
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // боковые ручки — меняем ширину
+        // боковые ручки — меняем ширину (wrap)
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -277,9 +283,10 @@ export default function EditorCanvas() {
       }
       t.on("transformend.textnorm", onTextNormalizeEnd)
 
-      detachTextFix.current = () => { t.off(".textsnap"); t.off(".textnorm") }
+      detachTextFix.current = () => { t.off(".textsnap"); t.off(".textnorm"); clearBoundBox() }
     } else {
       tr.keepRatio(true)
+      clearBoundBox()
     }
 
     tr.getLayer()?.batchDraw()
@@ -295,7 +302,7 @@ export default function EditorCanvas() {
       if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
       ;(l.node as any).draggable?.(enable && !l.meta.locked)
     })
-    if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
+    if (!enable) { trRef.current?.nodes([]); clearBoundBox(); uiLayerRef.current?.batchDraw() }
   }, [tool, layers, side])
 
   // ===== хоткеи =====
@@ -359,6 +366,7 @@ export default function EditorCanvas() {
       strokeWidth: brushSize,
       lineCap: "round",
       lineJoin: "round",
+      // через конфиг — это корректный путь (внутри вызовется setAttr)
       globalCompositeOperation: tool === "brush" ? "source-over" : ("destination-out" as any),
     })
     g.add(line)
@@ -501,7 +509,7 @@ export default function EditorCanvas() {
       fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
       fontSize: `${t.fontSize() * scale}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
+      letterSpacing: `${((t as any).letterSpacing?.() ?? 0) * scale}px`,
       whiteSpace: "pre-wrap",
       overflow: "hidden",
       outline: "none",
@@ -623,6 +631,7 @@ export default function EditorCanvas() {
       if (tgt === st || isBgTarget(tgt)) {
         select(null)
         trRef.current?.nodes([])
+        clearBoundBox()
         uiLayerRef.current?.batchDraw()
         return
       }
@@ -674,6 +683,7 @@ export default function EditorCanvas() {
         lastPointer: undefined
       }
       trRef.current?.nodes([])
+      clearBoundBox()
       uiLayerRef.current?.batchDraw()
     }
   }
@@ -1105,7 +1115,7 @@ export default function EditorCanvas() {
     const a = (ph.angleDeg*Math.PI)/180
     const gx = (Math.cos(a) * ph.strength)
     const gy = (Math.sin(a) * ph.strength)
-    ;(w as any).gravity = { x: gx, y: gy } // совместимо с compat-сборкой
+    ;(w as any).gravity = { x: gx, y: gy }
   }
 
   useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
@@ -1177,9 +1187,7 @@ export default function EditorCanvas() {
       y += style.fontSize * style.lineHeight
     })
 
-    // удалить исходный текстовый слой
     deleteLayer(l.id)
-    // добавить буквы
     setLayers(prev => [...prev, ...newLayers])
     artLayerRef.current?.batchDraw()
     bump()
