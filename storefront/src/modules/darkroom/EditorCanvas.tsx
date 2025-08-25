@@ -27,6 +27,12 @@ const EPS = 0.25
 const DEAD = 0.006
 
 // ==== ТИПЫ ====
+// чтобы не споткнуться об типы в TS (в среде без @types/planck-js) — всё any
+type PLNS = any
+type PLWorld = any
+type PLBody = any
+type PLJoint = any
+
 type BaseMeta = {
   blend: Blend
   opacity: number
@@ -50,19 +56,6 @@ type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: L
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
 const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
 const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
-
-// ==== PLANCK/Box2D типы (ленивый импорт) ====
-type PLNS = typeof import("planck-js")
-type PLWorld = import("planck-js").World
-type PLBody = import("planck-js").Body
-type PLJoint = import("planck-js").Joint
-
-type PhysHandle = {
-  role: PhysicsRole
-  bodies: PLBody[]
-  joints?: PLJoint[]
-  anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
-}
 
 export default function EditorCanvas() {
   const {
@@ -260,14 +253,14 @@ export default function EditorCanvas() {
 
   // во время brush/erase — отключаем драг
   useEffect(() => {
-    const enable = tool === "move"
+    const enable = tool === "move" && !ph.running
     layers.forEach((l) => {
       if (l.side !== side) return
       if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
       ;(l.node as any).draggable?.(enable && !l.meta.locked)
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
-  }, [tool, layers, side])
+  }, [tool, layers, side, ph.running])
 
   // ===== хоткеи =====
   useEffect(() => {
@@ -286,7 +279,7 @@ export default function EditorCanvas() {
       }
 
       if (!n || !lay) return
-      if (tool !== "move") return
+      if (tool !== "move" || ph.running) return
 
       if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(lay.id); return }
       if (e.key==="Backspace"||e.key==="Delete") { e.preventDefault(); deleteLayer(lay.id); return }
@@ -304,7 +297,7 @@ export default function EditorCanvas() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [selectedId, tool, set])
+  }, [selectedId, tool, set, ph.running])
 
   // ===== Brush / Erase =====
   const startStroke = (x: number, y: number) => {
@@ -864,16 +857,29 @@ export default function EditorCanvas() {
   const rafRef = useRef<number | null>(null)
   const [ph, setPh] = useState({
     running: false,
-    angleDeg: 90,      // 90° = вниз
-    strength: 1200,    // px/s^2
+    angleDeg: 90,      // 90° = вниз (на экране)
+    strength: 1200,    // px/s^2 (мы конвертим в м/с^2)
     autoRoles: true,
   })
 
+  // масштаб мира
   const PPM = 30 // pixels per meter
   const toM = (px:number) => px / PPM
   const toPx = (m:number) => m * PPM
   const deg2rad = (d:number) => d * Math.PI / 180
   const rad2deg = (r:number) => r * 180 / Math.PI
+
+  // ВНИМАНИЕ: экран (0,0) сверху-слева; в planck Y идёт вверх.
+  // Значит надо отзеркалить Y при переходе туда-обратно.
+  const toWorld = (pl: PLNS, p: { x:number; y:number }) => pl.Vec2(toM(p.x), toM(BASE_H - p.y))
+  const fromWorld = (v: { x:number; y:number }) => ({ x: toPx(v.x), y: BASE_H - toPx(v.y) })
+
+  type PhysHandle = {
+    role: PhysicsRole
+    bodies: PLBody[]
+    joints?: PLJoint[]
+    anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
+  }
 
   const getAnchor = (n: AnyNode): PhysHandle["anchor"] => {
     const rect = (n as any).getClientRect?.({ skipStroke: false }) || { x:(n as any).x?.()||0, y:(n as any).y?.()||0, width:(n as any).width?.()||0, height:(n as any).height?.()||0 }
@@ -919,7 +925,7 @@ export default function EditorCanvas() {
     const mkBody = (type:"dynamic"|"static", cx:number, cy:number, angleDeg:number) =>
       world.createBody({
         type,
-        position: pl.Vec2(toM(cx), toM(cy)),
+        position: toWorld(pl, { x: cx, y: cy }), // ключ: в мир — через toWorld
         angle: deg2rad(angleDeg)
       })
 
@@ -956,7 +962,7 @@ export default function EditorCanvas() {
         const radius = Math.max(3, (line?.strokeWidth()||12)/2)
         let prev: PLBody | null = null
         samples.forEach((p) => {
-          const b = world.createBody({ type:"dynamic", position: pl.Vec2(toM(p.x), toM(p.y)) })
+          const b = world.createBody({ type:"dynamic", position: toWorld(pl, { x: p.x, y: p.y }) })
           b.createFixture(pl.Circle(toM(radius)), { density: 0.6, friction: 0.2, restitution: 0.05 })
           bodies.push(b)
           if (prev) {
@@ -977,7 +983,8 @@ export default function EditorCanvas() {
       if (h.role === "collider" || h.role === "rigid") {
         const b = h.bodies[0]; if (!b) return
         const p = b.getPosition(), ang = b.getAngle()
-        const cx = toPx(p.x), cy = toPx(p.y)
+        const scr = fromWorld({ x: p.x, y: p.y }) // из мира — обратно в экранные
+        const cx = scr.x, cy = scr.y
         if (l.node instanceof Konva.Circle) {
           l.node.x(cx); l.node.y(cy); l.node.rotation(rad2deg(ang))
         } else {
@@ -992,7 +999,11 @@ export default function EditorCanvas() {
         const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
         if (!line) return
         const pts:number[] = []
-        h.bodies.forEach((b) => { const p = b.getPosition(); pts.push(toPx(p.x), toPx(p.y)) })
+        h.bodies.forEach((b) => {
+          const p = b.getPosition()
+          const sp = fromWorld({ x: p.x, y: p.y })
+          pts.push(sp.x, sp.y)
+        })
         if (pts.length>=4) { line.points(pts) }
       }
     })
@@ -1024,15 +1035,19 @@ export default function EditorCanvas() {
     const pl: PLNS = (mod as any).default ?? (mod as any)
     plRef.current = pl
 
+    // угол ph.angleDeg считаем по часовой от +X; вниз по экрану — положительный Y.
+    // В планке Y вверх, значит инвертируем Y-компоненту гравитации.
     const a = (ph.angleDeg*Math.PI)/180
-    const gx_m = (Math.cos(a) * ph.strength) / PPM
-    const gy_m = (Math.sin(a) * ph.strength) / PPM
+    const gx_m =  (Math.cos(a) * ph.strength) / PPM
+    const gy_m = -(Math.sin(a) * ph.strength) / PPM
+
     const world = new pl.World(pl.Vec2(gx_m, gy_m))
     worldRef.current = world
 
-    // «пол»
+    // «пол» — узкая статическая полоса внизу
     {
-      const b = world.createBody({ type:"static", position: pl.Vec2(toM(BASE_W/2), toM(BASE_H - 8)) })
+      const center = toWorld(pl, { x: BASE_W/2, y: BASE_H - 8 })
+      const b = world.createBody({ type:"static", position: center })
       b.createFixture(pl.Box(toM(BASE_W/2), toM(8)))
     }
 
@@ -1073,8 +1088,8 @@ export default function EditorCanvas() {
     const w = worldRef.current; const pl = plRef.current
     if (!w || !pl) return
     const a = (ph.angleDeg*Math.PI)/180
-    const gx_m = (Math.cos(a) * ph.strength) / PPM
-    const gy_m = (Math.sin(a) * ph.strength) / PPM
+    const gx_m =  (Math.cos(a) * ph.strength) / PPM
+    const gy_m = -(Math.sin(a) * ph.strength) / PPM
     w.setGravity(pl.Vec2(gx_m, gy_m))
   }
 
