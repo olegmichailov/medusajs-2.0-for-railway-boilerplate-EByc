@@ -895,6 +895,8 @@ export default function EditorCanvas() {
     const b = l.meta.baseline
     if (!b) return
     const n:any = l.node as any
+    // вернуть offset к исходному (по умолчанию 0,0 для прямоугольных/изображений)
+    if (!(l.node instanceof Konva.Circle)) { n.offsetX?.(0); n.offsetY?.(0) }
     n.x?.(b.x); n.y?.(b.y); n.rotation?.(b.rot); n.scaleX?.(b.sx); n.scaleY?.(b.sy)
     if (l.type === "strokes" && b.points) {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
@@ -916,6 +918,18 @@ export default function EditorCanvas() {
         .setTranslation(cx, cy)
         .setRotation(deg2rad(angleDeg))
       return world.createRigidBody(desc)
+    }
+
+    // 🔧 важный фикс: поворот вокруг центра для не-круглых
+    if (!(l.node instanceof Konva.Circle)) {
+      const n:any = l.node
+      const needCenter = (n.offsetX?.() ?? 0) !== anchor.w/2 || (n.offsetY?.() ?? 0) !== anchor.h/2
+      if (needCenter) {
+        n.offsetX?.(anchor.w/2)
+        n.offsetY?.(anchor.h/2)
+        n.x?.(anchor.cx)
+        n.y?.(anchor.cy)
+      }
     }
 
     if (role === "collider" || role === "rigid") {
@@ -974,14 +988,11 @@ export default function EditorCanvas() {
         const b = h.bodies[0]; if (!b) return
         const t = b.translation()
         const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
-        const cx = t.x, cy = t.y
         if (l.node instanceof Konva.Circle) {
-          l.node.x(cx); l.node.y(cy); l.node.rotation(rad2deg(ang))
+          l.node.x(t.x); l.node.y(t.y); l.node.rotation(rad2deg(ang))
         } else {
-          const x = cx - h.anchor.w/2
-          const y = cy - h.anchor.h/2
-          ;(l.node as any).x?.(x)
-          ;(l.node as any).y?.(y)
+          ;(l.node as any).x?.(t.x)
+          ;(l.node as any).y?.(t.y)
           ;(l.node as any).rotation?.(rad2deg(ang))
         }
       }
@@ -1018,7 +1029,7 @@ export default function EditorCanvas() {
   const startPhysics = async () => {
     if (ph.running) return
     const mod = await import("@dimforge/rapier2d-compat")
-    await mod.init()
+    await mod.init() // 💥 обязательно
     rapierRef.current = mod
 
     const a = (ph.angleDeg*Math.PI)/180
@@ -1067,13 +1078,12 @@ export default function EditorCanvas() {
   }
 
   const applyNewGravity = () => {
-    const w = worldRef.current; const R = rapierRef.current
-    if (!w || !R) return
+    const w = worldRef.current
+    if (!w) return
     const a = (ph.angleDeg*Math.PI)/180
-    const gx = (Math.cos(a) * ph.strength)
-    const gy = (Math.sin(a) * ph.strength)
-    // В Rapier нет официального сеттера, поэтому подменяем через any.
-    ;(w as any).gravity = { x: gx, y: gy }
+    const gx = Math.cos(a) * ph.strength
+    const gy = Math.sin(a) * ph.strength
+    ;(w as any).gravity = { x: gx, y: gy } // у Rapier это работает как сеттер
   }
 
   useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
