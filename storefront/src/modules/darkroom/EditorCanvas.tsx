@@ -124,12 +124,30 @@ export default function EditorCanvas() {
 
   // helpers
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false, physRole: "off" })
+
+  // ✅ корректно ставим blend (не перезаписывая метод Konva!)
+  const setBlend = (n: AnyNode, blend: Blend) => {
+    const node: any = n as any
+    if (typeof node.setAttr === "function") {
+      node.setAttr("globalCompositeOperation", blend)
+      return
+    }
+    if (typeof node.globalCompositeOperation === "function") {
+      node.globalCompositeOperation(blend)
+      return
+    }
+    // запасной вариант — напрямую в attrs (на случай экзотики)
+    node.attrs = node.attrs || {}
+    node.attrs.globalCompositeOperation = blend
+  }
+
+  const applyMeta = (n: AnyNode, meta: BaseMeta) => {
+    ;(n as any).opacity?.(meta.opacity)
+    if (!isEraseGroup(n) && !isStrokeGroup(n)) setBlend(n, meta.blend)
+  }
+
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
-  const applyMeta = (n: AnyNode, meta: BaseMeta) => {
-    n.opacity(meta.opacity)
-    if (!isEraseGroup(n) && !isStrokeGroup(n)) (n as any).globalCompositeOperation = meta.blend
-  }
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
@@ -145,6 +163,19 @@ export default function EditorCanvas() {
     attachTransformer()
     if (ph.running) resetPhysics()
   }, [side, layers]) // eslint-disable-line
+
+  // — одноразовая «починка» на случай, если раньше кто-то присвоил строку в globalCompositeOperation
+  useEffect(() => {
+    layers.forEach((l) => {
+      const node: any = l.node
+      if (!isEraseGroup(node) && !isStrokeGroup(node) && typeof node.globalCompositeOperation !== "function") {
+        try { delete node.globalCompositeOperation } catch {}
+        setBlend(node, l.meta.blend)
+      }
+    })
+    // один раз при монтировании
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ===== Transformer / TEXT =====
   const detachTextFix = useRef<(() => void) | null>(null)
@@ -203,6 +234,7 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
+        // боковые ручки — меняем ширину
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -217,6 +249,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
+        // углы/вертикаль — меняем fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -895,8 +928,6 @@ export default function EditorCanvas() {
     const b = l.meta.baseline
     if (!b) return
     const n:any = l.node as any
-    // вернуть offset к исходному (по умолчанию 0,0 для прямоугольных/изображений)
-    if (!(l.node instanceof Konva.Circle)) { n.offsetX?.(0); n.offsetY?.(0) }
     n.x?.(b.x); n.y?.(b.y); n.rotation?.(b.rot); n.scaleX?.(b.sx); n.scaleY?.(b.sy)
     if (l.type === "strokes" && b.points) {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
@@ -918,18 +949,6 @@ export default function EditorCanvas() {
         .setTranslation(cx, cy)
         .setRotation(deg2rad(angleDeg))
       return world.createRigidBody(desc)
-    }
-
-    // 🔧 важный фикс: поворот вокруг центра для не-круглых
-    if (!(l.node instanceof Konva.Circle)) {
-      const n:any = l.node
-      const needCenter = (n.offsetX?.() ?? 0) !== anchor.w/2 || (n.offsetY?.() ?? 0) !== anchor.h/2
-      if (needCenter) {
-        n.offsetX?.(anchor.w/2)
-        n.offsetY?.(anchor.h/2)
-        n.x?.(anchor.cx)
-        n.y?.(anchor.cy)
-      }
     }
 
     if (role === "collider" || role === "rigid") {
@@ -988,11 +1007,14 @@ export default function EditorCanvas() {
         const b = h.bodies[0]; if (!b) return
         const t = b.translation()
         const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
+        const cx = t.x, cy = t.y
         if (l.node instanceof Konva.Circle) {
-          l.node.x(t.x); l.node.y(t.y); l.node.rotation(rad2deg(ang))
+          l.node.x(cx); l.node.y(cy); l.node.rotation(rad2deg(ang))
         } else {
-          ;(l.node as any).x?.(t.x)
-          ;(l.node as any).y?.(t.y)
+          const x = cx - h.anchor.w/2
+          const y = cy - h.anchor.h/2
+          ;(l.node as any).x?.(x)
+          ;(l.node as any).y?.(y)
           ;(l.node as any).rotation?.(rad2deg(ang))
         }
       }
@@ -1029,7 +1051,7 @@ export default function EditorCanvas() {
   const startPhysics = async () => {
     if (ph.running) return
     const mod = await import("@dimforge/rapier2d-compat")
-    await mod.init() // 💥 обязательно
+    await mod.init()
     rapierRef.current = mod
 
     const a = (ph.angleDeg*Math.PI)/180
@@ -1081,14 +1103,14 @@ export default function EditorCanvas() {
     const w = worldRef.current
     if (!w) return
     const a = (ph.angleDeg*Math.PI)/180
-    const gx = Math.cos(a) * ph.strength
-    const gy = Math.sin(a) * ph.strength
-    ;(w as any).gravity = { x: gx, y: gy } // у Rapier это работает как сеттер
+    const gx = (Math.cos(a) * ph.strength)
+    const gy = (Math.sin(a) * ph.strength)
+    ;(w as any).gravity = { x: gx, y: gy } // совместимо с compat-сборкой
   }
 
   useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
 
-  // ===== Explode Text (кнопка в панели физики)
+  // ===== Explode Text
   const explodeSelectedText = () => {
     const l = sel
     if (!l || l.type !== "text" || !(l.node instanceof Konva.Text)) return
@@ -1241,9 +1263,10 @@ export default function EditorCanvas() {
         setSelectedFontSize={setSelectedFontSize}
         setSelectedFontFamily={setSelectedFontFamily}
         setSelectedColor={(hex)=>{ 
-          if (!sel) return
-          if (selectedKind === "text") (sel.node as Konva.Text).fill(hex)
-          else if ((sel.node as any).fill) (sel.node as any).fill(hex)
+          const s = sel
+          if (!s) return
+          if (selectedKind === "text") (s.node as Konva.Text).fill(hex)
+          else if ((s.node as any).fill) (s.node as any).fill(hex)
           artLayerRef.current?.batchDraw(); 
           bump()
         }}
