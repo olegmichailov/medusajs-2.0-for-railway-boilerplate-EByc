@@ -1,11 +1,13 @@
-// package.json
 {
   "name": "medusa-next",
   "version": "1.0.3",
   "private": true,
-  "author": "Kasper Fabricius Kristensen <kasper@medusajs.com> & Victor Gerbrands <victor@medusajs.com> (https://www.medusajs.com)",
   "description": "Next.js Starter to be used with Medusa server",
   "keywords": ["medusa-storefront"],
+  "author": "Kasper Fabricius Kristensen <kasper@medusajs.com> & Victor Gerbrands <victor@medusajs.com> (https://www.medusajs.com)",
+  "engines": {
+    "node": ">=18.17 <21"
+  },
   "scripts": {
     "wait": "await-backend",
     "launcher": "launch-storefront",
@@ -17,10 +19,6 @@
     "lint": "next lint",
     "analyze": "ANALYZE=true next build",
     "test-e2e": "playwright test e2e"
-  },
-  "resolutions": {
-    "webpack": "^5",
-    "@types/react": "17.0.40"
   },
   "dependencies": {
     "@dimforge/rapier2d-compat": "^0.12.0",
