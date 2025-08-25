@@ -54,16 +54,15 @@ const nextConfig = {
     port: process.env.PORT || 3000,
   },
 
-  webpack: (config, { isServer }) => {
-    // ✅ Включаем поддержку async WebAssembly для Rapier (compat)
+  webpack: (config) => {
+    // ✅ Async WebAssembly для @dimforge/rapier2d-compat
     config.experiments = {
       ...(config.experiments || {}),
       asyncWebAssembly: true,
       topLevelAwait: true,
     }
 
-    // ✅ Явно говорим вебпаку, что .wasm — это ассет (чтобы корректно ложился в /_next/static/)
-    // (если правило уже есть — не дублируем)
+    // ✅ Явно обрабатываем .wasm как asset/resource
     const hasWasmRule = config.module.rules.some(
       (r) => typeof r === "object" && r.test && r.test.toString().includes("\\.wasm$")
     )
@@ -74,16 +73,15 @@ const nextConfig = {
       })
     }
 
-    // ✅ Урезаем node-полифилы и конфликтующие модули на сервере/клиенте
+    // ✅ Урезаем node-полифилы
     config.resolve.fallback = {
       ...config.resolve.fallback,
-      // Konva/matter не должны тянуть node canvas/fs
       canvas: false,
       fs: false,
       path: false,
     }
 
-    // (не обязательно, но помогает с нестабильными ESM/CJS пакетами)
+    // Стабильность для смешанных ESM/CJS пакетов
     config.module.parser = {
       ...config.module.parser,
       javascript: {
