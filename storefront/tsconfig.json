@@ -2,25 +2,19 @@
   "compilerOptions": {
     "target": "es5",
     "lib": ["dom", "dom.iterable", "esnext"],
-
     "allowJs": true,
     "skipLibCheck": true,
-
     "strict": true,
     "forceConsistentCasingInFileNames": true,
-
     "noEmit": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-
     "module": "esnext",
     "moduleResolution": "node",
-
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-
     "baseUrl": "./src",
     "paths": {
       "@/*": ["*"],
@@ -28,12 +22,8 @@
       "@modules/*": ["modules/*"],
       "@pages/*": ["pages/*"]
     },
-
     "types": ["node"],
-
-    "plugins": [
-      { "name": "next" }
-    ]
+    "plugins": [{ "name": "next" }]
   },
   "include": [
     "next-env.d.ts",
@@ -42,11 +32,5 @@
     "**/*.d.ts",
     ".next/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    ".next",
-    ".nyc_output",
-    "coverage",
-    "jest-coverage"
-  ]
+  "exclude": ["node_modules", ".next", ".nyc_output", "coverage", "jest-coverage"]
 }
