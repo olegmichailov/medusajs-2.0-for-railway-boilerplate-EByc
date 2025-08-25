@@ -865,18 +865,16 @@ export default function EditorCanvas() {
   const [ph, setPh] = useState({
     running: false,
     angleDeg: 90,      // 90° = вниз
-    strength: 1200,    // px/s^2 (мы конвертим в м/с^2)
+    strength: 1200,    // px/s^2
     autoRoles: true,
   })
 
-  // масштаб мира (рекомендуется Box2D)
   const PPM = 30 // pixels per meter
   const toM = (px:number) => px / PPM
   const toPx = (m:number) => m * PPM
   const deg2rad = (d:number) => d * Math.PI / 180
   const rad2deg = (r:number) => r * 180 / Math.PI
 
-  // util: bbox → центр
   const getAnchor = (n: AnyNode): PhysHandle["anchor"] => {
     const rect = (n as any).getClientRect?.({ skipStroke: false }) || { x:(n as any).x?.()||0, y:(n as any).y?.()||0, width:(n as any).width?.()||0, height:(n as any).height?.()||0 }
     const cx = rect.x + rect.width/2
@@ -885,7 +883,6 @@ export default function EditorCanvas() {
     return { cx, cy, w: rect.width, h: rect.height, kind }
   }
 
-  // snapshot baseline (для Reset)
   const takeBaseline = (l: AnyLayer) => {
     const n:any = l.node as any
     const base = {
@@ -910,7 +907,6 @@ export default function EditorCanvas() {
     }
   }
 
-  // строим тела
   const buildForLayer = (pl: PLNS, l: AnyLayer, roleOverride?: PhysicsRole): PhysHandle | null => {
     const role = roleOverride ?? (l.meta.physRole || "off")
     if (role === "off" || l.type === "erase") return null
@@ -946,7 +942,7 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const SEG = 22 // px: шаг дискретизации
+        const SEG = 22 // px
         let acc = 0
         const samples: {x:number;y:number}[] = [{ x: pts[0], y: pts[1] }]
         for (let i=2;i<pts.length;i+=2) {
@@ -959,7 +955,7 @@ export default function EditorCanvas() {
         }
         const radius = Math.max(3, (line?.strokeWidth()||12)/2)
         let prev: PLBody | null = null
-        samples.forEach((p, idx) => {
+        samples.forEach((p) => {
           const b = world.createBody({ type:"dynamic", position: pl.Vec2(toM(p.x), toM(p.y)) })
           b.createFixture(pl.Circle(toM(radius)), { density: 0.6, friction: 0.2, restitution: 0.05 })
           bodies.push(b)
@@ -975,7 +971,6 @@ export default function EditorCanvas() {
     return { role, bodies, joints, anchor }
   }
 
-  // синк из физики → в Konva
   const syncFromBodies = (pl: PLNS) => {
     Object.entries(handlesRef.current).forEach(([id, h]) => {
       const l = layers.find(x=>x.id===id); if (!l) return
@@ -1006,10 +1001,6 @@ export default function EditorCanvas() {
 
   const killWorld = () => {
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
-    const w = worldRef.current
-    if (w) {
-      // planck сам очищает при GC; явная разборка не обязательна
-    }
     handlesRef.current = {}
     worldRef.current = null
   }
@@ -1033,7 +1024,6 @@ export default function EditorCanvas() {
     const pl: PLNS = (mod as any).default ?? (mod as any)
     plRef.current = pl
 
-    // гравитация: Y вниз по экрану -> положительный gy
     const a = (ph.angleDeg*Math.PI)/180
     const gx_m = (Math.cos(a) * ph.strength) / PPM
     const gy_m = (Math.sin(a) * ph.strength) / PPM
