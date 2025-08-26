@@ -298,11 +298,12 @@ export default function EditorCanvas() {
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
-      const shouldDrag = enable && !l.meta.locked && l.side === side && l.id === selectedId && !isStrokeGroup(l.node) && !isEraseGroup(l.node)
+      if (isEraseGroup(l.node)) return
+      const isRope = isStrokeGroup(l.node) && (l.meta.physRole === "rope")
+      const shouldDrag = enable && !l.meta.locked && l.side === side && l.id === selectedId && (!isStrokeGroup(l.node) || isRope)
       ;(l.node as any).draggable?.(Boolean(shouldDrag))
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
-    // останавливаем потенциальный старый драг
     try { stageRef.current?.stopDrag() } catch {}
   }, [tool, layers, side, selectedId])
 
@@ -920,7 +921,6 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (line) base.points = [...line.points()]
     }
-    // только сохраняем в state, без перерисовки физики
     setLayers(p => p.map(x => x.id===l.id ? ({ ...x, meta: { ...x.meta, baseline: base } }) : x))
   }
 
@@ -939,7 +939,7 @@ export default function EditorCanvas() {
     if (kinematic) return R.RigidBodyDesc.kinematicPositionBased()
     const d = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
     if (dyn) {
-      d.setCcdEnabled(true) // CCD против «пролёта»
+      d.setCcdEnabled(true)
       d.setLinearDamping(1.0)
       d.setAngularDamping(1.0)
     }
@@ -972,18 +972,30 @@ export default function EditorCanvas() {
 
   const buildBounds = () => {
     const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
-    const thick = 200 // px, толщина «стен» за пределами кадра
+    const thick = 200
     const off = 50
     const edges = [
-      { cx: BASE_W/2, cy: -off - thick/2,  w: BASE_W+thick*2, h: thick }, // top
-      { cx: BASE_W/2, cy: BASE_H+off+thick/2, w: BASE_W+thick*2, h: thick }, // bottom
-      { cx: -off - thick/2, cy: BASE_H/2,  w: thick, h: BASE_H+thick*2 }, // left
-      { cx: BASE_W+off+thick/2, cy: BASE_H/2, w: thick, h: BASE_H+thick*2 }, // right
+      { cx: BASE_W/2, cy: -off - thick/2,  w: BASE_W+thick*2, h: thick },
+      { cx: BASE_W/2, cy: BASE_H+off+thick/2, w: BASE_W+thick*2, h: thick },
+      { cx: -off - thick/2, cy: BASE_H/2,  w: thick, h: BASE_H+thick*2 },
+      { cx: BASE_W+off+thick/2, cy: BASE_H/2, w: thick, h: BASE_H+thick*2 },
     ]
     edges.forEach(e => {
       const rb = w.createRigidBody(mkRigidDesc(R, false).setTranslation(px2m(e.cx), px2m(e.cy)))
       mkColliderBox(R, w, rb, e.w, e.h)
     })
+  }
+
+  const localToWorld = (node: Konva.Node, x:number, y:number) => {
+    const tr = node.getAbsoluteTransform().copy()
+    const p = tr.point({x, y})
+    return { x: p.x, y: p.y }
+  }
+  const worldToLocal = (node: Konva.Node, x:number, y:number) => {
+    const tr = node.getAbsoluteTransform().copy()
+    const inv = tr.invert()
+    const p = inv.point({x, y})
+    return { x: p.x, y: p.y }
   }
 
   const buildOne = (id:string, roleOverride?: PhysicsRole) => {
@@ -1007,7 +1019,6 @@ export default function EditorCanvas() {
     }
 
     const pushRigidFromNode = () => {
-      // для «rigid» и «collider»: прямоугольная аппроксимация
       const isKine = role === "collider"
       const rb = mkRB(!isKine, cx, cy, angleDeg, isKine)
       bodies.push(rb)
@@ -1016,7 +1027,6 @@ export default function EditorCanvas() {
         const r = (l.node as Konva.Circle).radius() * ((l.node as any).scaleX?.() ?? 1)
         mkColliderBall(R, w, rb, Math.max(2, r))
       } else {
-        // всё остальное — бокс по getClientRect
         mkColliderBox(R, w, rb, Math.max(4, rect.width), Math.max(4, rect.height))
       }
     }
@@ -1029,29 +1039,30 @@ export default function EditorCanvas() {
       if (pts.length < 4) return
       const thick = Math.max(6, (line.strokeWidth?.() ?? 10))
 
-      // нормализуем точки, равномерная дискретизация
       const anchors: {x:number;y:number}[] = []
       let ax = pts[0], ay = pts[1]
-      anchors.push({x:ax, y:ay})
+      anchors.push(localToWorld(g, ax, ay))
       for (let i=2;i<pts.length;i+=2){
         const bx = pts[i], by = pts[i+1]
         const dx = bx-ax, dy = by-ay
         const len = Math.hypot(dx,dy)
         const step = Math.max(16, thick*0.9)
         const segs = Math.max(1, Math.floor(len/step))
-        for (let s=1;s<=segs;s++) anchors.push({x: ax + dx*(s/segs), y: ay + dy*(s/segs)})
+        for (let s=1;s<=segs;s++) {
+          const lx = ax + dx*(s/segs), ly = ay + dy*(s/segs)
+          anchors.push(localToWorld(g, lx, ly))
+        }
         ax = bx; ay = by
       }
       if (anchors.length < 2) return
 
-      const len = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.hypot(q.x-p.x, q.y-p.y)
-      const angle = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.atan2(q.y-p.y, q.x-p.x)
+      const segLen = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.hypot(q.x-p.x, q.y-p.y)
+      const ang    = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.atan2(q.y-p.y, q.x-p.x)
 
-      // кинематические «якоря» на концах для драга
       const a0 = anchors[0]
       const aN = anchors[anchors.length-1]
-      const rbA = mkRB(false, a0.x, a0.y, 0, true) // kinematic
-      const rbB = mkRB(false, aN.x, aN.y, 0, true) // kinematic
+      const rbA = mkRB(false, a0.x, a0.y, 0, true)
+      const rbB = mkRB(false, aN.x, aN.y, 0, true)
       bodies.push(rbA)
 
       let prev: RRigid | null = rbA
@@ -1059,13 +1070,12 @@ export default function EditorCanvas() {
         const p = anchors[i], q = anchors[i+1]
         const cx = (p.x+q.x)/2
         const cy = (p.y+q.y)/2
-        const L = Math.max(8, len(p,q))
-        const ang = angle(p,q)
-        const seg = mkRB(true, cx, cy, rad2deg(ang))
+        const L = Math.max(8, segLen(p,q))
+        const a = ang(p,q)
+        const seg = mkRB(true, cx, cy, rad2deg(a))
         bodies.push(seg)
         mkColliderBox(R, w, seg, L, thick)
 
-        // local anchors: конец предыдущего (правый) к левому концу текущего
         const A = prev!
         const jointData = R.JointData.revolute({x:0,y:0}, {x:-px2m(L/2), y:0})
         joints.push(w.createImpulseJoint(jointData, A, seg, true))
@@ -1073,14 +1083,13 @@ export default function EditorCanvas() {
       }
       // соединяем последний сегмент с rbB
       const lastSeg = bodies[bodies.length-1]
-      const lastLen = anchors.length>=2 ? len(anchors[anchors.length-2], anchors[anchors.length-1]) : 20
+      const lastLen = anchors.length>=2 ? segLen(anchors[anchors.length-2], anchors[anchors.length-1]) : 20
       const j2 = R.JointData.revolute({x:px2m(lastLen/2), y:0}, {x:0,y:0})
       joints.push(w.createImpulseJoint(j2, lastSeg, rbB, true))
       bodies.push(rbB)
     }
 
-    if (role === "rope" && l.type === "strokes") pushRopeFromStroke();
-    else pushRigidFromNode()
+    if (role === "rope" && l.type === "strokes") pushRopeFromStroke(); else pushRigidFromNode()
 
     handlesRef.current[id] = { role, bodies, joints }
   }
@@ -1102,21 +1111,21 @@ export default function EditorCanvas() {
     }
 
     if (h.role === "rope" && l.type === "strokes") {
-      // двигаем якоря в концы линии
       const g = l.node as Konva.Group
       const line = g.getChildren().find(ch => ch instanceof Konva.Line) as Konva.Line | undefined
       if (!line) return
       const pts = line.points(); if (pts.length < 4) return
       const [x0,y0] = [pts[0], pts[1]]
       const [x1,y1] = [pts[pts.length-2], pts[pts.length-1]]
+      const a = localToWorld(g, x0,y0)
+      const b = localToWorld(g, x1,y1)
       const rbA = h.bodies[0]
       const rbB = h.bodies[h.bodies.length-1]
-      rbA.setNextKinematicTranslation({ x: px2m(x0), y: px2m(y0) })
-      rbB.setNextKinematicTranslation({ x: px2m(x1), y: px2m(y1) })
+      rbA.setNextKinematicTranslation({ x: px2m(a.x), y: px2m(a.y) })
+      rbB.setNextKinematicTranslation({ x: px2m(b.x), y: px2m(b.y) })
       return
     }
 
-    // обычный «rigid»: силовой перехват — жёстко ставим позу тела под узел
     const rect = getRect(l.node)
     const cx = rect.x + rect.width/2
     const cy = rect.y + rect.height/2
@@ -1140,17 +1149,12 @@ export default function EditorCanvas() {
     const R = rapierRef.current!; const w = new R.World({ x: Math.cos(deg2rad(ph.angleDeg)) * ph.strength, y: Math.sin(deg2rad(ph.angleDeg)) * ph.strength })
     worldRef.current = w
     buildBounds()
-    // (пере)создаём тела для активной стороны
     layers.filter(l => l.side === side).forEach(l => { takeBaseline(l); buildOne(l.id) })
   }
 
   const killWorld = () => {
     const w = worldRef.current; if (!w) return
-    try {
-      Object.keys(handlesRef.current).forEach(id => removeHandle(id))
-    } finally {
-      worldRef.current = null
-    }
+    try { Object.keys(handlesRef.current).forEach(id => removeHandle(id)) } finally { worldRef.current = null }
   }
 
   const stepWorld = () => {
@@ -1158,30 +1162,28 @@ export default function EditorCanvas() {
     w.timestep = 1/60
     w.step()
 
-    // обновляем канву из физики
     for (const id of Object.keys(handlesRef.current)){
       const h = handlesRef.current[id]
       const l = layers.find(x=>x.id===id); if (!l) continue
 
-      if (h.role === "collider") {
-        // источник истины — канва; тело уже обновили в pushNodeToBody()
-        continue
-      }
+      if (h.role === "collider") continue
 
       if (h.role === "rope" && l.type === "strokes") {
         const g = l.node as Konva.Group
         const line = g.getChildren().find(ch => ch instanceof Konva.Line) as Konva.Line | undefined
         if (!line) continue
-        // собираем точки по центрам тел (первое/последнее — якоря)
+        const inv = g.getAbsoluteTransform().copy().invert()
         const pts:number[] = []
         h.bodies.forEach(rb => {
-          const p = rb.translation(); pts.push(m2px(p.x), m2px(p.y))
+          const p = rb.translation();
+          const wp = { x: m2px(p.x), y: m2px(p.y) }
+          const lp = inv.point(wp)
+          pts.push(lp.x, lp.y)
         })
         line.points(pts)
         continue
       }
 
-      // rigid: тянем узел к телу, если он сейчас не в драге/трансформе
       const dragging = (l.node as any).isDragging?.() || false
       if (dragging || isTransformingRef.current) continue
       const rb = h.bodies[0]
@@ -1193,7 +1195,6 @@ export default function EditorCanvas() {
       ;(l.node as any).rotation?.(rad2deg(rot))
     }
 
-    // синхронизируем коллайдер за мышью/драгом (каждый кадр)
     for (const id of Object.keys(handlesRef.current)){
       const h = handlesRef.current[id]
       if (h.role === "collider") pushNodeToBody(id)
@@ -1208,7 +1209,7 @@ export default function EditorCanvas() {
     await ensureRapier()
     if (!worldRef.current) startWorld();
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
-    ph.running = true; setPh({...ph, running:true})
+    setPh({...ph, running:true})
     rafRef.current = requestAnimationFrame(stepWorld)
   }
 
@@ -1219,14 +1220,13 @@ export default function EditorCanvas() {
 
   const resetPhysics = () => {
     pausePhysics()
-    // откатываем все к базовой позе
     layers.filter(l=>l.side===side).forEach(l => restoreBaseline(l))
     artLayerRef.current?.batchDraw()
     killWorld()
     setPh(p => ({...p, running:false}))
   }
 
-  /* ====================== Панель/интерфейс (минимум) ====================== */
+  /* ====================== UI ====================== */
   const Controls = () => (
     <div style={{position:"absolute", top:8, right:8, zIndex:10, display:"flex", gap:8}}>
       <button onClick={()=> ph.running ? pausePhysics() : startPhysics()} style={{padding:"6px 10px", border:"1px solid #111", background:"white"}}>{ph.running?"Pause":"Play"}</button>
@@ -1239,6 +1239,8 @@ export default function EditorCanvas() {
   /* ====================== Render ====================== */
   return (
     <div style={{position:"relative", width:"100%", height:`calc(100vh - ${padTop+padBottom}px)`, marginTop:padTop}}>
+      {/* Возвращаю Toolbar, как был (использует стор) */}
+      <Toolbar />
       <Controls />
       <div style={{display:"flex", gap:12}}>
         <div style={{flex:1, display:"flex", justifyContent:"center"}}>
