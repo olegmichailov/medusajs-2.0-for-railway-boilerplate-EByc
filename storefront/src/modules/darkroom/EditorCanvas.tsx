@@ -1,4 +1,3 @@
-// EditorCanvas.tsx
 "use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -16,8 +15,7 @@ const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// ===== ПЕЧАТНАЯ ОБЛАСТЬ (прямоугольник внутри которого всё должно жить) =====
-// Поменяй координаты, если нужна именно зона на футболке.
+// Печать/игровая зона (можешь сузить под область футболки)
 const PRINT_AREA = { x: 0, y: 0, w: BASE_W, h: BASE_H }
 
 // Текст
@@ -71,10 +69,7 @@ type PhysHandle = {
 }
 
 export default function EditorCanvas() {
-  const {
-    side, set, tool, brushColor, brushSize, shapeKind,
-    selectedId, select, showLayers, toggleLayers
-  } = useDarkroom()
+  const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select, showLayers, toggleLayers } = useDarkroom()
 
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
@@ -93,7 +88,6 @@ export default function EditorCanvas() {
   const frontArtRef = useRef<Konva.Group>(null)
   const backArtRef  = useRef<Konva.Group>(null)
 
-  // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
   const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
@@ -102,7 +96,7 @@ export default function EditorCanvas() {
 
   const isTransformingRef = useRef(false)
 
-  // Вёрстка/масштаб
+  // Вёрстка
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -120,7 +114,6 @@ export default function EditorCanvas() {
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // фикс скролла
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
@@ -128,7 +121,6 @@ export default function EditorCanvas() {
     return () => { document.body.style.overflow = prev }
   }, [set])
 
-  // helpers
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false, physRole: "off" })
 
   const setBlend = (n: AnyNode, blend: Blend) => {
@@ -144,7 +136,7 @@ export default function EditorCanvas() {
   const artGroup = (s: Side) => (s === "front" ? frontArtRef.current! : backArtRef.current!)
   const currentArt = () => artGroup(side)
 
-  // показываем только активную сторону (⚠️ без auto-reset физики)
+  // видимость
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     frontBgRef.current?.visible(side === "front"); backBgRef.current?.visible(side === "back")
@@ -153,7 +145,6 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers]) // eslint-disable-line
 
-  // одноразовая «починка» gCO
   useEffect(() => {
     layers.forEach((l) => {
       const node: any = l.node
@@ -199,10 +190,7 @@ export default function EditorCanvas() {
     if (isTextNode(n)) {
       const t = n as Konva.Text
       tr.keepRatio(false)
-      tr.enabledAnchors([
-        "top-left","top-right","bottom-left","bottom-right",
-        "middle-left","middle-right","top-center","bottom-center"
-      ])
+      tr.enabledAnchors(["top-left","top-right","bottom-left","bottom-right","middle-left","middle-right","top-center","bottom-center"])
 
       const onTextStart = () => captureTextSnap(t)
       const onTextEnd   = () => { textSnapRef.current = null }
@@ -214,7 +202,6 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // боковые ручки — меняем ширину
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -226,7 +213,6 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // углы/вертикаль — меняем fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -349,7 +335,6 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // сайт-шрифт
   const siteFont = () =>
     (typeof window !== "undefined"
       ? window.getComputedStyle(document.body).fontFamily
@@ -507,7 +492,7 @@ export default function EditorCanvas() {
     ;(node as any).x?.(((node as any).x?.() ?? 0) + dx); ;(node as any).y?.(((node as any).y?.() ?? 0) + dy)
   }
 
-  // ====== ФИЗИКА (Rapier2D) ======
+  // ====================== PHYSICS ======================
   const rapierRef = useRef<RAPIERNS | null>(null)
   const worldRef  = useRef<RWorld | null>(null)
   const handlesRef = useRef<Record<string, PhysHandle>>({})
@@ -515,14 +500,7 @@ export default function EditorCanvas() {
   const pointerRef = useRef<{ body: RRigid | null; joint: RJoint | null; draggingId: string | null }>({ body: null, joint: null, draggingId: null })
   const rafRef = useRef<number | null>(null)
 
-  const [ph, setPh] = useState({
-    running: false,
-    angleDeg: 90,
-    strength: 1200,
-    autoRoles: true,
-    useGyro: false,
-    clampToArea: true,
-  })
+  const [ph, setPh] = useState({ running: false, angleDeg: 90, strength: 1200, autoRoles: true, useGyro: false, clampToArea: true })
 
   const deg2rad = (d:number) => d * Math.PI / 180
   const rad2deg = (r:number) => r * 180 / Math.PI
@@ -569,7 +547,7 @@ export default function EditorCanvas() {
       return world.createRigidBody(desc)
     }
 
-    // ======== RIGID / COLLIDER для обычных фигур/картинок/текста
+    // RIGID/COLLIDER (кроме stroke)
     if ((role === "collider" || role === "rigid") && l.type !== "strokes") {
       const dyn = role === "rigid"
       if (l.node instanceof Konva.Circle) {
@@ -581,19 +559,13 @@ export default function EditorCanvas() {
       } else {
         const b = mkRB(dyn, anchor.cx, anchor.cy, (l.node as any).rotation?.()||0)
         let hw = anchor.w/2, hh = anchor.h/2
-
-        // Если это одна буква (Text, длина 1) — чуть ужимая прокси-коллайдер
-        if (l.node instanceof Konva.Text && l.node.text().length === 1) {
-          hw = Math.max(2, hw * 0.6)
-          hh = Math.max(2, hh * 0.85)
-        }
-
+        if (l.node instanceof Konva.Text && l.node.text().length === 1) { hw = Math.max(2, hw*0.6); hh = Math.max(2, hh*0.85) }
         world.createCollider(R.ColliderDesc.cuboid(hw, hh).setDensity(1).setFriction(0.6).setRestitution(0.1), b)
         bodies.push(b)
       }
     }
 
-    // ======== STROKES как COLLIDER: трубка из шаров по линии (фиксированные RB)
+    // Brush как COLLIDER (трубка из шаров)
     if (role === "collider" && l.type === "strokes") {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
@@ -622,7 +594,7 @@ export default function EditorCanvas() {
       }
     }
 
-    // ======== STROKES как ROPE (динамическая цепочка)
+    // Rope
     if (role === "rope" && l.type === "strokes") {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
@@ -646,16 +618,13 @@ export default function EditorCanvas() {
         const radius = Math.max(3, strokeW/2)
         let prev: RRigid | null = null
         samples.forEach((p) => {
-          const b = world.createRigidBody(
-            R.RigidBodyDesc.dynamic().setTranslation(p.x, p.y)
-              .setLinearDamping(0.2).setAngularDamping(0.2).setCcdEnabled(true)
-          )
+          const b = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(p.x, p.y).setLinearDamping(0.2).setAngularDamping(0.2).setCcdEnabled(true))
           world.createCollider(R.ColliderDesc.ball(radius).setDensity(0.7).setFriction(0.9).setRestitution(0.0), b)
           bodies.push(b)
           if (prev) {
             const j1 = world.createImpulseJoint(R.JointData.revolute({ x: 0, y: 0 }, { x: 0, y: 0 }), prev, b, true)
             joints.push(j1)
-            // удержание длины — чтобы не сжималось в «клубок»
+            // если есть distance в compat – удерживаем длину
             // @ts-ignore
             if (R.JointData.distance) {
               const j2 = world.createImpulseJoint(
@@ -670,7 +639,6 @@ export default function EditorCanvas() {
         })
       }
     }
-
     return { role, bodies, joints, anchor }
   }
 
@@ -686,7 +654,7 @@ export default function EditorCanvas() {
   const syncFromBodies = (R: RAPIERNS) => {
     Object.entries(handlesRef.current).forEach(([id, h]) => {
       const l = layers.find(x=>x.id===id); if (!l) return
-      if (h.role === "collider") return // статике двигать нечего
+      if (h.role === "collider") return
       if (h.role === "rigid") {
         const b = h.bodies[0]; if (!b) return
         const t = b.translation(); const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
@@ -704,10 +672,14 @@ export default function EditorCanvas() {
     artLayerRef.current?.batchDraw()
   }
 
-  // ==== ГРАНИЦЫ/СТЕНЫ + KILL-ZONE ====
+  // Стены
   const buildBounds = (R: RAPIERNS) => {
-    const w = worldRef.current!; boundsRef.current.colliders.forEach(c => w.removeCollider(c, true)); boundsRef.current.bodies.forEach(b => w.removeRigidBody(b))
+    const w = worldRef.current! // вызываем только при старте мира
+    // убираем старые стены (без шагов по самим объектам мира)
+    boundsRef.current.colliders.forEach(c => w.removeCollider(c, true))
+    boundsRef.current.bodies.forEach(b => w.removeRigidBody(b))
     boundsRef.current = { bodies: [], colliders: [] }
+
     if (!ph.clampToArea) return
     const { x, y, w: W, h: H } = PRINT_AREA
     const thick = 80
@@ -729,7 +701,7 @@ export default function EditorCanvas() {
     return (p.x < x - KILL_MARGIN || p.x > x + w + KILL_MARGIN || p.y < y - KILL_MARGIN || p.y > y + h + KILL_MARGIN)
   }
 
-  // ==== КУРСОР-ДРАГ ВО ВРЕМЯ PLAY ====
+  // Курсор-джойнт
   const ensurePointerBody = (R: RAPIERNS) => {
     const w = worldRef.current!
     if (pointerRef.current.body) return pointerRef.current.body
@@ -773,19 +745,28 @@ export default function EditorCanvas() {
     pointerRef.current = { body: null, joint: null, draggingId: null }
   }
 
+  // <<<< САМЫЙ ВАЖНЫЙ ФИКС: не удаляем тела во время обхода >>>>
   const syncAndCullKillZone = () => {
     const R = rapierRef.current, w = worldRef.current
     if (!R || !w) return
     syncFromBodies(R)
+
+    const toReset: string[] = []
     Object.entries(handlesRef.current).forEach(([id, h]) => {
+      if (h.role === "collider") return
       const b = h.bodies[0]; if (!b) return
       const t = b.translation()
-      if (inKillZone(t)) {
-        console.log("[PHYS] kill-zone reset", id, "at", t)
-        const lay = layers.find(L => L.id===id)
-        destroyHandle(id); if (lay) restoreBaseline(lay)
-      }
+      if (inKillZone(t)) toReset.push(id)
     })
+
+    if (toReset.length) {
+      // теперь отдельный проход — удаляем тела и откатываем слои
+      toReset.forEach((id) => {
+        const lay = layers.find(L => L.id===id) || null
+        destroyHandle(id)
+        if (lay) restoreBaseline(lay)
+      })
+    }
   }
 
   const stepLoop = () => {
@@ -812,7 +793,7 @@ export default function EditorCanvas() {
     world.integrationParameters.maxPositionIterations = 3 as any
     worldRef.current = world
 
-    buildBounds(mod)
+    buildBounds(mod) // строим стены до создания тел
 
     const currentSide = side
     layers.filter(l=>l.side===currentSide && !l.meta.locked && l.meta.visible).forEach(l=>{
@@ -848,7 +829,7 @@ export default function EditorCanvas() {
     ;(w as any).gravity = { x: gx, y: gy }
   }
 
-  // ==== Гироскоп (опционально) ====
+  // Гироскоп
   useEffect(() => {
     if (!ph.useGyro || !ph.running) return
     const handler = (ev: DeviceOrientationEvent) => {
@@ -860,9 +841,9 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("deviceorientation", handler)
   }, [ph.useGyro, ph.running])
 
-  useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
+  useEffect(() => () => { pausePhysics(); killWorld() }, [])
 
-  // ===== Explode Text
+  // ===== Explode Text (с точной раскладкой)
   const explodeSelectedText = () => {
     const l = sel
     if (!l || l.type !== "text" || !(l.node instanceof Konva.Text)) return
@@ -927,7 +908,7 @@ export default function EditorCanvas() {
     if (ph.running) rebuildWorldIfRunning()
   }
 
-  // ===== Данные для панелей =====
+  // ===== Панели =====
   const layerItems: LayerItem[] = useMemo(() => {
     void uiTick
     return layers
@@ -1008,7 +989,6 @@ export default function EditorCanvas() {
 
   const onLayerSelect = (id: string) => { select(id); if (tool !== "move") set({ tool: "move" }) }
 
-  // ===== Свойства выбранного узла =====
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -1038,7 +1018,6 @@ export default function EditorCanvas() {
   const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump() }
 
-  // ===== Clear All =====
   const clearArt = () => {
     const g = currentArt(); if (!g) return
     g.removeChildren()
@@ -1049,7 +1028,6 @@ export default function EditorCanvas() {
     if (ph.running) rebuildWorldIfRunning()
   }
 
-  // ===== Скачивание =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -1073,7 +1051,7 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ======= Stage input (с учётом drag-joint) =======
+  // Stage input (учёт drag joint)
   const onDown = (e: any) => {
     e.evt?.preventDefault?.()
     const touches: TouchList | undefined = e.evt.touches
@@ -1192,14 +1170,7 @@ export default function EditorCanvas() {
             </Layer>
 
             <Layer ref={uiLayerRef}>
-              <Transformer
-                ref={trRef}
-                rotateEnabled
-                anchorSize={12}
-                borderStroke="black"
-                anchorStroke="black"
-                anchorFill="white"
-              />
+              <Transformer ref={trRef} rotateEnabled anchorSize={12} borderStroke="black" anchorStroke="black" anchorFill="white" />
             </Layer>
           </Stage>
         </div>
@@ -1221,21 +1192,15 @@ export default function EditorCanvas() {
         layersOpen={showLayers}
         selectedKind={selectedKind}
         selectedProps={selectedProps}
-        setSelectedFill={setSelectedFill}
-        setSelectedStroke={setSelectedStroke}
-        setSelectedStrokeW={setSelectedStrokeW}
-        setSelectedText={setSelectedText}
-        setSelectedFontSize={setSelectedFontSize}
-        setSelectedFontFamily={setSelectedFontFamily}
-        setSelectedColor={(hex)=>{ 
-          const s = sel; if (!s) return
-          if (selectedKind === "text") (s.node as Konva.Text).fill(hex)
-          else if ((s.node as any).fill) (s.node as any).fill(hex)
-          artLayerRef.current?.batchDraw(); bump()
-        }}
-        setSelectedLineHeight={setSelectedLineHeight}
-        setSelectedLetterSpacing={setSelectedLetterSpacing}
-        setSelectedAlign={setSelectedAlign}
+        setSelectedFill={(hex)=>{ const s = sel; if (!s) return; if (selectedKind === "text") (s.node as Konva.Text).fill(hex); else if ((s.node as any).fill) (s.node as any).fill(hex); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedStroke={(hex)=>{ const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedStrokeW={(w)=>{ const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedText={(tstr)=>{ const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedFontSize={(nsize)=>{ const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedFontFamily={(name)=>{ const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedLineHeight={(lh)=>{ const n = sel?.node as Konva.Text; if (!n) return; n.lineHeight(clamp(lh, 0.5, 3)); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedLetterSpacing={(ls)=>{ const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump() }}
+        setSelectedAlign={(a)=>{ const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump() }}
         mobileLayers={{
           items: layerItems,
           selectedId: selectedId ?? undefined,
@@ -1263,21 +1228,18 @@ export default function EditorCanvas() {
             )}
             <button className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white" onClick={resetPhysics}>⟲ Reset</button>
 
-            <button
-              className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white"
-              disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
-              onClick={explodeSelectedText}
-              title="Explode selected text to letters"
-            >
-              ✷ Explode
-            </button>
+            <button className="h-9 px-3 border border-black bg-white hover:bg-black hover:text-white" disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)} onClick={explodeSelectedText} title="Explode selected text to letters">✷ Explode</button>
 
             <label className="ml-auto flex items-center gap-1 text-xs">
               <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
               <span>Auto roles</span>
             </label>
             <label className="ml-3 flex items-center gap-1 text-xs">
-              <input type="checkbox" checked={ph.clampToArea} onChange={(e)=>{ setPh(s=>({...s, clampToArea:e.target.checked})); if (ph.running && rapierRef.current) { buildBounds(rapierRef.current) } }} />
+              <input
+                type="checkbox"
+                checked={ph.clampToArea}
+                onChange={(e)=>{ setPh(s=>({...s, clampToArea:e.target.checked})); /* безопаснее просто перезапустить мир */ rebuildWorldIfRunning() }}
+              />
               <span>Clamp to area</span>
             </label>
             <label className="ml-3 flex items-center gap-1 text-xs" title="Гравитация от наклона телефона">
@@ -1320,7 +1282,7 @@ export default function EditorCanvas() {
             <div className="flex items-center gap-2">
               <button className="h-8 px-3 border border-black bg-white" onClick={resetPhysics}>⟲</button>
               <label className="flex items-center gap-1 text-[11px]">
-                <input type="checkbox" checked={ph.clampToArea} onChange={(e)=>{ setPh(s=>({...s, clampToArea:e.target.checked})); if (ph.running && rapierRef.current) buildBounds(rapierRef.current!) }} />
+                <input type="checkbox" checked={ph.clampToArea} onChange={(e)=>{ setPh(s=>({...s, clampToArea:e.target.checked})); rebuildWorldIfRunning() }} />
                 Clamp
               </label>
               <label className="flex items-center gap-1 text-[11px]">
