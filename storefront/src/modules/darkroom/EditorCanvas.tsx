@@ -119,11 +119,15 @@ export default function EditorCanvas() {
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // фикс скролла
+  // фикс скролла + корректная видимость панели слоёв
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
-    if (isMobile) set({ showLayers: false })
+
+    // Гарантируем: на десктопе слои включены, на мобилке скрыты
+    if (!isMobile) set({ showLayers: true })
+    else           set({ showLayers: false })
+
     return () => { document.body.style.overflow = prev }
   }, [set])
 
@@ -293,6 +297,14 @@ export default function EditorCanvas() {
   }
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
+
+  // дополнительный безопасный апдейт трансформера
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      trRef.current?.forceUpdate()
+      uiLayerRef.current?.batchDraw()
+    })
+  }, [selectedId, tool, side])
 
   // drag lock при brush/erase
   useEffect(() => {
@@ -958,6 +970,7 @@ export default function EditorCanvas() {
     removeHandle(id)
 
     const bodies: RRigid[] = []
+    the:
     const joints: RJoint[] = []
 
     const rect = getRect(l.node)
@@ -1067,11 +1080,6 @@ export default function EditorCanvas() {
         }
         if (samples.length < 2) samples.push(prev)
 
-        let prevBody: RRigid | null = null
-        samples.forEach((p, idx) => {
-          if (idx === 0) return // создаём на стыках, см. ниже
-        })
-
         for (let i=0; i<samples.length-1; i++) {
           const a = samples[i], b = samples[i+1]
           const cxSeg = (a.x + b.x)/2
@@ -1093,7 +1101,6 @@ export default function EditorCanvas() {
 
           if (i>0) {
             const prevB = bodies[bodies.length-2]
-            // локальные якоря на концах сегментов
             const j = w.createImpulseJoint(
               R.JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 }),
               prevB, rb, true
@@ -1189,16 +1196,14 @@ export default function EditorCanvas() {
   }
 
   const startPhysics = async () => {
-    if (ph.running) return // уже идёт
+    if (ph.running) return
 
-    // если модуль ещё не загружен — загрузим
     if (!rapierRef.current) {
       const mod = await import("@dimforge/rapier2d-compat")
       await mod.init()
       rapierRef.current = mod
     }
 
-    // если мир уже есть (после Pause) — просто продолжим цикл
     if (worldRef.current) {
       setPh(s=>({ ...s, running: true }))
       stepLoop()
@@ -1258,7 +1263,6 @@ export default function EditorCanvas() {
       const b = h.bodies[0]; if (!b) return
 
       if (h.role === "collider") {
-        // кинематика: следующая поза — чтобы динамика не «продрагивала»
         ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
         ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
       } else {
@@ -1272,7 +1276,6 @@ export default function EditorCanvas() {
     }
 
     if (h.role === "rope" && l.type === "strokes") {
-      // перезаписываем положения тел по линии (равномерный сэмплинг)
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (!line) return
       const pts = [...line.points()]
@@ -1595,7 +1598,7 @@ export default function EditorCanvas() {
           >
             {ph.running ? "■ Pause" : "▸ Play"}
           </button>
-          <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w-[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
+          <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w/[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
             <div className="flex items-center gap-2 text-[12px]">
               <label className="flex items-center gap-1">
                 <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
