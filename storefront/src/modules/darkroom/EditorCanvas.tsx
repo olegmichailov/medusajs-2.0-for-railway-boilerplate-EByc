@@ -522,7 +522,7 @@ export default function EditorCanvas() {
       fontStyle: t.fontStyle()?.includes("italic") ? "italic" : "normal",
       fontSize: `${t.fontSize() * scale}px`,
       lineHeight: String(t.lineHeight()),
-      letterSpacing: `${(t.letterSpacing?.() ?? 0) * scale}px`,
+      letterSpacing: `${((t as any).letterSpacing?.() ?? 0) * scale}px`,
       whiteSpace: "pre-wrap",
       overflow: "hidden",
       outline: "none",
