@@ -52,6 +52,7 @@ type AnyNode =
   | Konva.Rect
   | Konva.Circle
   | Konva.RegularPolygon
+
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
@@ -915,7 +916,7 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (line) base.points = [...line.points()]
     }
-    // не триггерим физику: только сохраняем
+    // только сохраняем в state, без перерисовки физики
     setLayers(p => p.map(x => x.id===l.id ? ({ ...x, meta: { ...x.meta, baseline: base } }) : x))
   }
 
@@ -930,10 +931,11 @@ export default function EditorCanvas() {
     }
   }
 
-  const mkRigidDesc = (R:RAPIERNS, dynamic:boolean) => {
-    const d = dynamic ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
-    if (dynamic) {
-      d.setCcdEnabled(true) // против «пролёта»
+  const mkRigidDesc = (R:RAPIERNS, dyn:boolean, kinematic=false) => {
+    if (kinematic) return R.RigidBodyDesc.kinematicPositionBased()
+    const d = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
+    if (dyn) {
+      d.setCcdEnabled(true) // CCD против «пролёта»
       d.setLinearDamping(1.0)
       d.setAngularDamping(1.0)
     }
@@ -943,8 +945,8 @@ export default function EditorCanvas() {
   const removeHandle = (id:string) => {
     const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
     const h = handlesRef.current[id]; if (!h) return
-    h.joints?.forEach(j => w.removeImpulseJoint(j, true))
-    h.bodies.forEach(b => w.removeRigidBody(b))
+    try { h.joints?.forEach(j => w.removeImpulseJoint(j, true)) } catch {}
+    try { h.bodies.forEach(b => w.removeRigidBody(b)) } catch {}
     delete handlesRef.current[id]
   }
 
@@ -963,8 +965,8 @@ export default function EditorCanvas() {
     const cy = rect.y + rect.height/2
     const angleDeg = (l.node as any).rotation?.() || 0
 
-    const mkRB = (dyn:boolean, cxpx:number, cypx:number, angle:number) => {
-      const desc = mkRigidDesc(R, dyn)
+    const mkRB = (dyn:boolean, cxpx:number, cypx:number, angle:number, asKinematic=false) => {
+      const desc = mkRigidDesc(R, dyn, asKinematic)
         .setTranslation(px2m(cxpx), px2m(cypx))
         .setRotation(deg2rad(angle))
       return w.createRigidBody(desc)
@@ -973,38 +975,39 @@ export default function EditorCanvas() {
     const addCuboidCollider = (b: RRigid, wpx:number, hpx:number) => {
       const col = R.ColliderDesc
         .cuboid(px2m(wpx/2), px2m(hpx/2))
-        .setFriction(0.6)
-        .setRestitution(0.05)
+        .setFriction(0.8)
+        .setRestitution(0.02)
         .setDensity(1)
       w.createCollider(col, b)
     }
 
     if (role === "collider" || role === "rigid") {
       const dyn = role === "rigid"
+      const isKinematic = role === "collider" // двигаем руками, чтобы не «продрагивало»
 
       if (l.node instanceof Konva.Circle) {
         const rpx = (l.node as Konva.Circle).radius()
-        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg)
+        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
         const col = R.ColliderDesc.ball(px2m(rpx))
-          .setFriction(0.6).setRestitution(0.05).setDensity(1)
+          .setFriction(0.8).setRestitution(0.02).setDensity(1)
         w.createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.RegularPolygon && (l.node as Konva.RegularPolygon).sides() === 3) {
         // треугольник — выпуклый полигон
         const r = (l.node as Konva.RegularPolygon).radius()
-        const verts = []
+        const verts:number[] = []
         for (let i=0;i<3;i++) {
           const a = (-Math.PI/2) + i * (2*Math.PI/3)
           verts.push(px2m(Math.cos(a)*r), px2m(Math.sin(a)*r))
         }
-        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg)
+        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
         const col = R.ColliderDesc.convexHull(new Float32Array(verts))!
-          .setFriction(0.6).setRestitution(0.05).setDensity(1)
+          .setFriction(0.8).setRestitution(0.02).setDensity(1)
         w.createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.Group && (l.node as any).getChildren()?.length===2) {
-        // cross (две перекрёстные прямоугольные балки)
-        const b = mkRB(dyn, cx, cy, angleDeg)
+        // cross (две перекрёстные балки)
+        const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
         const children = (l.node as any).getChildren() as Konva.Node[]
         children.forEach(ch => {
           const cr = (ch as any).getClientRect?.({ skipStroke:true }) || {x:0,y:0,width:0,height:0}
@@ -1024,53 +1027,80 @@ export default function EditorCanvas() {
             const cySeg = (y1+y2)/2
             const len = Math.hypot(x2-x1, y2-y1)
             const ang = Math.atan2(y2-y1, x2-x1)
-            const b = mkRB(dyn, cxSeg, cySeg, rad2deg(ang))
+            const b = mkRB(dyn, cxSeg, cySeg, rad2deg(ang), isKinematic)
             const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(sw/2))
-              .setFriction(0.6).setRestitution(0.05).setDensity(1)
+              .setFriction(0.8).setRestitution(0.02).setDensity(1)
             w.createCollider(col, b)
             bodies.push(b)
           }
         } else {
-          const b = mkRB(dyn, cx, cy, angleDeg)
+          const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
           addCuboidCollider(b, rect.width, rect.height)
           bodies.push(b)
         }
       } else {
         // прямоугольник/картинка/текст/прочее
-        const b = mkRB(dyn, cx, cy, angleDeg)
+        const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
         addCuboidCollider(b, rect.width, rect.height)
         bodies.push(b)
       }
     }
 
     if (role === "rope" && l.type === "strokes") {
+      // цепочка прямоугольных сегментов + revolute стыки
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const SEG = 16 // px
+        const SEG_TARGET = 22 // px — целевая длина сегмента
+        const thickness = Math.max(6, (line?.strokeWidth()||12))
+        // выборка равномерными отрезками
+        const samples: {x:number;y:number}[] = []
         let acc = 0
-        const samples: {x:number;y:number}[] = [{ x: pts[0], y: pts[1] }]
+        let prev = { x: pts[0], y: pts[1] }
+        samples.push(prev)
         for (let i=2;i<pts.length;i+=2) {
-          const x0 = samples.at(-1)!.x, y0 = samples.at(-1)!.y
-          const x1 = pts[i], y1 = pts[i+1]
-          const dx = x1-x0, dy=y1-y0
-          const dist = Math.hypot(dx,dy)
-          acc += dist
-          if (acc >= SEG) { const k = SEG/dist; samples.push({ x: x0+dx*k, y: y0+dy*k }); acc = 0 }
+          const p = { x: pts[i], y: pts[i+1] }
+          const d = Math.hypot(p.x - prev.x, p.y - prev.y)
+          acc += d
+          if (acc >= SEG_TARGET) { samples.push(p); acc = 0 }
+          prev = p
         }
-        const radius = Math.max(3, (line?.strokeWidth()||12)/2)
-        let prev: RRigid | null = null
+        if (samples.length < 2) samples.push(prev)
+
+        let prevBody: RRigid | null = null
         samples.forEach((p, idx) => {
-          const b = w.createRigidBody(mkRigidDesc(R, true).setTranslation(px2m(p.x), px2m(p.y)))
-          w.createCollider(R.ColliderDesc.ball(px2m(radius)).setFriction(0.5).setRestitution(0.05).setDensity(0.6), b)
-          bodies.push(b)
-          if (prev) {
-            const j = w.createImpulseJoint(R.JointData.revolute({ x: 0, y: 0 }, { x: 0, y: 0 }), prev, b, true)
+          if (idx === 0) return // создаём на стыках, см. ниже
+        })
+
+        for (let i=0; i<samples.length-1; i++) {
+          const a = samples[i], b = samples[i+1]
+          const cxSeg = (a.x + b.x)/2
+          const cySeg = (a.y + b.y)/2
+          const len = Math.max(4, Math.hypot(b.x-a.x, b.y-a.y))
+          const ang = Math.atan2(b.y-a.y, b.x-a.x)
+          const rb = w.createRigidBody(
+            R.RigidBodyDesc.dynamic()
+              .setTranslation(px2m(cxSeg), px2m(cySeg))
+              .setRotation(ang)
+              .setCcdEnabled(true)
+              .setLinearDamping(0.9)
+              .setAngularDamping(0.9)
+          )
+          const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(thickness/2))
+            .setFriction(0.7).setRestitution(0.02).setDensity(0.8)
+          w.createCollider(col, rb)
+          bodies.push(rb)
+
+          if (i>0) {
+            const prevB = bodies[bodies.length-2]
+            // локальные якоря на концах сегментов
+            const j = w.createImpulseJoint(
+              R.JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 }),
+              prevB, rb, true
+            )
             joints.push(j)
           }
-          prev = b
-          if (idx < 2) (b as any).setAdditionalMass?.(0.1)
-        })
+        }
       }
     }
 
@@ -1086,8 +1116,8 @@ export default function EditorCanvas() {
   const syncFromBodies = (R: RAPIERNS) => {
     Object.entries(handlesRef.current).forEach(([id, h]) => {
       const l = layers.find(x=>x.id===id); if (!l) return
-      if (h.role === "collider" || h.role === "rigid") {
-        const b = h.bodies[0]; if (!b) return
+      if ((h.role === "collider" || h.role === "rigid") && h.bodies[0]) {
+        const b = h.bodies[0]
         const t = b.translation()
         const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
         const cx = m2px(t.x), cy = m2px(t.y)
@@ -1149,9 +1179,9 @@ export default function EditorCanvas() {
     const halfH = px2m(BASE_H/2)
     const mk = (cx:number, cy:number, hx:number, hy:number) => {
       const rb = w.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy))
-      w.createCollider(R.ColliderDesc.cuboid(hx, hy), rb)
+      w.createCollider(R.ColliderDesc.cuboid(hx, hy).setFriction(0.9).setRestitution(0.01), rb)
     }
-    // bottom, top, left, right
+    // bottom, top, left, right (вне экрана, чтобы не залипало о край)
     mk(px2m(BASE_W/2), px2m(BASE_H) + thick, halfW, thick)
     mk(px2m(BASE_W/2), -thick,             halfW, thick)
     mk(-thick,                px2m(BASE_H/2), thick, halfH)
@@ -1159,19 +1189,31 @@ export default function EditorCanvas() {
   }
 
   const startPhysics = async () => {
-    if (ph.running) return
-    const mod = await import("@dimforge/rapier2d-compat")
-    await mod.init()
-    rapierRef.current = mod
+    if (ph.running) return // уже идёт
 
+    // если модуль ещё не загружен — загрузим
+    if (!rapierRef.current) {
+      const mod = await import("@dimforge/rapier2d-compat")
+      await mod.init()
+      rapierRef.current = mod
+    }
+
+    // если мир уже есть (после Pause) — просто продолжим цикл
+    if (worldRef.current) {
+      setPh(s=>({ ...s, running: true }))
+      stepLoop()
+      return
+    }
+
+    const R = rapierRef.current!
     const a = deg2rad(ph.angleDeg)
     const gx = Math.cos(a) * ph.strength
     const gy = Math.sin(a) * ph.strength
-    const world = new mod.World({ x: gx, y: gy })
+    const world = new R.World({ x: gx, y: gy })
     worldRef.current = world
     frameRef.current = 0
 
-    buildWalls(mod, world)
+    buildWalls(R, world)
 
     const currentSide = side
     layers
@@ -1214,13 +1256,23 @@ export default function EditorCanvas() {
       const cy = rect.y + rect.height / 2
       const angDeg = (l.node as any).rotation?.() || 0
       const b = h.bodies[0]; if (!b) return
-      b.setTranslation({ x: px2m(cx), y: px2m(cy) }, true)
-      b.setRotation(deg2rad(angDeg), true)
+
+      if (h.role === "collider") {
+        // кинематика: следующая поза — чтобы динамика не «продрагивала»
+        ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
+        ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
+      } else {
+        b.setTranslation({ x: px2m(cx), y: px2m(cy) }, true)
+        b.setRotation(deg2rad(angDeg), true)
+      }
+      b.setLinvel?.({ x: 0, y: 0 }, true)
+      b.setAngvel?.(0, true)
       b.wakeUp()
       return
     }
 
     if (h.role === "rope" && l.type === "strokes") {
+      // перезаписываем положения тел по линии (равномерный сэмплинг)
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (!line) return
       const pts = [...line.points()]
@@ -1231,7 +1283,7 @@ export default function EditorCanvas() {
       const res: { x: number; y: number }[] = [raw[0]]
       let acc = 0
       const total = raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)
-      const step = Math.max(1, total / (want - 1))
+      const step = Math.max(1, total / (want))
       for (let i = 1; i < raw.length; i++) {
         const a = raw[i - 1], b = raw[i]
         const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy)
@@ -1248,6 +1300,8 @@ export default function EditorCanvas() {
       res.forEach((p, i) => {
         const b = h.bodies[i]; if (!b) return
         b.setTranslation({ x: px2m(p.x), y: px2m(p.y) }, true)
+        b.setLinvel?.({ x: 0, y: 0 }, true)
+        b.setAngvel?.(0, true)
         b.wakeUp()
       })
     }
