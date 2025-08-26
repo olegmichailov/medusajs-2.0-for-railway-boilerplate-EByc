@@ -73,7 +73,7 @@ type PhysHandle = {
 
 /* ====================== Компонент ====================== */
 export default function EditorCanvas() {
-  const { side, set, tool, brushColor, brushSize, shapeKind, selectedId, select, showLayers, toggleLayers } = useDarkroom()
+  const { side, set, tool, brushColor, brushSize, selectedId, select, showLayers, toggleLayers } = useDarkroom()
 
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
@@ -294,22 +294,26 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // drag lock при brush/erase
+  // Разрешаем драг только активному слою (фикс «прилипания» предыдущего)
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
-      if (l.side !== side) return
-      if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
-      ;(l.node as any).draggable?.(enable && !l.meta.locked)
+      const shouldDrag = enable && !l.meta.locked && l.side === side && l.id === selectedId && !isStrokeGroup(l.node) && !isEraseGroup(l.node)
+      ;(l.node as any).draggable?.(Boolean(shouldDrag))
     })
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
-  }, [tool, layers, side])
+    // останавливаем потенциальный старый драг
+    try { stageRef.current?.stopDrag() } catch {}
+  }, [tool, layers, side, selectedId])
 
   // ===== хоткеи =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ae = document.activeElement as HTMLElement | null
       if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
+
+      if (e.code === "Space") { e.preventDefault(); ph.running ? pausePhysics() : startPhysics(); return }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); resetPhysics(); return }
 
       const n = node(selectedId)
       const lay = find(selectedId)
@@ -950,6 +954,38 @@ export default function EditorCanvas() {
     delete handlesRef.current[id]
   }
 
+  const colliderMaterial = { friction: 0.9, restitution: 0.05 }
+
+  const mkColliderBox = (R:RAPIERNS, w:RWorld, body: RRigid, wpx:number, hpx:number) => {
+    const c = R.ColliderDesc.cuboid(px2m(wpx/2), px2m(hpx/2))
+    c.setFriction(colliderMaterial.friction)
+    c.setRestitution(colliderMaterial.restitution)
+    return w.createCollider(c, body)
+  }
+
+  const mkColliderBall = (R:RAPIERNS, w:RWorld, body: RRigid, rpx:number) => {
+    const c = R.ColliderDesc.ball(px2m(rpx))
+    c.setFriction(colliderMaterial.friction)
+    c.setRestitution(colliderMaterial.restitution)
+    return w.createCollider(c, body)
+  }
+
+  const buildBounds = () => {
+    const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
+    const thick = 200 // px, толщина «стен» за пределами кадра
+    const off = 50
+    const edges = [
+      { cx: BASE_W/2, cy: -off - thick/2,  w: BASE_W+thick*2, h: thick }, // top
+      { cx: BASE_W/2, cy: BASE_H+off+thick/2, w: BASE_W+thick*2, h: thick }, // bottom
+      { cx: -off - thick/2, cy: BASE_H/2,  w: thick, h: BASE_H+thick*2 }, // left
+      { cx: BASE_W+off+thick/2, cy: BASE_H/2, w: thick, h: BASE_H+thick*2 }, // right
+    ]
+    edges.forEach(e => {
+      const rb = w.createRigidBody(mkRigidDesc(R, false).setTranslation(px2m(e.cx), px2m(e.cy)))
+      mkColliderBox(R, w, rb, e.w, e.h)
+    })
+  }
+
   const buildOne = (id:string, roleOverride?: PhysicsRole) => {
     const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
     const l = layers.find(x=>x.id===id); if (!l) return
@@ -966,673 +1002,303 @@ export default function EditorCanvas() {
     const angleDeg = (l.node as any).rotation?.() || 0
 
     const mkRB = (dyn:boolean, cxpx:number, cypx:number, angle:number, asKinematic=false) => {
-      const desc = mkRigidDesc(R, dyn, asKinematic)
-        .setTranslation(px2m(cxpx), px2m(cypx))
-        .setRotation(deg2rad(angle))
-      return w.createRigidBody(desc)
+      const d = mkRigidDesc(R, dyn, asKinematic).setTranslation(px2m(cxpx), px2m(cypx)).setRotation(deg2rad(angle))
+      return w.createRigidBody(d)
     }
 
-    const addCuboidCollider = (b: RRigid, wpx:number, hpx:number) => {
-      const col = R.ColliderDesc
-        .cuboid(px2m(wpx/2), px2m(hpx/2))
-        .setFriction(0.8)
-        .setRestitution(0.02)
-        .setDensity(1)
-      w.createCollider(col, b)
-    }
-
-    if (role === "collider" || role === "rigid") {
-      const dyn = role === "rigid"
-      const isKinematic = role === "collider" // двигаем руками, чтобы не «продрагивало»
+    const pushRigidFromNode = () => {
+      // для «rigid» и «collider»: прямоугольная аппроксимация
+      const isKine = role === "collider"
+      const rb = mkRB(!isKine, cx, cy, angleDeg, isKine)
+      bodies.push(rb)
 
       if (l.node instanceof Konva.Circle) {
-        const rpx = (l.node as Konva.Circle).radius()
-        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
-        const col = R.ColliderDesc.ball(px2m(rpx))
-          .setFriction(0.8).setRestitution(0.02).setDensity(1)
-        w.createCollider(col, b)
-        bodies.push(b)
-      } else if (l.node instanceof Konva.RegularPolygon && (l.node as Konva.RegularPolygon).sides() === 3) {
-        // треугольник — выпуклый полигон
-        const r = (l.node as Konva.RegularPolygon).radius()
-        const verts:number[] = []
-        for (let i=0;i<3;i++) {
-          const a = (-Math.PI/2) + i * (2*Math.PI/3)
-          verts.push(px2m(Math.cos(a)*r), px2m(Math.sin(a)*r))
-        }
-        const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
-        const col = R.ColliderDesc.convexHull(new Float32Array(verts))!
-          .setFriction(0.8).setRestitution(0.02).setDensity(1)
-        w.createCollider(col, b)
-        bodies.push(b)
-      } else if (l.node instanceof Konva.Group && (l.node as any).getChildren()?.length===2) {
-        // cross (две перекрёстные балки)
-        const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
-        const children = (l.node as any).getChildren() as Konva.Node[]
-        children.forEach(ch => {
-          const cr = (ch as any).getClientRect?.({ skipStroke:true }) || {x:0,y:0,width:0,height:0}
-          addCuboidCollider(b, cr.width, cr.height)
-        })
-        bodies.push(b)
-      } else if (l.node instanceof Konva.Line && (l.node as Konva.Line).stroke()) {
-        // линия → сегменты-капсулы
-        const ln = l.node as Konva.Line
-        const pts = [...ln.points()]
-        const sw = Math.max(1, ln.strokeWidth() || 1)
-        if (pts.length >= 4) {
-          for (let i=0;i<pts.length-2;i+=2) {
-            const x1 = pts[i],   y1 = pts[i+1]
-            const x2 = pts[i+2], y2 = pts[i+3]
-            const cxSeg = (x1+x2)/2
-            const cySeg = (y1+y2)/2
-            const len = Math.hypot(x2-x1, y2-y1)
-            const ang = Math.atan2(y2-y1, x2-x1)
-            const b = mkRB(dyn, cxSeg, cySeg, rad2deg(ang), isKinematic)
-            const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(sw/2))
-              .setFriction(0.8).setRestitution(0.02).setDensity(1)
-            w.createCollider(col, b)
-            bodies.push(b)
-          }
-        } else {
-          const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
-          addCuboidCollider(b, rect.width, rect.height)
-          bodies.push(b)
-        }
+        const r = (l.node as Konva.Circle).radius() * ((l.node as any).scaleX?.() ?? 1)
+        mkColliderBall(R, w, rb, Math.max(2, r))
       } else {
-        // прямоугольник/картинка/текст/прочее
-        const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
-        addCuboidCollider(b, rect.width, rect.height)
-        bodies.push(b)
+        // всё остальное — бокс по getClientRect
+        mkColliderBox(R, w, rb, Math.max(4, rect.width), Math.max(4, rect.height))
       }
     }
 
-    if (role === "rope" && l.type === "strokes") {
-      // цепочка прямоугольных сегментов + revolute стыки
-      const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
-      const pts = line ? [...line.points()] : []
-      if (pts.length >= 4) {
-        const SEG_TARGET = 22 // px — целевая длина сегмента
-        const thickness = Math.max(6, (line?.strokeWidth()||12))
-        // выборка равномерными отрезками
-        const samples: {x:number;y:number}[] = []
-        let acc = 0
-        let prev = { x: pts[0], y: pts[1] }
-        samples.push(prev)
-        for (let i=2;i<pts.length;i+=2) {
-          const p = { x: pts[i], y: pts[i+1] }
-          const d = Math.hypot(p.x - prev.x, p.y - prev.y)
-          acc += d
-          if (acc >= SEG_TARGET) { samples.push(p); acc = 0 }
-          prev = p
-        }
-        if (samples.length < 2) samples.push(prev)
+    const pushRopeFromStroke = () => {
+      const g = l.node as Konva.Group
+      const line = g.getChildren().find(ch => ch instanceof Konva.Line) as Konva.Line | undefined
+      if (!line) return
+      const pts = [...line.points()]
+      if (pts.length < 4) return
+      const thick = Math.max(6, (line.strokeWidth?.() ?? 10))
 
-        let prevBody: RRigid | null = null
-        samples.forEach((p, idx) => {
-          if (idx === 0) return // создаём на стыках, см. ниже
-        })
-
-        for (let i=0; i<samples.length-1; i++) {
-          const a = samples[i], b = samples[i+1]
-          const cxSeg = (a.x + b.x)/2
-          const cySeg = (a.y + b.y)/2
-          const len = Math.max(4, Math.hypot(b.x-a.x, b.y-a.y))
-          const ang = Math.atan2(b.y-a.y, b.x-a.x)
-          const rb = w.createRigidBody(
-            R.RigidBodyDesc.dynamic()
-              .setTranslation(px2m(cxSeg), px2m(cySeg))
-              .setRotation(ang)
-              .setCcdEnabled(true)
-              .setLinearDamping(0.9)
-              .setAngularDamping(0.9)
-          )
-          const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(thickness/2))
-            .setFriction(0.7).setRestitution(0.02).setDensity(0.8)
-          w.createCollider(col, rb)
-          bodies.push(rb)
-
-          if (i>0) {
-            const prevB = bodies[bodies.length-2]
-            // локальные якоря на концах сегментов
-            const j = w.createImpulseJoint(
-              R.JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 }),
-              prevB, rb, true
-            )
-            joints.push(j)
-          }
-        }
+      // нормализуем точки, равномерная дискретизация
+      const anchors: {x:number;y:number}[] = []
+      let ax = pts[0], ay = pts[1]
+      anchors.push({x:ax, y:ay})
+      for (let i=2;i<pts.length;i+=2){
+        const bx = pts[i], by = pts[i+1]
+        const dx = bx-ax, dy = by-ay
+        const len = Math.hypot(dx,dy)
+        const step = Math.max(16, thick*0.9)
+        const segs = Math.max(1, Math.floor(len/step))
+        for (let s=1;s<=segs;s++) anchors.push({x: ax + dx*(s/segs), y: ay + dy*(s/segs)})
+        ax = bx; ay = by
       }
+      if (anchors.length < 2) return
+
+      const len = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.hypot(q.x-p.x, q.y-p.y)
+      const angle = (p:{x:number;y:number}, q:{x:number;y:number}) => Math.atan2(q.y-p.y, q.x-p.x)
+
+      // кинематические «якоря» на концах для драга
+      const a0 = anchors[0]
+      const aN = anchors[anchors.length-1]
+      const rbA = mkRB(false, a0.x, a0.y, 0, true) // kinematic
+      const rbB = mkRB(false, aN.x, aN.y, 0, true) // kinematic
+      bodies.push(rbA)
+
+      let prev: RRigid | null = rbA
+      for (let i=0;i<anchors.length-1;i++){
+        const p = anchors[i], q = anchors[i+1]
+        const cx = (p.x+q.x)/2
+        const cy = (p.y+q.y)/2
+        const L = Math.max(8, len(p,q))
+        const ang = angle(p,q)
+        const seg = mkRB(true, cx, cy, rad2deg(ang))
+        bodies.push(seg)
+        mkColliderBox(R, w, seg, L, thick)
+
+        // local anchors: конец предыдущего (правый) к левому концу текущего
+        const A = prev!
+        const jointData = R.JointData.revolute({x:0,y:0}, {x:-px2m(L/2), y:0})
+        joints.push(w.createImpulseJoint(jointData, A, seg, true))
+        prev = seg
+      }
+      // соединяем последний сегмент с rbB
+      const lastSeg = bodies[bodies.length-1]
+      const lastLen = anchors.length>=2 ? len(anchors[anchors.length-2], anchors[anchors.length-1]) : 20
+      const j2 = R.JointData.revolute({x:px2m(lastLen/2), y:0}, {x:0,y:0})
+      joints.push(w.createImpulseJoint(j2, lastSeg, rbB, true))
+      bodies.push(rbB)
     }
+
+    if (role === "rope" && l.type === "strokes") pushRopeFromStroke();
+    else pushRigidFromNode()
 
     handlesRef.current[id] = { role, bodies, joints }
   }
 
-  const rebuildOne = (id:string) => {
-    const l = layers.find(x=>x.id===id); if (!l) return
-    takeBaseline(l)
-    buildOne(id)
-  }
-
-  const syncFromBodies = (R: RAPIERNS) => {
-    Object.entries(handlesRef.current).forEach(([id, h]) => {
-      const l = layers.find(x=>x.id===id); if (!l) return
-      if ((h.role === "collider" || h.role === "rigid") && h.bodies[0]) {
-        const b = h.bodies[0]
-        const t = b.translation()
-        const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
-        const cx = m2px(t.x), cy = m2px(t.y)
-        if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(ang)) return
-
-        if (l.node instanceof Konva.Circle) {
-          l.node.absolutePosition({ x: cx, y: cy })
-          l.node.rotation(rad2deg(ang))
-        } else {
-          const rect = getRect(l.node)
-          const w = rect.width
-          const h = rect.height
-          const ox = w / 2
-          const oy = h / 2
-          const cos = Math.cos(ang)
-          const sin = Math.sin(ang)
-          const rx = cos * ox - sin * oy
-          const ry = sin * ox + cos * oy
-          const xw = cx - rx
-          const yw = cy - ry
-          ;(l.node as any).absolutePosition?.({ x: xw, y: yw })
-          ;(l.node as any).rotation?.(rad2deg(ang))
-        }
-      }
-      if (h.role === "rope" && l.type === "strokes") {
-        const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
-        if (!line) return
-        const pts:number[] = []
-        h.bodies.forEach((b) => { const p = b.translation(); pts.push(m2px(p.x), m2px(p.y)) })
-        if (pts.length>=4) { line.points(pts) }
-      }
-    })
-    artLayerRef.current?.batchDraw()
-  }
-
-  const killWorld = () => {
-    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
-    handlesRef.current = {}
-    worldRef.current = null
-  }
-
-  const stepLoop = () => {
-    const R = rapierRef.current, w = worldRef.current
-    if (!R || !w) return
-    w.step()
-    syncFromBodies(R)
-    frameRef.current++
-    rafRef.current = requestAnimationFrame(stepLoop)
-  }
-
-  const inferAutoRole = (l: AnyLayer): PhysicsRole =>
-    l.type === "strokes" ? "rope"
-    : (l.type === "text" || l.type === "image" || l.type === "shape") ? "rigid"
-    : "off"
-
-  const buildWalls = (R:RAPIERNS, w:RWorld) => {
-    const thick = px2m(40)
-    const halfW = px2m(BASE_W/2)
-    const halfH = px2m(BASE_H/2)
-    const mk = (cx:number, cy:number, hx:number, hy:number) => {
-      const rb = w.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy))
-      w.createCollider(R.ColliderDesc.cuboid(hx, hy).setFriction(0.9).setRestitution(0.01), rb)
-    }
-    // bottom, top, left, right (вне экрана, чтобы не залипало о край)
-    mk(px2m(BASE_W/2), px2m(BASE_H) + thick, halfW, thick)
-    mk(px2m(BASE_W/2), -thick,             halfW, thick)
-    mk(-thick,                px2m(BASE_H/2), thick, halfH)
-    mk(px2m(BASE_W) + thick,  px2m(BASE_H/2), thick, halfH)
-  }
-
-  const startPhysics = async () => {
-    if (ph.running) return // уже идёт
-
-    // если модуль ещё не загружен — загрузим
-    if (!rapierRef.current) {
-      const mod = await import("@dimforge/rapier2d-compat")
-      await mod.init()
-      rapierRef.current = mod
-    }
-
-    // если мир уже есть (после Pause) — просто продолжим цикл
-    if (worldRef.current) {
-      setPh(s=>({ ...s, running: true }))
-      stepLoop()
-      return
-    }
-
-    const R = rapierRef.current!
-    const a = deg2rad(ph.angleDeg)
-    const gx = Math.cos(a) * ph.strength
-    const gy = Math.sin(a) * ph.strength
-    const world = new R.World({ x: gx, y: gy })
-    worldRef.current = world
-    frameRef.current = 0
-
-    buildWalls(R, world)
-
-    const currentSide = side
-    layers
-      .filter(l=>l.side===currentSide && !l.meta.locked && l.meta.visible)
-      .forEach(l=>{
-        const roleToUse: PhysicsRole =
-          ph.autoRoles && (l.meta.physRole||"off")==="off" ? inferAutoRole(l) : (l.meta.physRole||"off")
-        takeBaseline(l)
-        buildOne(l.id, roleToUse)
-      })
-
-    setPh(s=>({ ...s, running: true }))
-    stepLoop()
-  }
-
-  const pausePhysics = () => {
-    if (!ph.running) return
-    setPh(s=>({ ...s, running: false }))
-    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
-  }
-
-  const resetPhysics = () => {
-    pausePhysics()
-    layers.filter(l=>l.side===side).forEach(restoreBaseline)
-    killWorld()
-    artLayerRef.current?.batchDraw()
-  }
-
   const pushNodeToBody = (id: string) => {
-    const R = rapierRef.current, w = worldRef.current
-    if (!R || !w) return
-    const h = handlesRef.current[id]
-    if (!h) return
-    const l = layers.find(x => x.id === id)
-    if (!l) return
+    const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
+    const h = handlesRef.current[id]; if (!h) return
+    const l = layers.find(x=>x.id===id); if (!l) return
 
-    if (h.role === "rigid" || h.role === "collider") {
+    if (h.role === "collider") {
       const rect = getRect(l.node)
-      const cx = rect.x + rect.width / 2
-      const cy = rect.y + rect.height / 2
-      const angDeg = (l.node as any).rotation?.() || 0
-      const b = h.bodies[0]; if (!b) return
-
-      if (h.role === "collider") {
-        // кинематика: следующая поза — чтобы динамика не «продрагивала»
-        ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
-        ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
-      } else {
-        b.setTranslation({ x: px2m(cx), y: px2m(cy) }, true)
-        b.setRotation(deg2rad(angDeg), true)
-      }
-      b.setLinvel?.({ x: 0, y: 0 }, true)
-      b.setAngvel?.(0, true)
-      b.wakeUp()
+      const cx = rect.x + rect.width/2
+      const cy = rect.y + rect.height/2
+      const ang = (l.node as any).rotation?.() || 0
+      const rb = h.bodies[0]
+      rb.setNextKinematicTranslation({ x: px2m(cx), y: px2m(cy) })
+      rb.setNextKinematicRotation(deg2rad(ang))
       return
     }
 
     if (h.role === "rope" && l.type === "strokes") {
-      // перезаписываем положения тел по линии (равномерный сэмплинг)
-      const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
+      // двигаем якоря в концы линии
+      const g = l.node as Konva.Group
+      const line = g.getChildren().find(ch => ch instanceof Konva.Line) as Konva.Line | undefined
       if (!line) return
-      const pts = [...line.points()]
-      if (pts.length < 4 || h.bodies.length === 0) return
-      const want = h.bodies.length
-      const raw: { x: number; y: number }[] = []
-      for (let i = 0; i < pts.length; i += 2) raw.push({ x: pts[i], y: pts[i + 1] })
-      const res: { x: number; y: number }[] = [raw[0]]
-      let acc = 0
-      const total = raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)
-      const step = Math.max(1, total / (want))
-      for (let i = 1; i < raw.length; i++) {
-        const a = raw[i - 1], b = raw[i]
-        const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy)
-        let t = 0
-        while (acc + (dist - t) >= step && res.length < want) {
-          const k = (step - acc + t) / dist
-          res.push({ x: a.x + dx * k, y: a.y + dy * k })
-          acc = 0
-          t = step - t
-        }
-        acc += dist - t
-      }
-      while (res.length < want) res.push(raw.at(-1)!)
-      res.forEach((p, i) => {
-        const b = h.bodies[i]; if (!b) return
-        b.setTranslation({ x: px2m(p.x), y: px2m(p.y) }, true)
-        b.setLinvel?.({ x: 0, y: 0 }, true)
-        b.setAngvel?.(0, true)
-        b.wakeUp()
-      })
+      const pts = line.points(); if (pts.length < 4) return
+      const [x0,y0] = [pts[0], pts[1]]
+      const [x1,y1] = [pts[pts.length-2], pts[pts.length-1]]
+      const rbA = h.bodies[0]
+      const rbB = h.bodies[h.bodies.length-1]
+      rbA.setNextKinematicTranslation({ x: px2m(x0), y: px2m(y0) })
+      rbB.setNextKinematicTranslation({ x: px2m(x1), y: px2m(y1) })
+      return
+    }
+
+    // обычный «rigid»: силовой перехват — жёстко ставим позу тела под узел
+    const rect = getRect(l.node)
+    const cx = rect.x + rect.width/2
+    const cy = rect.y + rect.height/2
+    const ang = (l.node as any).rotation?.() || 0
+    const rb = h.bodies[0]
+    rb.setTranslation({ x: px2m(cx), y: px2m(cy) }, true)
+    rb.setRotation(deg2rad(ang), true)
+  }
+
+  const rebuildOne = (id:string) => { removeHandle(id); buildOne(id) }
+
+  const ensureRapier = async () => {
+    if (!rapierRef.current) {
+      const R = await import("@dimforge/rapier2d-compat")
+      await R.init()
+      rapierRef.current = R
     }
   }
 
-  const applyNewGravity = () => {
-    const w = worldRef.current
-    if (!w) return
-    const a = deg2rad(ph.angleDeg)
-    const gx = Math.cos(a) * ph.strength
-    const gy = Math.sin(a) * ph.strength
-    ;(w as any).gravity = { x: gx, y: gy }
+  const startWorld = () => {
+    const R = rapierRef.current!; const w = new R.World({ x: Math.cos(deg2rad(ph.angleDeg)) * ph.strength, y: Math.sin(deg2rad(ph.angleDeg)) * ph.strength })
+    worldRef.current = w
+    buildBounds()
+    // (пере)создаём тела для активной стороны
+    layers.filter(l => l.side === side).forEach(l => { takeBaseline(l); buildOne(l.id) })
   }
 
-  // --- Gyro (опционально)
-  const gyroOffRef = useRef<null | (() => void)>(null)
-  const enableGyro = async () => {
-    if (gyroOffRef.current) return
+  const killWorld = () => {
+    const w = worldRef.current; if (!w) return
     try {
-      const AnyDevOri: any = (window as any).DeviceOrientationEvent
-      if (AnyDevOri && typeof AnyDevOri.requestPermission === "function") {
-        const res = await AnyDevOri.requestPermission()
-        if (res !== "granted") return
-      }
-    } catch {}
-    const onOri = (e: DeviceOrientationEvent) => {
-      const beta = e.beta ?? 0
-      const gamma = e.gamma ?? 0
-      const x = Math.sin((gamma * Math.PI) / 180)
-      const y = Math.sin((beta  * Math.PI) / 180)
-      const deg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
-      setPh(s => ({ ...s, angleDeg: Math.round(deg) }))
-      applyNewGravity()
+      Object.keys(handlesRef.current).forEach(id => removeHandle(id))
+    } finally {
+      worldRef.current = null
     }
-    window.addEventListener("deviceorientation", onOri, true)
-    gyroOffRef.current = () => window.removeEventListener("deviceorientation", onOri, true)
   }
-  const disableGyro = () => { gyroOffRef.current?.(); gyroOffRef.current = null }
-  useEffect(() => { ph.gyro ? enableGyro() : disableGyro(); return disableGyro }, [ph.gyro])
 
-  useEffect(() => () => { pausePhysics(); killWorld(); disableGyro() }, []) // cleanup
+  const stepWorld = () => {
+    const w = worldRef.current, R = rapierRef.current; if (!w || !R) return
+    w.timestep = 1/60
+    w.step()
 
-  /* ====================== Explode Text ====================== */
-  const explodeSelectedText = () => {
-    const l = sel
-    if (!l || l.type !== "text" || !(l.node instanceof Konva.Text)) return
-    const t = l.node
+    // обновляем канву из физики
+    for (const id of Object.keys(handlesRef.current)){
+      const h = handlesRef.current[id]
+      const l = layers.find(x=>x.id===id); if (!l) continue
 
-    const style = {
-      fontFamily: t.fontFamily(),
-      fontStyle: t.fontStyle(),
-      fontSize: t.fontSize(),
-      fill: t.fill() as string,
-      lineHeight: t.lineHeight() || 1,
-      letterSpacing: (t as any).letterSpacing?.() || 0,
-      align: t.align() as "left"|"center"|"right",
-      width: t.width(),
-    }
+      if (h.role === "collider") {
+        // источник истины — канва; тело уже обновили в pushNodeToBody()
+        continue
+      }
 
-    const canvas = document.createElement("canvas")
-    const ctx = canvas.getContext("2d")!
-    const weight = style.fontStyle?.includes("bold") ? "700" : "400"
-    const italic = style.fontStyle?.includes("italic") ? "italic " : ""
-    ctx.font = `${italic}${weight} ${style.fontSize}px ${style.fontFamily}`
-
-    const text = t.text()
-    const lines = text.split("\n")
-    const lineWidths = lines.map(line => ctx.measureText(line).width)
-
-    const baseX = t.x()
-    const baseY = t.y()
-
-    let y = baseY
-    const newLayers: AnyLayer[] = []
-
-    lines.forEach((line, li) => {
-      const lw = lineWidths[li]
-      let x = baseX
-      if (style.align === "center") x = baseX + (style.width - lw)/2
-      if (style.align === "right")  x = baseX + (style.width - lw)
-
-      for (let i=0;i<line.length;i++) {
-        const ch = line[i]
-        const w = ctx.measureText(ch).width
-        if (ch.trim()==="") { x += w + style.letterSpacing; continue }
-        const n = new Konva.Text({
-          text: ch,
-          x: x, y: y,
-          fontFamily: style.fontFamily,
-          fontStyle: style.fontStyle,
-          fontSize: style.fontSize,
-          fill: style.fill,
-          lineHeight: 1,
-          draggable: false,
+      if (h.role === "rope" && l.type === "strokes") {
+        const g = l.node as Konva.Group
+        const line = g.getChildren().find(ch => ch instanceof Konva.Line) as Konva.Line | undefined
+        if (!line) continue
+        // собираем точки по центрам тел (первое/последнее — якоря)
+        const pts:number[] = []
+        h.bodies.forEach(rb => {
+          const p = rb.translation(); pts.push(m2px(p.x), m2px(p.y))
         })
-        ;(n as any).id(uid())
-        currentArt().add(n)
-        const id = (n as any).id()
-        const meta = baseMeta(`char ${ch}`)
-        meta.physRole = "rigid"
-        const lay: AnyLayer = { id, side, node: n, meta, type: "text" }
-        attachCommonHandlers(n, id)
-        newLayers.push(lay)
-        x += w + style.letterSpacing
+        line.points(pts)
+        continue
       }
-      y += style.fontSize * style.lineHeight
-    })
 
-    deleteLayer(l.id)
-    setLayers(prev => [...prev, ...newLayers])
+      // rigid: тянем узел к телу, если он сейчас не в драге/трансформе
+      const dragging = (l.node as any).isDragging?.() || false
+      if (dragging || isTransformingRef.current) continue
+      const rb = h.bodies[0]
+      const p = rb.translation(); const rot = rb.rotation()
+      const rect = getRect(l.node)
+      const wpx = rect.width, hpx = rect.height
+      ;(l.node as any).x?.(m2px(p.x) - wpx/2)
+      ;(l.node as any).y?.(m2px(p.y) - hpx/2)
+      ;(l.node as any).rotation?.(rad2deg(rot))
+    }
+
+    // синхронизируем коллайдер за мышью/драгом (каждый кадр)
+    for (const id of Object.keys(handlesRef.current)){
+      const h = handlesRef.current[id]
+      if (h.role === "collider") pushNodeToBody(id)
+      if (h.role === "rope") pushNodeToBody(id)
+    }
+
     artLayerRef.current?.batchDraw()
-    if (ph.running) { newLayers.forEach(nl => buildOne(nl.id)) }
+    rafRef.current = requestAnimationFrame(stepWorld)
   }
+
+  const startPhysics = async () => {
+    await ensureRapier()
+    if (!worldRef.current) startWorld();
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    ph.running = true; setPh({...ph, running:true})
+    rafRef.current = requestAnimationFrame(stepWorld)
+  }
+
+  const pausePhysics = () => {
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    setPh(p => ({...p, running:false}))
+  }
+
+  const resetPhysics = () => {
+    pausePhysics()
+    // откатываем все к базовой позе
+    layers.filter(l=>l.side===side).forEach(l => restoreBaseline(l))
+    artLayerRef.current?.batchDraw()
+    killWorld()
+    setPh(p => ({...p, running:false}))
+  }
+
+  /* ====================== Панель/интерфейс (минимум) ====================== */
+  const Controls = () => (
+    <div style={{position:"absolute", top:8, right:8, zIndex:10, display:"flex", gap:8}}>
+      <button onClick={()=> ph.running ? pausePhysics() : startPhysics()} style={{padding:"6px 10px", border:"1px solid #111", background:"white"}}>{ph.running?"Pause":"Play"}</button>
+      <button onClick={resetPhysics} style={{padding:"6px 10px", border:"1px solid #111", background:"white"}}>Reset</button>
+      <button onClick={()=>downloadBoth(side)} style={{padding:"6px 10px", border:"1px solid #111", background:"white"}}>Export</button>
+      <button onClick={()=>toggleLayers()} style={{padding:"6px 10px", border:"1px solid #111", background:"white"}}>{showLayers?"Hide layers":"Show layers"}</button>
+    </div>
+  )
 
   /* ====================== Render ====================== */
   return (
-    <div
-      className="fixed inset-0 bg-white"
-      style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect: "none", userSelect: "none" }}
-    >
-      {!isMobile && showLayers && (
-        <LayersPanel
-          items={layerItems}
-          selectId={selectedId}
-          onSelect={(id)=>{ onLayerSelect(id) }}
-          onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
-          onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
-          onDelete={deleteLayer}
-          onDuplicate={duplicateLayer}
-          onReorder={reorder}
-          onChangeBlend={(id, b)=>updateMeta(id,{ blend: b as Blend })}
-          onChangeOpacity={(id, o)=>updateMeta(id,{ opacity: o })}
-          onChangePhysicsRole={(id, r)=>updateMeta(id, { physRole: r })}
-        />
-      )}
-
-      <div className="w-full h-full flex items-start justify-center">
-        <div style={{ position:"relative", touchAction:"none", width: viewW, height: viewH }}>
+    <div style={{position:"relative", width:"100%", height:`calc(100vh - ${padTop+padBottom}px)`, marginTop:padTop}}>
+      <Controls />
+      <div style={{display:"flex", gap:12}}>
+        <div style={{flex:1, display:"flex", justifyContent:"center"}}>
           <Stage
-            width={viewW} height={viewH} scale={{ x: scale, y: scale }}
-            ref={stageRef}
-            onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
-            onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+            ref={stageRef as any}
+            width={viewW}
+            height={viewH}
+            scaleX={scale}
+            scaleY={scale}
+            onMouseDown={onDown}
+            onMouseMove={onMove}
+            onMouseUp={onUp}
+            onTouchStart={onDown}
+            onTouchMove={onMove}
+            onTouchEnd={onUp}
           >
-            <Layer ref={bgLayerRef} listening={true}>
-              {frontMock && <KImage ref={frontBgRef} image={frontMock} visible={side==="front"} width={BASE_W} height={BASE_H} listening={true} />}
-              {backMock  && <KImage ref={backBgRef}  image={backMock}  visible={side==="back"}  width={BASE_W} height={BASE_H} listening={true} />}
+            <Layer ref={bgLayerRef as any} listening={false}>
+              <KImage ref={frontBgRef as any} image={frontMock} width={BASE_W} height={BASE_H} visible={side==='front'} listening={false} />
+              <KImage ref={backBgRef as any}  image={backMock}  width={BASE_W} height={BASE_H} visible={side==='back'}  listening={false} />
             </Layer>
 
-            <Layer ref={artLayerRef} listening={true}>
-              <KGroup ref={frontArtRef} visible={side==="front"} />
-              <KGroup ref={backArtRef}  visible={side==="back"}  />
+            <Layer ref={artLayerRef as any}>
+              <KGroup ref={frontArtRef as any} visible={side==='front'} />
+              <KGroup ref={backArtRef  as any} visible={side==='back'}  />
             </Layer>
 
-            <Layer ref={uiLayerRef}>
-              <Transformer
-                ref={trRef}
-                rotateEnabled
-                anchorSize={12}
-                borderStroke="black"
-                anchorStroke="black"
-                anchorFill="white"
-              />
+            <Layer ref={uiLayerRef as any}>
+              <Transformer ref={trRef as any} rotateEnabled={true} />
             </Layer>
           </Stage>
         </div>
+        {showLayers && (
+          <div style={{width:320}}>
+            <LayersPanel
+              items={layerItems}
+              selectedId={selectedId}
+              onSelect={onLayerSelect}
+              onDelete={deleteLayer}
+              onDuplicate={duplicateLayer}
+              onReorder={reorder}
+              onUpdate={updateMeta}
+              onAddText={onAddText}
+              onAddShape={onAddShape}
+              onUploadImage={onUploadImage}
+              selectedKind={selectedKind}
+              selectedProps={selectedProps as any}
+              setSelectedFill={setSelectedFill}
+              setSelectedStroke={setSelectedStroke}
+              setSelectedStrokeW={setSelectedStrokeW}
+              setSelectedText={setSelectedText}
+              setSelectedFontSize={setSelectedFontSize}
+              setSelectedFontFamily={setSelectedFontFamily}
+              setSelectedLineHeight={setSelectedLineHeight}
+              setSelectedLetterSpacing={setSelectedLetterSpacing}
+              setSelectedAlign={setSelectedAlign}
+              physics={{ running: ph.running, start: startPhysics, pause: pausePhysics, reset: resetPhysics }}
+            />
+          </div>
+        )}
       </div>
-
-      <Toolbar
-        side={side} setSide={(s: Side)=>set({ side: s })}
-        tool={tool} setTool={(t: Tool)=>set({ tool: t })}
-        brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
-        brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
-        shapeKind={shapeKind} setShapeKind={()=>{}}
-        onUploadImage={onUploadImage}
-        onAddText={onAddText}
-        onAddShape={onAddShape}
-        onDownloadFront={()=>downloadBoth("front")}
-        onDownloadBack={()=>downloadBoth("back")}
-        onClear={clearArt}
-        toggleLayers={toggleLayers}
-        layersOpen={showLayers}
-        selectedKind={selectedKind}
-        selectedProps={selectedProps}
-        setSelectedFill={(hex)=>{ 
-          const s = sel
-          if (!s) return
-          if (selectedKind === "text") (s.node as Konva.Text).fill(hex)
-          else if ((s.node as any).fill) (s.node as any).fill(hex)
-          artLayerRef.current?.batchDraw(); 
-          bump()
-          if (ph.running && s) rebuildOne(s.id)
-        }}
-        setSelectedStroke={setSelectedStroke}
-        setSelectedStrokeW={setSelectedStrokeW}
-        setSelectedText={setSelectedText}
-        setSelectedFontSize={setSelectedFontSize}
-        setSelectedFontFamily={setSelectedFontFamily}
-        setSelectedLineHeight={setSelectedLineHeight}
-        setSelectedLetterSpacing={setSelectedLetterSpacing}
-        setSelectedAlign={setSelectedAlign}
-        mobileLayers={{
-          items: layerItems,
-          selectedId: selectedId ?? undefined,
-          onSelect: onLayerSelect,
-          onToggleVisible: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) },
-          onToggleLock: (id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }) },
-          onDelete: deleteLayer,
-          onDuplicate: duplicateLayer,
-          onMoveUp:   (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>0) reorder(id, order[i-1], "before") },
-          onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
-        }}
-        mobileTopOffset={padTop}
-      />
-
-      {/* ===== Physics panel (desktop) — узкая */}
-      {!isMobile && (
-        <div className="fixed right-4 bottom-4 w-[320px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3 z-50">
-          <div className="text-[11px] uppercase tracking-widest">Physics (Rapier2D)</div>
-
-          <div className="flex items-center gap-2">
-            {!ph.running ? (
-              <button className="h-8 px-3 border border-black bg-white hover:bg-black hover:text-white" onClick={startPhysics}>▸ Play</button>
-            ) : (
-              <button className="h-8 px-3 border border-black bg-black text-white hover:bg-white hover:text-black" onClick={pausePhysics}>■ Pause</button>
-            )}
-            <button className="h-8 px-3 border border-black bg-white hover:bg-black hover:text-white" onClick={resetPhysics}>⟲ Reset</button>
-            <button
-              className="h-8 px-3 border border-black bg-white hover:bg-black hover:text-white ml-auto"
-              disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
-              onClick={explodeSelectedText}
-              title="Explode selected text to letters"
-            >
-              ✷ Explode
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
-              <span>Auto roles</span>
-            </label>
-            <label className="flex items-center gap-1 ml-4">
-              <input type="checkbox" checked={ph.gyro} onChange={(e)=>setPh(s=>({...s, gyro:e.target.checked}))} />
-              <span>Gyro</span>
-            </label>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-xs w-10">Dir</div>
-            <input type="range" min={0} max={360} step={1}
-              value={ph.angleDeg}
-              onChange={(e)=>{ const v = parseInt(e.target.value,10); setPh(s=>({...s, angleDeg:v})); applyNewGravity() }}
-              className="w-full"
-            />
-            <div className="w-12 text-xs text-right">{ph.angleDeg}°</div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-xs w-10">Str</div>
-            <input type="range" min={0} max={30} step={0.1}
-              value={ph.strength}
-              onChange={(e)=>{ const v = parseFloat(e.target.value); setPh(s=>({...s, strength:v})); applyNewGravity() }}
-              className="w-full"
-            />
-            <div className="w-12 text-xs text-right">{ph.strength.toFixed(1)}</div>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <span className="opacity-70">For selected:</span>
-            <select
-              className="h-8 px-2 border border-black/30 rounded-none flex-1"
-              value={(sel?.meta.physRole)||"off"}
-              onChange={(e)=> sel && updateMeta(sel.id, { physRole: e.target.value as PhysicsRole })}
-            >
-              <option value="off">off</option>
-              <option value="collider">collider</option>
-              <option value="rigid">rigid</option>
-              <option value="rope">rope</option>
-            </select>
-          </div>
-        </div>
-      )}
-
-      {/* ===== Physics (mobile) */}
-      {isMobile && (
-        <>
-          <button
-            className="fixed right-3 bottom-[148px] z-50 h-10 px-3 border border-black bg-white rounded-none"
-            onClick={()=> ph.running ? pausePhysics() : startPhysics()}
-          >
-            {ph.running ? "■ Pause" : "▸ Play"}
-          </button>
-          <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w-[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
-            <div className="flex items-center gap-2 text-[12px]">
-              <label className="flex items-center gap-1">
-                <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
-                Auto roles
-              </label>
-              <label className="flex items-center gap-1 ml-3">
-                <input type="checkbox" checked={ph.gyro} onChange={(e)=>setPh(s=>({...s, gyro:e.target.checked}))} />
-                Gyro
-              </label>
-              <button className="h-8 px-3 border border-black bg-white ml-auto" onClick={resetPhysics}>⟲ Reset</button>
-              <button
-                className="h-8 px-3 border border-black bg-white"
-                disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
-                onClick={explodeSelectedText}
-              >
-                ✷ Explode
-              </button>
-            </div>
-            <div className="mt-2">
-              <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Dir</span><span className="flex-1" /></div>
-              <input type="range" min={0} max={360} step={1}
-                value={ph.angleDeg}
-                onChange={(e)=>{ const v=parseInt(e.target.value,10); setPh(s=>({...s, angleDeg:v})); applyNewGravity() }}
-                className="w-full"
-              />
-            </div>
-            <div className="mt-2">
-              <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Str</span><span className="flex-1" /></div>
-              <input type="range" min={0} max={30} step={0.1}
-                value={ph.strength}
-                onChange={(e)=>{ const v=parseFloat(e.target.value); setPh(s=>({...s, strength:v})); applyNewGravity() }}
-                className="w-full"
-              />
-            </div>
-          </div>
-        </>
-      )}
     </div>
   )
 }
