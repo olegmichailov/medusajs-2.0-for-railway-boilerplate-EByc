@@ -58,11 +58,18 @@ type RWorld = import("@dimforge/rapier2d-compat").World
 type RRigid = import("@dimforge/rapier2d-compat").RigidBody
 type RJoint = import("@dimforge/rapier2d-compat").ImpulseJoint
 
+type OriginKind = "center"|"topleft"
+
 type PhysHandle = {
   role: PhysicsRole
   bodies: RRigid[]
   joints?: RJoint[]
-  anchor: { cx:number; cy:number; w:number; h:number; kind:"center"|"topleft" }
+  // геометрия для обратного синка
+  origin: OriginKind
+  w?: number
+  h?: number
+  // для линий
+  line?: { halfLen:number }
 }
 
 export default function EditorCanvas() {
@@ -155,16 +162,16 @@ export default function EditorCanvas() {
       log("side changed → reset physics")
       resetPhysics()
     }
-  }, [side]) // ← только side!
+  }, [side])
 
-  // Видимость слоёв при любых их изменениях (без ресета мира)
+  // Видимость слоёв
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     artLayerRef.current?.batchDraw()
     attachTransformer()
-  }, [layers, side]) // безопасно: reset не вызываем
+  }, [layers, side])
 
-  // одноразовая «починка» на случай присвоения строки в gCO
+  // одноразовая починка gCO
   useEffect(() => {
     layers.forEach((l) => {
       const node: any = l.node
@@ -233,7 +240,6 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // боковые ручки — меняем ширину
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -248,7 +254,6 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // углы/вертикаль — меняем fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -903,12 +908,67 @@ export default function EditorCanvas() {
   const deg2rad = (d:number) => d * Math.PI / 180
   const rad2deg = (r:number) => r * 180 / Math.PI
 
-  const getAnchor = (n: AnyNode): PhysHandle["anchor"] => {
-    const rect = (n as any).getClientRect?.({ skipStroke: false }) || { x:(n as any).x?.()||0, y:(n as any).y?.()||0, width:(n as any).width?.()||0, height:(n as any).height?.()||0 }
-    const cx = rect.x + rect.width/2
-    const cy = rect.y + rect.height/2
-    const kind = n instanceof Konva.Circle ? "center" : "topleft"
-    return { cx, cy, w: rect.width, h: rect.height, kind }
+  // === измерения узлов (размеры в МИРОВЫХ px, с учётом scale), центр и угол ===
+  const absScale = (n: Konva.Node) => (n as any).getAbsoluteScale ? (n as any).getAbsoluteScale() : { x: 1, y: 1 }
+  const absRotDeg = (n: Konva.Node) => (n as any).getAbsoluteRotation ? (n as any).getAbsoluteRotation() : ((n as any).rotation?.() ?? 0)
+  const absTr = (n: Konva.Node) => (n as any).getAbsoluteTransform().copy()
+
+  const measureRectLike = (n: Konva.Rect | Konva.Image | Konva.Text | Konva.Group) => {
+    const s = absScale(n)
+    let w = 0, h = 0
+    if (n instanceof Konva.Text) {
+      const self = (n as any).getSelfRect?.() || { width: n.width(), height: n.height() || 1 }
+      w = (n.width() || self.width) * s.x
+      h = (self.height || 1) * s.y
+    } else if (n instanceof Konva.Group) {
+      // наш “крест” имеет логические 320x320
+      w = 320 * s.x; h = 320 * s.y
+    } else if (n instanceof Konva.Image || n instanceof Konva.Rect) {
+      w = (n.width() || 1) * s.x
+      h = (n.height() || 1) * s.y
+    }
+    const ctrWorld = absTr(n).point({ x: w / (2 * s.x), y: h / (2 * s.y) }) // центр прямоугольника
+    const ang = deg2rad(absRotDeg(n))
+    return { cx: ctrWorld.x, cy: ctrWorld.y, w, h, ang }
+  }
+
+  const measureCircle = (c: Konva.Circle) => {
+    const s = absScale(c)
+    const r = c.radius() * (Math.abs(s.x) + Math.abs(s.y)) / 2
+    const pos = c.getAbsolutePosition()
+    const ang = deg2rad(absRotDeg(c))
+    return { cx: pos.x, cy: pos.y, r, ang }
+  }
+
+  const measureRegularPolygon = (p: Konva.RegularPolygon) => {
+    const s = absScale(p)
+    const r = p.radius() * (Math.abs(s.x) + Math.abs(s.y)) / 2
+    const sides = (p as any).sides?.() ?? 3
+    const center = p.getAbsolutePosition()
+    const ang = deg2rad(absRotDeg(p))
+    // локальные точки (в координатах тела)
+    const ptsLocal: {x:number;y:number}[] = []
+    for (let i=0;i<sides;i++){
+      const a = (i / sides) * Math.PI * 2
+      ptsLocal.push({ x: r * Math.cos(a), y: r * Math.sin(a) })
+    }
+    return { cx: center.x, cy: center.y, ang, ptsLocal }
+  }
+
+  const measureLineShape = (ln: Konva.Line) => {
+    // для "shape"-линии предполагаем 2 точки (мы её так создаём)
+    const pts = ln.points()
+    const s = absScale(ln)
+    const p1 = absTr(ln).point({ x: pts[0], y: pts[1] })
+    const p2 = absTr(ln).point({ x: pts[2], y: pts[3] })
+    const mx = (p1.x + p2.x) / 2
+    const my = (p1.y + p2.y) / 2
+    const dx = p2.x - p1.x
+    const dy = p2.y - p1.y
+    const len = Math.hypot(dx, dy)
+    const ang = Math.atan2(dy, dx)
+    const radius = (ln.strokeWidth?.() ?? 16) * (Math.abs(s.x) + Math.abs(s.y)) / 4
+    return { cx: mx, cy: my, halfLen: len/2, radius, ang }
   }
 
   const takeBaseline = (l: AnyLayer) => {
@@ -939,33 +999,76 @@ export default function EditorCanvas() {
     const role = roleOverride ?? (l.meta.physRole || "off")
     if (role === "off" || l.type === "erase") return null
 
-    const anchor = getAnchor(l.node)
     const world = worldRef.current!
     const bodies: RRigid[] = []
     const joints: RJoint[] = []
 
-    const mkRB = (dyn:boolean, cx:number, cy:number, angleDeg:number) => {
-      const desc = (dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed())
-        .setTranslation(cx, cy)
-        .setRotation(deg2rad(angleDeg))
-      return world.createRigidBody(desc)
+    const dyn = role === "rigid"
+    const rbDesc = (dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed())
+      .setCcdEnabled(true)
+      .setLinearDamping(0.6)
+      .setAngularDamping(0.8)
+      .setCanSleep(true)
+
+    // === фигуры
+    if (l.node instanceof Konva.Circle) {
+      const m = measureCircle(l.node)
+      const b = world.createRigidBody(rbDesc.setTranslation(m.cx, m.cy).setRotation(m.ang))
+      world.createCollider(R.ColliderDesc.ball(m.r).setDensity(1).setFriction(0.35).setRestitution(0.05), b)
+      bodies.push(b)
+      return { role, bodies, joints, origin: "center" }
     }
 
-    if (role === "collider" || role === "rigid") {
-      const dyn = role === "rigid"
-      if (l.node instanceof Konva.Circle) {
-        const rpx = (l.node as Konva.Circle).radius()
-        const cx = l.node.x(), cy = l.node.y()
-        const b = mkRB(dyn, cx, cy, (l.node.rotation?.()||0))
-        world.createCollider(R.ColliderDesc.ball(rpx).setDensity(1).setFriction(0.35).setRestitution(0.05), b)
-        bodies.push(b)
-      } else {
-        const b = mkRB(dyn, anchor.cx, anchor.cy, (l.node as any).rotation?.()||0)
-        world.createCollider(R.ColliderDesc.cuboid(anchor.w/2, anchor.h/2).setDensity(1).setFriction(0.35).setRestitution(0.05), b)
-        bodies.push(b)
+    if (l.node instanceof Konva.Rect || l.node instanceof Konva.Image || l.node instanceof Konva.Text || l.node instanceof Konva.Group) {
+      const m = measureRectLike(l.node as any)
+      const b = world.createRigidBody(rbDesc.setTranslation(m.cx, m.cy).setRotation(m.ang))
+      world.createCollider(R.ColliderDesc.cuboid(m.w/2, m.h/2).setDensity(1).setFriction(0.35).setRestitution(0.05), b)
+      // спец: “крест” — составной коллайдер
+      if (l.node instanceof Konva.Group) {
+        const s = absScale(l.node)
+        const ang = m.ang
+        // локальные центры перекладины и стойки относительно центра группы (0..320)
+        const parts = [
+          { w: 320*s.x, h: 60*s.y,  ox: 160*s.x, oy: (130+30)*s.y }, // горизонтальная
+          { w: 60*s.x,  h: 320*s.y, ox: (130+30)*s.x, oy: 160*s.y }, // вертикальная
+        ]
+        for (const p of parts) {
+          // в локальных координатах группы центр прямоугольника в (ox, oy)
+          // переводим его в смещение относительно центра (160,160) и поворачиваем вместе с телом
+          const lx = p.ox - 160*s.x
+          const ly = p.oy - 160*s.y
+          const rx =  Math.cos(ang)*lx - Math.sin(ang)*ly
+          const ry =  Math.sin(ang)*lx + Math.cos(ang)*ly
+          world.createCollider(
+            R.ColliderDesc.cuboid(p.w/2, p.h/2)
+              .setTranslation(rx, ry)
+              .setDensity(1).setFriction(0.35).setRestitution(0.05),
+            b
+          )
+        }
       }
+      bodies.push(b)
+      return { role, bodies, joints, origin: "topleft", w: m.w, h: m.h }
     }
 
+    if (l.node instanceof Konva.RegularPolygon) {
+      const m = measureRegularPolygon(l.node)
+      const b = world.createRigidBody(rbDesc.setTranslation(m.cx, m.cy).setRotation(m.ang))
+      const pts = new Float32Array(m.ptsLocal.flatMap(p => [p.x, p.y]))
+      world.createCollider(R.ColliderDesc.convexHull(pts)!.setDensity(1).setFriction(0.35).setRestitution(0.05), b)
+      bodies.push(b)
+      return { role, bodies, joints, origin: "center" }
+    }
+
+    if (l.node instanceof Konva.Line && l.type === "shape") {
+      const m = measureLineShape(l.node)
+      const b = world.createRigidBody(rbDesc.setTranslation(m.cx, m.cy).setRotation(m.ang))
+      world.createCollider(R.ColliderDesc.capsule(m.halfLen, m.radius).setDensity(1).setFriction(0.35).setRestitution(0.05), b)
+      bodies.push(b)
+      return { role, bodies, joints, origin: "center", line: { halfLen: m.halfLen } }
+    }
+
+    // верёвка (stroke-группа)
     if (role === "rope" && l.type === "strokes") {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
@@ -978,68 +1081,72 @@ export default function EditorCanvas() {
           const x1 = pts[i], y1 = pts[i+1]
           const dx = x1-x0, dy=y1-y0
           const dist = Math.hypot(dx,dy)
-          acc += dist
-          if (acc >= SEG) { const k = SEG/dist; samples.push({ x: x0+dx*k, y: y0+dy*k }); acc = 0 }
+          while (acc + SEG <= dist) {
+            const k = (acc + SEG) / dist
+            samples.push({ x: x0+dx*k, y: y0+dy*k })
+            acc += SEG
+          }
+          acc = (acc + dist) % SEG
         }
         const radius = Math.max(3, (line?.strokeWidth()||12)/2)
         let prev: RRigid | null = null
-        samples.forEach((p) => {
-          const b = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(p.x, p.y))
+        samples.forEach((p, i) => {
+          const b = world.createRigidBody(R.RigidBodyDesc.dynamic().setCcdEnabled(true).setTranslation(p.x, p.y))
           world.createCollider(R.ColliderDesc.ball(radius).setDensity(0.6).setFriction(0.2).setRestitution(0.05), b)
           bodies.push(b)
           if (prev) {
             const joint = R.JointData.revolute({ x: 0, y: 0 }, { x: 0, y: 0 })
             const j = world.createImpulseJoint(joint, prev, b, true)
             joints.push(j)
+          } else {
+            // привяжем первый сегмент к миру фикс-джойнтом, чтобы верёвка не улетала вся
+            const anchor = world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(p.x, p.y))
+            const j0 = world.createImpulseJoint(R.JointData.fixed({x:0,y:0},{x:0,y:0}), anchor, b, true)
+            joints.push(j0)
           }
           prev = b
         })
       }
+      return { role, bodies, joints, origin: "topleft" }
     }
 
-    log("build layer", { id: l.id, type: l.type, role, bodies: bodies.length, joints: joints.length })
-    return { role, bodies, joints, anchor }
+    return null
   }
 
-  const syncFromBodies = (R: RAPIERNS) => {
+  const syncFromBodies = () => {
     Object.entries(handlesRef.current).forEach(([id, h]) => {
       const l = layers.find(x=>x.id===id); if (!l) return
-      if (h.role === "collider" || h.role === "rigid") {
-        const b = h.bodies[0]; if (!b) return
-        const t = b.translation()
-        const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
-        const cx = t.x, cy = t.y
+      const b = h.bodies[0]; if (!b) return
+      const t = b.translation()
+      const rot = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
+      const cx = t.x, cy = t.y
+      if (!isFinite(cx) || !isFinite(cy) || !isFinite(rot)) return
 
-        if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(ang)) {
-          log("NaN from body, skip frame", { id })
-          return
-        }
-
-        if (l.node instanceof Konva.Circle) {
-          l.node.absolutePosition({ x: cx, y: cy })
-          l.node.rotation(rad2deg(ang))
-        } else {
-          // центр тела → левый-верхний Konva-узла с учётом угла
-          const w = h.anchor.w
-          const hh = h.anchor.h
-          const ox = w / 2
-          const oy = hh / 2
-          const cos = Math.cos(ang)
-          const sin = Math.sin(ang)
-          const rx = cos * ox - sin * oy
-          const ry = sin * ox + cos * oy
-          const xw = cx - rx
-          const yw = cy - ry
-          ;(l.node as any).absolutePosition?.({ x: xw, y: yw })
-          ;(l.node as any).rotation?.(rad2deg(ang))
-        }
+      // линии (shape): обновляем по центру и углу
+      if (l.node instanceof Konva.Line && l.type === "shape" && h.line) {
+        const hl = h.line.halfLen
+        const dx = Math.cos(rot) * hl
+        const dy = Math.sin(rot) * hl
+        l.node.points([cx - dx, cy - dy, cx + dx, cy + dy])
+        return
       }
-      if (h.role === "rope" && l.type === "strokes") {
-        const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
-        if (!line) return
-        const pts:number[] = []
-        h.bodies.forEach((b) => { const p = b.translation(); pts.push(p.x, p.y) })
-        if (pts.length>=4) { line.points(pts) }
+
+      // центр-якорь
+      if (h.origin === "center") {
+        ;(l.node as any).absolutePosition?.({ x: cx, y: cy })
+        ;(l.node as any).rotation?.(rad2deg(rot))
+        return
+      }
+
+      // левый-верхний якорь (Rect/Image/Text/Group)
+      if (h.origin === "topleft" && h.w && h.h) {
+        const ox = -h.w/2
+        const oy = -h.h/2
+        const rx =  Math.cos(rot)*ox - Math.sin(rot)*oy
+        const ry =  Math.sin(rot)*ox + Math.cos(rot)*oy
+        ;(l.node as any).absolutePosition?.({ x: cx + rx, y: cy + ry })
+        ;(l.node as any).rotation?.(rad2deg(rot))
+        return
       }
     })
     artLayerRef.current?.batchDraw()
@@ -1052,10 +1159,10 @@ export default function EditorCanvas() {
   }
 
   const stepLoop = () => {
-    const R = rapierRef.current, w = worldRef.current
-    if (!R || !w) return
+    const w = worldRef.current
+    if (!w) return
     w.step()
-    syncFromBodies(R)
+    syncFromBodies()
     frameRef.current++
     if (frameRef.current % 60 === 0) log("frame", frameRef.current)
     rafRef.current = requestAnimationFrame(stepLoop)
@@ -1081,10 +1188,19 @@ export default function EditorCanvas() {
 
     log("start physics: gravity", { gx, gy })
 
-    // пол
+    // границы: 4 стены по периметру
     {
-      const ground = world.createRigidBody(mod.RigidBodyDesc.fixed().setTranslation(BASE_W/2, BASE_H - 8))
-      world.createCollider(mod.ColliderDesc.cuboid(BASE_W/2, 8), ground)
+      const WALL = 32
+      const walls = [
+        { x: BASE_W/2,       y: -WALL/2,        w: BASE_W + WALL*2, h: WALL }, // top
+        { x: BASE_W/2,       y: BASE_H + WALL/2, w: BASE_W + WALL*2, h: WALL }, // bottom
+        { x: -WALL/2,        y: BASE_H/2,       w: WALL, h: BASE_H + WALL*2 }, // left
+        { x: BASE_W + WALL/2,y: BASE_H/2,       w: WALL, h: BASE_H + WALL*2 }, // right
+      ]
+      for (const wDesc of walls) {
+        const rb = world.createRigidBody(mod.RigidBodyDesc.fixed().setTranslation(wDesc.x, wDesc.y))
+        world.createCollider(mod.ColliderDesc.cuboid(wDesc.w/2, wDesc.h/2), rb)
+      }
     }
 
     const currentSide = side
@@ -1094,7 +1210,6 @@ export default function EditorCanvas() {
         const roleToUse: PhysicsRole =
           ph.autoRoles && (l.meta.physRole||"off")==="off" ? inferAutoRole(l) : (l.meta.physRole||"off")
 
-        // НЕ трогаем setLayers здесь (никаких updateMeta), чтобы не триггерить ресет.
         takeBaseline(l)
         const h = buildForLayer(mod, l, roleToUse)
         if (h) handlesRef.current[l.id] = h
@@ -1130,7 +1245,7 @@ export default function EditorCanvas() {
 
   useEffect(() => () => { pausePhysics(); killWorld() }, []) // cleanup
 
-  // ===== Explode Text
+  // ===== Explode Text (как было)
   const explodeSelectedText = () => {
     const l = sel
     if (!l || l.type !== "text" || !(l.node instanceof Konva.Text)) return
@@ -1147,7 +1262,6 @@ export default function EditorCanvas() {
       width: t.width(),
     }
 
-    // оффскрин-канвас для метрик
     const canvas = document.createElement("canvas")
     const ctx = canvas.getContext("2d")!
     const weight = style.fontStyle?.includes("bold") ? "700" : "400"
@@ -1197,9 +1311,7 @@ export default function EditorCanvas() {
       y += style.fontSize * style.lineHeight
     })
 
-    // удалить исходный текстовый слой
     deleteLayer(l.id)
-    // добавить буквы
     setLayers(prev => [...prev, ...newLayers])
     artLayerRef.current?.batchDraw()
     bump()
@@ -1384,7 +1496,7 @@ export default function EditorCanvas() {
             <div className="flex items-center gap-2">
               <button className="h-8 px-3 border border-black bg-white" onClick={resetPhysics}>⟲ Reset</button>
               <button
-                className="h-8 px-3 border border-black bg-white"
+                className="h-8 px-3 border border-black bg:white"
                 disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
                 onClick={explodeSelectedText}
               >
