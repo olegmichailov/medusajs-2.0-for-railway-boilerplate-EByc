@@ -386,7 +386,7 @@ export default function EditorCanvas() {
     setIsDrawing(false)
     const lay = find(selectedId)
     if (!lay) return
-    if (ph.running && lay.meta.physRole === "rope") rebuildOne(lay.id) // создавать физику верёвки на лету
+    if (ph.running && lay.meta.physRole === "rope") rebuildOne(lay.id)
   }
 
   // сайт-шрифт
@@ -981,7 +981,7 @@ export default function EditorCanvas() {
     removeHandle(id)
 
     const bodies: RRigid[] = []
-    const joints: RJoint[] = []
+    aconst joints: RJoint[] = []
 
     const rect = getRect(l.node)
     const cx = rect.x + rect.width/2
@@ -1036,7 +1036,6 @@ export default function EditorCanvas() {
             joints.push(j)
           }
           prev = b
-          // чуть тяжелее первые звенья для устойчивости
           if (idx < 2) (b as any).setAdditionalMass?.(0.1)
         })
       }
@@ -1047,7 +1046,7 @@ export default function EditorCanvas() {
 
   const rebuildOne = (id:string) => {
     const l = layers.find(x=>x.id===id); if (!l) return
-    takeBaseline(l) // чтобы Reset вернул на новое место
+    takeBaseline(l)
     buildOne(id)
   }
 
@@ -1067,7 +1066,6 @@ export default function EditorCanvas() {
           l.node.absolutePosition({ x: cx, y: cy })
           l.node.rotation(rad2deg(ang))
         } else {
-          // вычисляем текущие габариты (после масштаб/текста) — без «зазора»
           const rect = getRect(l.node)
           const w = rect.width
           const h = rect.height
@@ -1172,6 +1170,7 @@ export default function EditorCanvas() {
     killWorld()
     artLayerRef.current?.batchDraw()
   }
+
   const pushNodeToBody = (id: string) => {
     const R = rapierRef.current, w = worldRef.current
     if (!R || !w) return
@@ -1198,13 +1197,13 @@ export default function EditorCanvas() {
       const pts = [...line.points()]
       if (pts.length < 4 || h.bodies.length === 0) return
 
-      // ресемплируем по количеству тел, чтобы тянуть можно было любым концом
       const want = h.bodies.length
       const raw: { x: number; y: number }[] = []
       for (let i = 0; i < pts.length; i += 2) raw.push({ x: pts[i], y: pts[i + 1] })
       const res: { x: number; y: number }[] = [raw[0]]
       let acc = 0
-      const step = Math.max(1, (raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)) / (want - 1))
+      const total = raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)
+      const step = Math.max(1, total / (want - 1))
       for (let i = 1; i < raw.length; i++) {
         const a = raw[i - 1], b = raw[i]
         const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy)
@@ -1250,9 +1249,8 @@ export default function EditorCanvas() {
     const onOri = (e: DeviceOrientationEvent) => {
       const beta = e.beta ?? 0
       const gamma = e.gamma ?? 0
-      // проекция вектора "вниз" по плоскости экрана
-      const x = Math.sin(gamma * Math.PI / 180)
-      const y = Math.sin(beta  * Math.PI / 180)
+      const x = Math.sin((gamma * Math.PI) / 180)
+      const y = Math.sin((beta  * Math.PI) / 180)
       const deg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
       setPh(s => ({ ...s, angleDeg: Math.round(deg) }))
       applyNewGravity()
@@ -1265,7 +1263,7 @@ export default function EditorCanvas() {
 
   useEffect(() => () => { pausePhysics(); killWorld(); disableGyro() }, []) // cleanup
 
-  // ===== Explode Text (разбить выбранный текст на буквы) =====
+  // ===== Explode Text =====
   const explodeSelectedText = () => {
     const l = sel
     if (!l || l.type !== "text" || !(l.node instanceof Konva.Text)) return
@@ -1282,7 +1280,6 @@ export default function EditorCanvas() {
       width: t.width(),
     }
 
-    // оффскрин-канвас для метрик
     const canvas = document.createElement("canvas")
     const ctx = canvas.getContext("2d")!
     const weight = style.fontStyle?.includes("bold") ? "700" : "400"
@@ -1332,9 +1329,7 @@ export default function EditorCanvas() {
       y += style.fontSize * style.lineHeight
     })
 
-    // удалить исходный текстовый слой
     deleteLayer(l.id)
-    // добавить буквы
     setLayers(prev => [...prev, ...newLayers])
     artLayerRef.current?.batchDraw()
     if (ph.running) { newLayers.forEach(nl => buildOne(nl.id)) }
