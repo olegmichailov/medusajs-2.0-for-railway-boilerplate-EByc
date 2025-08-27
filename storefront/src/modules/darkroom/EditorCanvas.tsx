@@ -970,7 +970,6 @@ export default function EditorCanvas() {
     removeHandle(id)
 
     const bodies: RRigid[] = []
-    the:
     const joints: RJoint[] = []
 
     const rect = getRect(l.node)
