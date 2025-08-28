@@ -1,4 +1,3 @@
-/* ---------- EditorCanvas.tsx (final) ---------- */
 "use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -21,25 +20,28 @@ const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
-/* ====================== Физика: масштаб ====================== */
+/* ====================== Физика ====================== */
 const WORLD_SCALE = 50
 const px2m = (v:number) => v / WORLD_SCALE
 const m2px = (v:number) => v * WORLD_SCALE
 
-/* ====================== Физика: тюнинг устойчивости ====================== */
-const SUBSTEPS = 3                             // несколько шагов за кадр
-const DRAG_AS_KINEMATIC = true                 // во время драга делаем тела кинематическими
-const ROPE_SEG_TARGET = 26                     // длина сегмента в пикселях
+// устойчивость и «игровость»
+const SUBSTEPS = 5                           // больше стабильности
+const ROPE_SEG_TARGET = 24                   // короче сегменты — живее
 const ROPE_THICK_MIN = 6
-const ROPE_ANGLE_LIMIT_DEG = 135               // мягкий предел сгиба
-const ROPE_DISABLE_SELF_COLLISION = true       // не сталкивать сегменты друг с другом
+const ROPE_ANGLE_LIMIT_DEG = 170             // почти свободно гнётся
+const RIGID_DENSITY = 0.6                    // помягче толкается
+const RIGID_LIN_DAMP = 1.2
+const RIGID_ANG_DAMP = 1.2
+const ROPE_DENSITY = 0.35
+const ROPE_LIN_DAMP = 1.4
+const ROPE_ANG_DAMP = 1.6
 
 /* ====================== Утилиты ====================== */
 const uid = () => Math.random().toString(36).slice(2)
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
-const hash32 = (s:string) => { let h=2166136261|0; for (let i=0;i<s.length;i++) { h^=s.charCodeAt(i); h = Math.imul(h, 16777619) } return (h>>>0) }
 
 /* ====================== Типы ====================== */
 type BaseMeta = {
@@ -108,7 +110,6 @@ export default function EditorCanvas() {
   const bump = () => setUiTick(v => (v + 1) | 0)
 
   const isTransformingRef = useRef(false)
-  const draggingIdRef = useRef<string|null>(null)  // id узла, который сейчас тащим (для кинематики на время драга)
 
   // Вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
@@ -266,7 +267,7 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // меняем ширину
+        // ширина
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -282,7 +283,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // меняем fontSize
+        // fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -425,11 +426,9 @@ export default function EditorCanvas() {
       : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
 
   const attachCommonHandlers = (k: AnyNode, id: string) => {
-    // снятие старых слушателей (если клон/переиспользование)
     ;(k as any).off?.(".phys .transformerSync .tap .click .dblclick .dbltap")
     ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
-    // синхронизация во время физики
     ;(k as any).on("dragmove.phys", () => { if (ph.running) pushNodeToBody(id) })
     ;(k as any).on("dragend.phys",  () => { if (ph.running) rebuildOne(id) })
     ;(k as any).on("transform.phys", () => { if (ph.running) pushNodeToBody(id) })
@@ -610,7 +609,7 @@ export default function EditorCanvas() {
     vv?.addEventListener("scroll", place as any)
   }
 
-  /* ====================== Жесты (мобилка) ====================== */
+  /* ====================== Жесты (мобилка) + mouse joint ====================== */
   type G = {
     active: boolean
     two: boolean
@@ -625,6 +624,76 @@ export default function EditorCanvas() {
     lastPointer?: { x: number, y: number }
   }
   const gestureRef = useRef<G>({ active:false, two:false, startDist:0, startAngle:0, startScaleX:1, startScaleY:1, startRot:0, startPos:{x:0,y:0}, centerCanvas:{x:0,y:0}, nodeId:null })
+
+  // mouse joint (якорь + джойнт)
+  const dragPhysRef = useRef<{anchor: RRigid | null, joint: RJoint | null, target: { id: string, idx: number } | null}>({ anchor: null, joint: null, target: null })
+
+  const ensureAnchor = () => {
+    const R = rapierRef.current, w = worldRef.current
+    if (!R || !w) return null
+    if (dragPhysRef.current.anchor) return dragPhysRef.current.anchor
+    const b = (w as any).createRigidBody((R as any).RigidBodyDesc.kinematicPositionBased().setTranslation(0,0))
+    dragPhysRef.current.anchor = b
+    return b
+  }
+  const startPhysDrag = (canvasX:number, canvasY:number, lay: AnyLayer) => {
+    const R = rapierRef.current, w = worldRef.current
+    if (!R || !w) return
+    const h = handlesRef.current[lay.id]
+    if (!h || h.bodies.length===0) return
+
+    const ax = px2m(canvasX), ay = px2m(canvasY)
+    const anchor = ensureAnchor(); if (!anchor) return
+    ;(anchor as any).setNextKinematicTranslation?.({ x: ax, y: ay })
+
+    let idx = 0
+    if (h.role === "rope") {
+      // выбираем ближайший сегмент к курсору
+      let best = Infinity, bestIdx = 0
+      h.bodies.forEach((b, i) => {
+        const t = (b as any).translation()
+        const d = Math.hypot(m2px(t.x)-canvasX, m2px(t.y)-canvasY)
+        if (d < best) { best = d; bestIdx = i }
+      })
+      idx = bestIdx
+    }
+
+    const target = h.bodies[idx]
+    // для чистых colliders тянем напрямую (они сами кинематические)
+    if (h.role === "collider") {
+      dragPhysRef.current.target = { id: lay.id, idx: 0 }
+      dragPhysRef.current.joint = null
+      return
+    }
+
+    // revolute — свободно вращается, но прицеплен к якорю
+    const jd = (R as any).JointData.revolute({ x: 0, y: 0 }, { x: 0, y: 0 })
+    const j = (w as any).createImpulseJoint(jd, anchor, target, true)
+    dragPhysRef.current.joint = j
+    dragPhysRef.current.target = { id: lay.id, idx }
+  }
+  const movePhysDrag = (canvasX:number, canvasY:number) => {
+    const R = rapierRef.current; if (!R) return
+    const anchor = dragPhysRef.current.anchor; if (!anchor) return
+    ;(anchor as any).setNextKinematicTranslation?.({ x: px2m(canvasX), y: px2m(canvasY) })
+    // colliders — просто двигаем само тело
+    const tgt = dragPhysRef.current.target
+    if (tgt) {
+      const h = handlesRef.current[tgt.id]
+      if (h && h.role === "collider" && h.bodies[0]) {
+        const b = h.bodies[0]
+        ;(b as any).setNextKinematicTranslation?.({ x: px2m(canvasX), y: px2m(canvasY) })
+        ;(b as any).setNextKinematicRotation?.(0)
+      }
+    }
+  }
+  const endPhysDrag = () => {
+    const w = worldRef.current; if (!w) return
+    const j = dragPhysRef.current.joint
+    if (j) { try { (w as any).removeImpulseJoint(j, true) } catch {} }
+    dragPhysRef.current.joint = null
+    dragPhysRef.current.target = null
+  }
 
   const getStagePointer = () => stageRef.current?.getPointerPosition() || { x: 0, y: 0 }
   const toCanvas = (p: {x:number,y:number}) => ({ x: p.x/scale, y: p.y/scale })
@@ -648,13 +717,6 @@ export default function EditorCanvas() {
     const dy = stagePoint.y - p2.y
     ;(node as any).x?.(((node as any).x?.() ?? 0) + dx)
     ;(node as any).y?.(((node as any).y?.() ?? 0) + dy)
-  }
-
-  // helper: включить/выключить кинематику у всех тел слоя
-  const setBodiesKinematic = (id: string, on: boolean) => {
-    const R = rapierRef.current; const h = handlesRef.current[id]; if (!R || !h) return
-    const kind = (R as any).RigidBodyType?.KinematicPositionBased
-    h.bodies.forEach(b => b.setBodyType(on ? kind : (R as any).RigidBodyType?.Dynamic, true))
   }
 
   const onDown = (e: any) => {
@@ -682,6 +744,15 @@ export default function EditorCanvas() {
       const lay = find(selectedId)
 
       if (lay && !lay.meta.locked) {
+        // если физика включена — начинаем mouse joint
+        if (ph.running && (lay.meta.physRole !== "off" || lay.type === "strokes")) {
+          const p = toCanvas(getStagePointer())
+          startPhysDrag(p.x, p.y, lay)
+          gestureRef.current.active = false // управление берёт joint
+          return
+        }
+
+        // обычный жест (без физики)
         gestureRef.current = {
           ...gestureRef.current,
           active: true, two: false, nodeId: lay.id,
@@ -692,10 +763,6 @@ export default function EditorCanvas() {
           startScaleX: (lay.node as any).scaleX?.() ?? 1,
           startScaleY: (lay.node as any).scaleY?.() ?? 1,
           startRot: (lay.node as any).rotation?.() ?? 0
-        }
-        if (ph.running && DRAG_AS_KINEMATIC) {
-          draggingIdRef.current = lay.id
-          setBodiesKinematic(lay.id, true)
         }
       }
       return
@@ -714,6 +781,14 @@ export default function EditorCanvas() {
       const dist = Math.hypot(dx, dy)
       const ang  = Math.atan2(dy, dx)
 
+      // при включённой физике pinch тоже переводим в mouse-joint (перетаскивание)
+      if (ph.running && (lay.meta.physRole !== "off" || lay.type === "strokes")) {
+        const p = toCanvas({ x: cx, y: cy })
+        startPhysDrag(p.x, p.y, lay)
+        gestureRef.current.active = false
+        return
+      }
+
       gestureRef.current = {
         active: true, two: true, nodeId: lay.id,
         startDist: Math.max(dist, 0.0001), startAngle: ang,
@@ -726,10 +801,6 @@ export default function EditorCanvas() {
       }
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
-      if (ph.running && DRAG_AS_KINEMATIC) {
-        draggingIdRef.current = lay.id
-        setBodiesKinematic(lay.id, true)
-      }
     }
   }
 
@@ -742,6 +813,13 @@ export default function EditorCanvas() {
       if (!isDrawing) return
       const p = toCanvas(getStagePointer())
       appendStroke(p.x, p.y)
+      return
+    }
+
+    // mouse joint активен — ведём якорь
+    if (ph.running && dragPhysRef.current.target) {
+      const p = toCanvas(getStagePointer())
+      movePhysDrag(p.x, p.y)
       return
     }
 
@@ -795,13 +873,7 @@ export default function EditorCanvas() {
 
   const onUp = () => {
     if (isDrawing) finishStroke()
-    if (ph.running && DRAG_AS_KINEMATIC && draggingIdRef.current) {
-      // возвращаем обратно в динамику
-      setBodiesKinematic(draggingIdRef.current, false)
-      // лёгкая нормализация позы
-      rebuildOne(draggingIdRef.current)
-      draggingIdRef.current = null
-    }
+    if (ph.running) endPhysDrag()
     gestureRef.current.active = false
     gestureRef.current.two = false
     isTransformingRef.current = false
@@ -999,8 +1071,8 @@ export default function EditorCanvas() {
     const d = dyn ? (R as any).RigidBodyDesc.dynamic() : (R as any).RigidBodyDesc.fixed()
     if (dyn) {
       d.setCcdEnabled(true)
-      d.setLinearDamping(1.0)
-      d.setAngularDamping(1.0)
+      d.setLinearDamping(RIGID_LIN_DAMP)
+      d.setAngularDamping(RIGID_ANG_DAMP)
     }
     return d
   }
@@ -1035,13 +1107,12 @@ export default function EditorCanvas() {
       return (w as any).createRigidBody(desc)
     }
 
-    const addCuboidCollider = (b: RRigid, wpx:number, hpx:number, groups?: any) => {
+    const addCuboidCollider = (b: RRigid, wpx:number, hpx:number) => {
       const col = (R as any).ColliderDesc
         .cuboid(px2m(wpx/2), px2m(hpx/2))
-        .setFriction(0.8)
-        .setRestitution(0.02)
-        .setDensity(1)
-      if (groups) (col as any).setCollisionGroups(groups)
+        .setFriction(0.9)
+        .setRestitution(0.0)
+        .setDensity(RIGID_DENSITY)
       ;(w as any).createCollider(col, b)
     }
 
@@ -1053,7 +1124,7 @@ export default function EditorCanvas() {
         const rpx = (l.node as Konva.Circle).radius()
         const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
         const col = (R as any).ColliderDesc.ball(px2m(rpx))
-          .setFriction(0.8).setRestitution(0.02).setDensity(1)
+          .setFriction(0.9).setRestitution(0.0).setDensity(RIGID_DENSITY)
         ;(w as any).createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.RegularPolygon && (l.node as Konva.RegularPolygon).sides() === 3) {
@@ -1065,7 +1136,7 @@ export default function EditorCanvas() {
         }
         const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
         const col = (R as any).ColliderDesc.convexHull(new Float32Array(verts))!
-          .setFriction(0.8).setRestitution(0.02).setDensity(1)
+          .setFriction(0.9).setRestitution(0.0).setDensity(RIGID_DENSITY)
         ;(w as any).createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.Group && (l.node as any).getChildren()?.length===2) {
@@ -1090,7 +1161,7 @@ export default function EditorCanvas() {
             const ang = Math.atan2(y2-y1, x2-x1)
             const b = mkRB(dyn, cxSeg, cySeg, rad2deg(ang), isKinematic)
             const col = (R as any).ColliderDesc.cuboid(px2m(len/2), px2m(sw/2))
-              .setFriction(0.8).setRestitution(0.02).setDensity(1)
+              .setFriction(0.9).setRestitution(0.0).setDensity(RIGID_DENSITY)
             ;(w as any).createCollider(col, b)
             bodies.push(b)
           }
@@ -1111,7 +1182,6 @@ export default function EditorCanvas() {
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
         const thickness = Math.max(ROPE_THICK_MIN, (line?.strokeWidth()||12))
-        // равномерный сэмплинг
         const samples: {x:number;y:number}[] = []
         let acc = 0
         let prev = { x: pts[0], y: pts[1] }
@@ -1120,7 +1190,7 @@ export default function EditorCanvas() {
           const p = { x: pts[i], y: pts[i+1] }
           const d = Math.hypot(p.x - prev.x, p.y - prev.y)
           acc += d
-          while (acc >= ROPE_SEG_TARGET) { // больше точек = стабильнее
+          while (acc >= ROPE_SEG_TARGET) {
             const k = (ROPE_SEG_TARGET - (acc - d)) / d
             samples.push({ x: prev.x + (p.x - prev.x) * k, y: prev.y + (p.y - prev.y) * k })
             acc -= ROPE_SEG_TARGET
@@ -1128,15 +1198,6 @@ export default function EditorCanvas() {
           prev = p
         }
         if (samples.length < 2) samples.push(prev)
-
-        // маска коллизий: не сталкиваться сам с собой
-        let groupsForRope: any = undefined
-        if (ROPE_DISABLE_SELF_COLLISION) {
-          const bit = 1 << ((hash32(id) % 14) + 2) // избегаем default (бит 1)
-          const inv = ~bit
-          const hasIG = (R as any).InteractionGroups
-          groupsForRope = hasIG ? new (R as any).InteractionGroups(bit, inv) : (((bit & 0xffff) << 16) | (inv & 0xffff))
-        }
 
         for (let i=0; i<samples.length-1; i++) {
           const a = samples[i], b = samples[i+1]
@@ -1149,18 +1210,16 @@ export default function EditorCanvas() {
               .setTranslation(px2m(cxSeg), px2m(cySeg))
               .setRotation(ang)
               .setCcdEnabled(true)
-              .setLinearDamping(0.95)
-              .setAngularDamping(0.95)
+              .setLinearDamping(ROPE_LIN_DAMP)
+              .setAngularDamping(ROPE_ANG_DAMP)
           )
           const col = (R as any).ColliderDesc.cuboid(px2m(len/2), px2m(thickness/2))
-            .setFriction(0.6).setRestitution(0.0).setDensity(0.8)
-          if (groupsForRope) (col as any).setCollisionGroups(groupsForRope)
+            .setFriction(0.9).setRestitution(0.0).setDensity(ROPE_DENSITY)
           ;(w as any).createCollider(col, rb)
           bodies.push(rb)
 
           if (i>0) {
             const prevB = bodies[bodies.length-2]
-            // revolute + мягкие угловые лимиты, чтобы не «складывалась в комок»
             const jd = (R as any).JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 })
             ;(jd as any).limitsEnabled = true
             ;(jd as any).limits = [deg2rad(-ROPE_ANGLE_LIMIT_DEG), deg2rad(ROPE_ANGLE_LIMIT_DEG)]
@@ -1222,8 +1281,11 @@ export default function EditorCanvas() {
 
   const killWorld = () => {
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    // удалить текущий mouse-joint
+    try { endPhysDrag() } catch {}
     handlesRef.current = {}
     worldRef.current = null
+    dragPhysRef.current.anchor = null
   }
 
   const stepLoop = () => {
@@ -1311,8 +1373,6 @@ export default function EditorCanvas() {
     const l = layers.find(x => x.id === id)
     if (!l) return
 
-    const dragging = draggingIdRef.current === id
-
     if (h.role === "rigid" || h.role === "collider") {
       const rect = getRect(l.node)
       const cx = rect.x + rect.width / 2
@@ -1320,11 +1380,7 @@ export default function EditorCanvas() {
       const angDeg = (l.node as any).rotation?.() || 0
       const b = h.bodies[0]; if (!b) return
 
-      if (dragging && DRAG_AS_KINEMATIC) {
-        ;(b as any).setBodyType?.((R as any).RigidBodyType?.KinematicPositionBased, true)
-        ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
-        ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
-      } else if (h.role === "collider") {
+      if (h.role === "collider") {
         ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
         ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
       } else {
@@ -1346,7 +1402,6 @@ export default function EditorCanvas() {
       const raw: { x: number; y: number }[] = []
       for (let i = 0; i < pts.length; i += 2) raw.push({ x: pts[i], y: pts[i + 1] })
 
-      // равномерная дискретизация
       const res: { x: number; y: number }[] = [raw[0]]
       let acc = 0
       const total = raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)
@@ -1367,12 +1422,7 @@ export default function EditorCanvas() {
 
       res.forEach((p, i) => {
         const b = h.bodies[i]; if (!b) return
-        if (dragging && DRAG_AS_KINEMATIC) {
-          ;(b as any).setBodyType?.((R as any).RigidBodyType?.KinematicPositionBased, true)
-          ;(b as any).setNextKinematicTranslation?.({ x: px2m(p.x), y: px2m(p.y) })
-        } else {
-          ;(b as any).setTranslation?.({ x: px2m(p.x), y: px2m(p.y) }, true)
-        }
+        ;(b as any).setTranslation?.({ x: px2m(p.x), y: px2m(p.y) }, true)
         ;(b as any).setLinvel?.({ x: 0, y: 0 }, true)
         ;(b as any).setAngvel?.(0, true)
         ;(b as any).wakeUp?.()
@@ -1708,4 +1758,3 @@ export default function EditorCanvas() {
     </div>
   )
 }
-/* ---------- /EditorCanvas.tsx ---------- */
