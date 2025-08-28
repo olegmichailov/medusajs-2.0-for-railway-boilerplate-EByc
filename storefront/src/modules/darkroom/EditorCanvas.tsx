@@ -1,3 +1,4 @@
+/* ---------- EditorCanvas.tsx (final) ---------- */
 "use client"
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -21,17 +22,24 @@ const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
 /* ====================== Физика: масштаб ====================== */
-/** 1 «метр» в Rapier = 50 px на канве */
 const WORLD_SCALE = 50
 const px2m = (v:number) => v / WORLD_SCALE
 const m2px = (v:number) => v * WORLD_SCALE
+
+/* ====================== Физика: тюнинг устойчивости ====================== */
+const SUBSTEPS = 3                             // несколько шагов за кадр
+const DRAG_AS_KINEMATIC = true                 // во время драга делаем тела кинематическими
+const ROPE_SEG_TARGET = 26                     // длина сегмента в пикселях
+const ROPE_THICK_MIN = 6
+const ROPE_ANGLE_LIMIT_DEG = 135               // мягкий предел сгиба
+const ROPE_DISABLE_SELF_COLLISION = true       // не сталкивать сегменты друг с другом
 
 /* ====================== Утилиты ====================== */
 const uid = () => Math.random().toString(36).slice(2)
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
-const log = (...a:any[]) => console.log("[PHYS]", ...a)
+const hash32 = (s:string) => { let h=2166136261|0; for (let i=0;i<s.length;i++) { h^=s.charCodeAt(i); h = Math.imul(h, 16777619) } return (h>>>0) }
 
 /* ====================== Типы ====================== */
 type BaseMeta = {
@@ -100,6 +108,7 @@ export default function EditorCanvas() {
   const bump = () => setUiTick(v => (v + 1) | 0)
 
   const isTransformingRef = useRef(false)
+  const draggingIdRef = useRef<string|null>(null)  // id узла, который сейчас тащим (для кинематики на время драга)
 
   // Вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
@@ -152,7 +161,7 @@ export default function EditorCanvas() {
   const [ph, setPh] = useState({
     running: false,
     angleDeg: 90,
-    strength: 9.8, // м/с^2
+    strength: 9.8,
     autoRoles: true,
     gyro: false,
   })
@@ -166,7 +175,7 @@ export default function EditorCanvas() {
     artLayerRef.current?.batchDraw()
     attachTransformer()
     if (ph.running) resetPhysics()
-  }, [side]) // ← только side
+  }, [side])
 
   // видимость слоёв
   useEffect(() => {
@@ -175,7 +184,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [layers, side])
 
-  // одноразовая «починка» gCO
+  // одноразовый фикс gCO
   useEffect(() => {
     layers.forEach((l) => {
       const node: any = l.node
@@ -190,7 +199,7 @@ export default function EditorCanvas() {
   /* ====================== Transformer / TEXT ====================== */
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
-  const trTargetRef   = useRef<Konva.Node | null>(null) // FIX: отслеживаем прошлую цель трансформера
+  const trTargetRef   = useRef<Konva.Node | null>(null)
   const textSnapRef   = useRef<{ fs0:number; wrap0:number; cx0:number; cy0:number }|null>(null)
   const captureTextSnap = (t: Konva.Text) => {
     const wrap0 = Math.max(1, t.width() || 1)
@@ -202,17 +211,12 @@ export default function EditorCanvas() {
 
   const clearTransformerBoundBox = () => {
     const tr = trRef.current!
-    // FIX: сбрасываем кастомный boundBoxFunc, который включался для текста
     ;(tr as any).boundBoxFunc((_: any, newBox: any) => newBox)
   }
-
   const detachAllFromPrevTarget = () => {
     const prev = trTargetRef.current
     if (!prev) return
-    ;(prev as any).off(".guard")
-    ;(prev as any).off(".textsnap")
-    ;(prev as any).off(".textnorm")
-    ;(prev as any).off(".transformerSync")
+    ;(prev as any).off(".guard .textsnap .textnorm .phys .transformerSync")
     trTargetRef.current = null
   }
 
@@ -221,16 +225,14 @@ export default function EditorCanvas() {
     const n = lay?.node as unknown as Konva.Node | undefined
     const disabled = !n || lay?.meta.locked || isStrokeGroup(lay!.node) || isEraseGroup(lay!.node) || tool !== "move"
 
-    // снять обработчики с предыдущей цели
     detachAllFromPrevTarget()
-
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
 
     const tr = trRef.current!
     if (disabled) {
       tr.nodes([])
-      clearTransformerBoundBox() // FIX: возвращаем дефолтный бокс
+      clearTransformerBoundBox()
       uiLayerRef.current?.batchDraw()
       return
     }
@@ -238,7 +240,6 @@ export default function EditorCanvas() {
     tr.nodes([n!])
     tr.rotateEnabled(true)
 
-    // общая защита
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
     ;(n as any).on("transformstart.guard", onStart)
@@ -265,7 +266,7 @@ export default function EditorCanvas() {
         const s = textSnapRef.current!
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // боковые ручки — меняем ширину
+        // меняем ширину
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -281,7 +282,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // углы/вертикаль — меняем fontSize
+        // меняем fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -309,11 +310,9 @@ export default function EditorCanvas() {
         requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw() })
       }
       t.on("transformend.textnorm", onTextNormalizeEnd)
-
       detachTextFix.current = () => { t.off(".textsnap"); t.off(".textnorm") }
     } else {
-      // не текст — включаем обычный трансформер
-      clearTransformerBoundBox() // FIX: сброс поведения текста
+      clearTransformerBoundBox()
       tr.keepRatio(true)
       ;(n as any).on("transform.transformerSync", () => { if (ph.running) pushNodeToBody((n as any).id()) })
       ;(n as any).on("transformend.transformerSync", () => { if (ph.running) rebuildOne((n as any).id()) })
@@ -426,6 +425,8 @@ export default function EditorCanvas() {
       : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
 
   const attachCommonHandlers = (k: AnyNode, id: string) => {
+    // снятие старых слушателей (если клон/переиспользование)
+    ;(k as any).off?.(".phys .transformerSync .tap .click .dblclick .dbltap")
     ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
     // синхронизация во время физики
@@ -649,6 +650,13 @@ export default function EditorCanvas() {
     ;(node as any).y?.(((node as any).y?.() ?? 0) + dy)
   }
 
+  // helper: включить/выключить кинематику у всех тел слоя
+  const setBodiesKinematic = (id: string, on: boolean) => {
+    const R = rapierRef.current; const h = handlesRef.current[id]; if (!R || !h) return
+    const kind = (R as any).RigidBodyType?.KinematicPositionBased
+    h.bodies.forEach(b => b.setBodyType(on ? kind : (R as any).RigidBodyType?.Dynamic, true))
+  }
+
   const onDown = (e: any) => {
     e.evt?.preventDefault?.()
     const touches: TouchList | undefined = e.evt.touches
@@ -672,7 +680,7 @@ export default function EditorCanvas() {
         if (found && found.side === side) select(found.id)
       }
       const lay = find(selectedId)
-      // FIX: разрешаем жесты и для strokes-групп (раньше было запрещено)
+
       if (lay && !lay.meta.locked) {
         gestureRef.current = {
           ...gestureRef.current,
@@ -684,6 +692,10 @@ export default function EditorCanvas() {
           startScaleX: (lay.node as any).scaleX?.() ?? 1,
           startScaleY: (lay.node as any).scaleY?.() ?? 1,
           startRot: (lay.node as any).rotation?.() ?? 0
+        }
+        if (ph.running && DRAG_AS_KINEMATIC) {
+          draggingIdRef.current = lay.id
+          setBodiesKinematic(lay.id, true)
         }
       }
       return
@@ -714,6 +726,10 @@ export default function EditorCanvas() {
       }
       trRef.current?.nodes([])
       uiLayerRef.current?.batchDraw()
+      if (ph.running && DRAG_AS_KINEMATIC) {
+        draggingIdRef.current = lay.id
+        setBodiesKinematic(lay.id, true)
+      }
     }
   }
 
@@ -737,7 +753,6 @@ export default function EditorCanvas() {
       const dy = p.y - prev.y
 
       if (lay.type === "strokes") {
-        // FIX: тащим «верёвку» — смещаем все точки линии, затем синхронизируем тела
         const g = lay.node as Konva.Group
         const line = (g.getChildren().at(0) as Konva.Line | undefined)
         if (line) {
@@ -780,6 +795,13 @@ export default function EditorCanvas() {
 
   const onUp = () => {
     if (isDrawing) finishStroke()
+    if (ph.running && DRAG_AS_KINEMATIC && draggingIdRef.current) {
+      // возвращаем обратно в динамику
+      setBodiesKinematic(draggingIdRef.current, false)
+      // лёгкая нормализация позы
+      rebuildOne(draggingIdRef.current)
+      draggingIdRef.current = null
+    }
     gestureRef.current.active = false
     gestureRef.current.two = false
     isTransformingRef.current = false
@@ -809,8 +831,8 @@ export default function EditorCanvas() {
     })
     if (selectedId === id) select(null)
     artLayerRef.current?.batchDraw()
-    bump()
     if (ph.running) removeHandle(id)
+    bump()
   }
 
   const duplicateLayer = (id: string) => {
@@ -824,8 +846,8 @@ export default function EditorCanvas() {
     attachCommonHandlers(clone, newLay.id)
     setLayers(p => [...p, newLay]); select(newLay.id)
     artLayerRef.current?.batchDraw()
-    bump()
     if (ph.running) buildOne(newLay.id)
+    bump()
   }
 
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
@@ -859,8 +881,8 @@ export default function EditorCanvas() {
       return { ...l, meta }
     }))
     artLayerRef.current?.batchDraw()
-    bump()
     if (typeof patch.physRole !== "undefined" && ph.running) rebuildOne(id)
+    bump()
   }
 
   const onLayerSelect = (id: string) => { select(id); if (tool !== "move") set({ tool: "move" }) }
@@ -885,15 +907,15 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedLineHeight = (lh:number)   => { const n = sel?.node as Konva.Text; if (!n) return; n.lineHeight(clamp(lh, 0.5, 3)); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
-  const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump(); if (ph.running && sel) rebuildOne(sel.id) }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedLineHeight = (lh:number)   => { const n = sel?.node as Konva.Text; if (!n) return; n.lineHeight(clamp(lh, 0.5, 3)); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
+  const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); if (ph.running && sel) rebuildOne(sel.id); bump() }
 
   // ===== Clear All
   const clearArt = () => {
@@ -902,8 +924,8 @@ export default function EditorCanvas() {
     setLayers(prev => prev.filter(l => l.side !== side))
     select(null)
     artLayerRef.current?.batchDraw()
-    bump()
     if (ph.running) { pausePhysics(); killWorld(); startPhysics() }
+    bump()
   }
 
   // ===== Скачивание
@@ -940,7 +962,6 @@ export default function EditorCanvas() {
   const worldRef  = useRef<RWorld | null>(null)
   const handlesRef = useRef<Record<string, PhysHandle>>({})
   const rafRef = useRef<number | null>(null)
-  const frameRef = useRef(0)
 
   const deg2rad = (d:number) => d * Math.PI / 180
   const rad2deg = (r:number) => r * 180 / Math.PI
@@ -974,8 +995,8 @@ export default function EditorCanvas() {
   }
 
   const mkRigidDesc = (R:RAPIERNS, dyn:boolean, kinematic=false) => {
-    if (kinematic) return R.RigidBodyDesc.kinematicPositionBased()
-    const d = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
+    if (kinematic) return (R as any).RigidBodyDesc.kinematicPositionBased()
+    const d = dyn ? (R as any).RigidBodyDesc.dynamic() : (R as any).RigidBodyDesc.fixed()
     if (dyn) {
       d.setCcdEnabled(true)
       d.setLinearDamping(1.0)
@@ -987,8 +1008,8 @@ export default function EditorCanvas() {
   const removeHandle = (id:string) => {
     const R = rapierRef.current, w = worldRef.current; if (!R || !w) return
     const h = handlesRef.current[id]; if (!h) return
-    try { h.joints?.forEach(j => w.removeImpulseJoint(j, true)) } catch {}
-    try { h.bodies.forEach(b => w.removeRigidBody(b)) } catch {}
+    try { h.joints?.forEach(j => (w as any).removeImpulseJoint(j, true)) } catch {}
+    try { h.bodies.forEach(b => (w as any).removeRigidBody(b)) } catch {}
     delete handlesRef.current[id]
   }
 
@@ -1011,16 +1032,17 @@ export default function EditorCanvas() {
       const desc = mkRigidDesc(R, dyn, asKinematic)
         .setTranslation(px2m(cxpx), px2m(cypx))
         .setRotation(deg2rad(angle))
-      return w.createRigidBody(desc)
+      return (w as any).createRigidBody(desc)
     }
 
-    const addCuboidCollider = (b: RRigid, wpx:number, hpx:number) => {
-      const col = R.ColliderDesc
+    const addCuboidCollider = (b: RRigid, wpx:number, hpx:number, groups?: any) => {
+      const col = (R as any).ColliderDesc
         .cuboid(px2m(wpx/2), px2m(hpx/2))
         .setFriction(0.8)
         .setRestitution(0.02)
         .setDensity(1)
-      w.createCollider(col, b)
+      if (groups) (col as any).setCollisionGroups(groups)
+      ;(w as any).createCollider(col, b)
     }
 
     if (role === "collider" || role === "rigid") {
@@ -1030,9 +1052,9 @@ export default function EditorCanvas() {
       if (l.node instanceof Konva.Circle) {
         const rpx = (l.node as Konva.Circle).radius()
         const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
-        const col = R.ColliderDesc.ball(px2m(rpx))
+        const col = (R as any).ColliderDesc.ball(px2m(rpx))
           .setFriction(0.8).setRestitution(0.02).setDensity(1)
-        w.createCollider(col, b)
+        ;(w as any).createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.RegularPolygon && (l.node as Konva.RegularPolygon).sides() === 3) {
         const r = (l.node as Konva.RegularPolygon).radius()
@@ -1042,9 +1064,9 @@ export default function EditorCanvas() {
           verts.push(px2m(Math.cos(a)*r), px2m(Math.sin(a)*r))
         }
         const b = mkRB(dyn, l.node.x(), l.node.y(), angleDeg, isKinematic)
-        const col = R.ColliderDesc.convexHull(new Float32Array(verts))!
+        const col = (R as any).ColliderDesc.convexHull(new Float32Array(verts))!
           .setFriction(0.8).setRestitution(0.02).setDensity(1)
-        w.createCollider(col, b)
+        ;(w as any).createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.Group && (l.node as any).getChildren()?.length===2) {
         const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
@@ -1067,9 +1089,9 @@ export default function EditorCanvas() {
             const len = Math.hypot(x2-x1, y2-y1)
             const ang = Math.atan2(y2-y1, x2-x1)
             const b = mkRB(dyn, cxSeg, cySeg, rad2deg(ang), isKinematic)
-            const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(sw/2))
+            const col = (R as any).ColliderDesc.cuboid(px2m(len/2), px2m(sw/2))
               .setFriction(0.8).setRestitution(0.02).setDensity(1)
-            w.createCollider(col, b)
+            ;(w as any).createCollider(col, b)
             bodies.push(b)
           }
         } else {
@@ -1088,8 +1110,8 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const SEG_TARGET = 22
-        const thickness = Math.max(6, (line?.strokeWidth()||12))
+        const thickness = Math.max(ROPE_THICK_MIN, (line?.strokeWidth()||12))
+        // равномерный сэмплинг
         const samples: {x:number;y:number}[] = []
         let acc = 0
         let prev = { x: pts[0], y: pts[1] }
@@ -1098,10 +1120,23 @@ export default function EditorCanvas() {
           const p = { x: pts[i], y: pts[i+1] }
           const d = Math.hypot(p.x - prev.x, p.y - prev.y)
           acc += d
-          if (acc >= SEG_TARGET) { samples.push(p); acc = 0 }
+          while (acc >= ROPE_SEG_TARGET) { // больше точек = стабильнее
+            const k = (ROPE_SEG_TARGET - (acc - d)) / d
+            samples.push({ x: prev.x + (p.x - prev.x) * k, y: prev.y + (p.y - prev.y) * k })
+            acc -= ROPE_SEG_TARGET
+          }
           prev = p
         }
         if (samples.length < 2) samples.push(prev)
+
+        // маска коллизий: не сталкиваться сам с собой
+        let groupsForRope: any = undefined
+        if (ROPE_DISABLE_SELF_COLLISION) {
+          const bit = 1 << ((hash32(id) % 14) + 2) // избегаем default (бит 1)
+          const inv = ~bit
+          const hasIG = (R as any).InteractionGroups
+          groupsForRope = hasIG ? new (R as any).InteractionGroups(bit, inv) : (((bit & 0xffff) << 16) | (inv & 0xffff))
+        }
 
         for (let i=0; i<samples.length-1; i++) {
           const a = samples[i], b = samples[i+1]
@@ -1109,25 +1144,27 @@ export default function EditorCanvas() {
           const cySeg = (a.y + b.y)/2
           const len = Math.max(4, Math.hypot(b.x-a.x, b.y-a.y))
           const ang = Math.atan2(b.y-a.y, b.x-a.x)
-          const rb = w.createRigidBody(
-            R.RigidBodyDesc.dynamic()
+          const rb = (w as any).createRigidBody(
+            (R as any).RigidBodyDesc.dynamic()
               .setTranslation(px2m(cxSeg), px2m(cySeg))
               .setRotation(ang)
               .setCcdEnabled(true)
-              .setLinearDamping(0.9)
-              .setAngularDamping(0.9)
+              .setLinearDamping(0.95)
+              .setAngularDamping(0.95)
           )
-          const col = R.ColliderDesc.cuboid(px2m(len/2), px2m(thickness/2))
-            .setFriction(0.7).setRestitution(0.02).setDensity(0.8)
-          w.createCollider(col, rb)
+          const col = (R as any).ColliderDesc.cuboid(px2m(len/2), px2m(thickness/2))
+            .setFriction(0.6).setRestitution(0.0).setDensity(0.8)
+          if (groupsForRope) (col as any).setCollisionGroups(groupsForRope)
+          ;(w as any).createCollider(col, rb)
           bodies.push(rb)
 
           if (i>0) {
             const prevB = bodies[bodies.length-2]
-            const j = w.createImpulseJoint(
-              R.JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 }),
-              prevB, rb, true
-            )
+            // revolute + мягкие угловые лимиты, чтобы не «складывалась в комок»
+            const jd = (R as any).JointData.revolute({ x: -px2m(len/2), y: 0 }, { x: px2m(len/2), y: 0 })
+            ;(jd as any).limitsEnabled = true
+            ;(jd as any).limits = [deg2rad(-ROPE_ANGLE_LIMIT_DEG), deg2rad(ROPE_ANGLE_LIMIT_DEG)]
+            const j = (w as any).createImpulseJoint(jd, prevB, rb, true)
             joints.push(j)
           }
         }
@@ -1148,8 +1185,8 @@ export default function EditorCanvas() {
       const l = layers.find(x=>x.id===id); if (!l) return
       if ((h.role === "collider" || h.role === "rigid") && h.bodies[0]) {
         const b = h.bodies[0]
-        const t = b.translation()
-        const ang = (b.rotation() as any)?.angle ?? (b.rotation() as unknown as number) ?? 0
+        const t = (b as any).translation()
+        const ang = ((b as any).rotation()?.angle) ?? ((b as any).rotation() as unknown as number) ?? 0
         const cx = m2px(t.x), cy = m2px(t.y)
         if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(ang)) return
 
@@ -1176,7 +1213,7 @@ export default function EditorCanvas() {
         const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
         if (!line) return
         const pts:number[] = []
-        h.bodies.forEach((b) => { const p = b.translation(); pts.push(m2px(p.x), m2px(p.y)) })
+        h.bodies.forEach((b) => { const p = (b as any).translation(); pts.push(m2px(p.x), m2px(p.y)) })
         if (pts.length>=4) { line.points(pts) }
       }
     })
@@ -1192,9 +1229,8 @@ export default function EditorCanvas() {
   const stepLoop = () => {
     const R = rapierRef.current, w = worldRef.current
     if (!R || !w) return
-    w.step()
+    for (let i=0;i<SUBSTEPS;i++) (w as any).step()
     syncFromBodies(R)
-    frameRef.current++
     rafRef.current = requestAnimationFrame(stepLoop)
   }
 
@@ -1208,8 +1244,8 @@ export default function EditorCanvas() {
     const halfW = px2m(BASE_W/2)
     const halfH = px2m(BASE_H/2)
     const mk = (cx:number, cy:number, hx:number, hy:number) => {
-      const rb = w.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy))
-      w.createCollider(R.ColliderDesc.cuboid(hx, hy).setFriction(0.9).setRestitution(0.01), rb)
+      const rb = (w as any).createRigidBody((R as any).RigidBodyDesc.fixed().setTranslation(cx, cy))
+      ;(w as any).createCollider((R as any).ColliderDesc.cuboid(hx, hy).setFriction(0.9).setRestitution(0.01), rb)
     }
     mk(px2m(BASE_W/2), px2m(BASE_H) + thick, halfW, thick)
     mk(px2m(BASE_W/2), -thick,             halfW, thick)
@@ -1219,10 +1255,9 @@ export default function EditorCanvas() {
 
   const startPhysics = async () => {
     if (ph.running) return
-
     if (!rapierRef.current) {
       const mod = await import("@dimforge/rapier2d-compat")
-      await mod.init()
+      await (mod as any).init?.()
       rapierRef.current = mod
     }
 
@@ -1236,9 +1271,8 @@ export default function EditorCanvas() {
     const a = deg2rad(ph.angleDeg)
     const gx = Math.cos(a) * ph.strength
     const gy = Math.sin(a) * ph.strength
-    const world = new R.World({ x: gx, y: gy })
+    const world = new (R as any).World({ x: gx, y: gy })
     worldRef.current = world
-    frameRef.current = 0
 
     buildWalls(R, world)
 
@@ -1277,6 +1311,8 @@ export default function EditorCanvas() {
     const l = layers.find(x => x.id === id)
     if (!l) return
 
+    const dragging = draggingIdRef.current === id
+
     if (h.role === "rigid" || h.role === "collider") {
       const rect = getRect(l.node)
       const cx = rect.x + rect.width / 2
@@ -1284,16 +1320,20 @@ export default function EditorCanvas() {
       const angDeg = (l.node as any).rotation?.() || 0
       const b = h.bodies[0]; if (!b) return
 
-      if (h.role === "collider") {
+      if (dragging && DRAG_AS_KINEMATIC) {
+        ;(b as any).setBodyType?.((R as any).RigidBodyType?.KinematicPositionBased, true)
+        ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
+        ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
+      } else if (h.role === "collider") {
         ;(b as any).setNextKinematicTranslation?.({ x: px2m(cx), y: px2m(cy) })
         ;(b as any).setNextKinematicRotation?.(deg2rad(angDeg))
       } else {
-        b.setTranslation({ x: px2m(cx), y: px2m(cy) }, true)
-        b.setRotation(deg2rad(angDeg), true)
+        ;(b as any).setTranslation?.({ x: px2m(cx), y: px2m(cy) }, true)
+        ;(b as any).setRotation?.(deg2rad(angDeg), true)
       }
-      b.setLinvel?.({ x: 0, y: 0 }, true)
-      b.setAngvel?.(0, true)
-      b.wakeUp()
+      ;(b as any).setLinvel?.({ x: 0, y: 0 }, true)
+      ;(b as any).setAngvel?.(0, true)
+      ;(b as any).wakeUp?.()
       return
     }
 
@@ -1305,6 +1345,8 @@ export default function EditorCanvas() {
       const want = h.bodies.length
       const raw: { x: number; y: number }[] = []
       for (let i = 0; i < pts.length; i += 2) raw.push({ x: pts[i], y: pts[i + 1] })
+
+      // равномерная дискретизация
       const res: { x: number; y: number }[] = [raw[0]]
       let acc = 0
       const total = raw.reduce((s, p, i) => i ? s + Math.hypot(p.x - raw[i - 1].x, p.y - raw[i - 1].y) : 0, 0)
@@ -1322,12 +1364,18 @@ export default function EditorCanvas() {
         acc += dist - t
       }
       while (res.length < want) res.push(raw.at(-1)!)
+
       res.forEach((p, i) => {
         const b = h.bodies[i]; if (!b) return
-        b.setTranslation({ x: px2m(p.x), y: px2m(p.y) }, true)
-        b.setLinvel?.({ x: 0, y: 0 }, true)
-        b.setAngvel?.(0, true)
-        b.wakeUp()
+        if (dragging && DRAG_AS_KINEMATIC) {
+          ;(b as any).setBodyType?.((R as any).RigidBodyType?.KinematicPositionBased, true)
+          ;(b as any).setNextKinematicTranslation?.({ x: px2m(p.x), y: px2m(p.y) })
+        } else {
+          ;(b as any).setTranslation?.({ x: px2m(p.x), y: px2m(p.y) }, true)
+        }
+        ;(b as any).setLinvel?.({ x: 0, y: 0 }, true)
+        ;(b as any).setAngvel?.(0, true)
+        ;(b as any).wakeUp?.()
       })
     }
   }
@@ -1437,7 +1485,6 @@ export default function EditorCanvas() {
 
     deleteLayer(l.id)
     setLayers(prev => [...prev, ...newLayers])
-    // Выделим первый символ для удобства + починим трансформер прямо сейчас
     if (newLayers[0]) select(newLayers[0].id)
     requestAnimationFrame(attachTransformer)
     artLayerRef.current?.batchDraw()
@@ -1515,13 +1562,12 @@ export default function EditorCanvas() {
         selectedKind={selectedKind}
         selectedProps={selectedProps}
         setSelectedFill={(hex)=>{ 
-          const s = sel
-          if (!s) return
+          const s = sel; if (!s) return
           if (selectedKind === "text") (s.node as Konva.Text).fill(hex)
           else if ((s.node as any).fill) (s.node as any).fill(hex)
           artLayerRef.current?.batchDraw(); 
-          bump()
           if (ph.running && s) rebuildOne(s.id)
+          bump()
         }}
         setSelectedStroke={setSelectedStroke}
         setSelectedStrokeW={setSelectedStrokeW}
@@ -1545,7 +1591,7 @@ export default function EditorCanvas() {
         mobileTopOffset={padTop}
       />
 
-      {/* ===== Physics panel (desktop) — узкая */}
+      {/* ===== Physics panel (desktop) */}
       {!isMobile && (
         <div className="fixed right-4 bottom-4 w-[320px] border border-black bg-white rounded-none shadow-xl p-3 space-y-3 z-50">
           <div className="text-[11px] uppercase tracking-widest">Physics (Rapier2D)</div>
@@ -1614,7 +1660,7 @@ export default function EditorCanvas() {
         </div>
       )}
 
-      {/* ===== Physics (mobile) — Play/Pause внутри панели, ничего не перекрывает */}
+      {/* ===== Physics (mobile) — Play/Pause внутри панели */}
       {isMobile && (
         <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w-[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
           <div className="flex items-center gap-2 text-[12px]">
@@ -1662,3 +1708,4 @@ export default function EditorCanvas() {
     </div>
   )
 }
+/* ---------- /EditorCanvas.tsx ---------- */
