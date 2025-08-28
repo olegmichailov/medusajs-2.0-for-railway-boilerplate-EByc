@@ -119,15 +119,11 @@ export default function EditorCanvas() {
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // фикс скролла + корректная видимость панели слоёв
+  // фикс скролла
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
-
-    // Гарантируем: на десктопе слои включены, на мобилке скрыты
-    if (!isMobile) set({ showLayers: true })
-    else           set({ showLayers: false })
-
+    if (isMobile) set({ showLayers: false })
     return () => { document.body.style.overflow = prev }
   }, [set])
 
@@ -194,6 +190,7 @@ export default function EditorCanvas() {
   /* ====================== Transformer / TEXT ====================== */
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
+  const trTargetRef   = useRef<Konva.Node | null>(null) // FIX: отслеживаем прошлую цель трансформера
   const textSnapRef   = useRef<{ fs0:number; wrap0:number; cx0:number; cy0:number }|null>(null)
   const captureTextSnap = (t: Konva.Text) => {
     const wrap0 = Math.max(1, t.width() || 1)
@@ -203,27 +200,54 @@ export default function EditorCanvas() {
     textSnapRef.current = { fs0: t.fontSize(), wrap0, cx0, cy0 }
   }
 
+  const clearTransformerBoundBox = () => {
+    const tr = trRef.current!
+    // FIX: сбрасываем кастомный boundBoxFunc, который включался для текста
+    ;(tr as any).boundBoxFunc((_: any, newBox: any) => newBox)
+  }
+
+  const detachAllFromPrevTarget = () => {
+    const prev = trTargetRef.current
+    if (!prev) return
+    ;(prev as any).off(".guard")
+    ;(prev as any).off(".textsnap")
+    ;(prev as any).off(".textnorm")
+    ;(prev as any).off(".transformerSync")
+    trTargetRef.current = null
+  }
+
   const attachTransformer = () => {
     const lay = find(selectedId)
-    const n = lay?.node
-    const disabled = !n || lay?.meta.locked || isStrokeGroup(n) || isEraseGroup(n) || tool !== "move"
+    const n = lay?.node as unknown as Konva.Node | undefined
+    const disabled = !n || lay?.meta.locked || isStrokeGroup(lay!.node) || isEraseGroup(lay!.node) || tool !== "move"
+
+    // снять обработчики с предыдущей цели
+    detachAllFromPrevTarget()
+
     if (detachTextFix.current) { detachTextFix.current(); detachTextFix.current = null }
     if (detachGuard.current)   { detachGuard.current();   detachGuard.current   = null }
 
     const tr = trRef.current!
-    if (disabled) { tr.nodes([]); uiLayerRef.current?.batchDraw(); return }
+    if (disabled) {
+      tr.nodes([])
+      clearTransformerBoundBox() // FIX: возвращаем дефолтный бокс
+      uiLayerRef.current?.batchDraw()
+      return
+    }
 
-    tr.nodes([n])
+    tr.nodes([n!])
     tr.rotateEnabled(true)
 
+    // общая защита
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
     ;(n as any).on("transformstart.guard", onStart)
     ;(n as any).on("transformend.guard", onEndT)
     detachGuard.current = () => (n as any).off(".guard")
+    trTargetRef.current = n || null
 
-    if (isTextNode(n)) {
-      const t = n as Konva.Text
+    if (isTextNode(lay!.node)) {
+      const t = lay!.node as Konva.Text
       tr.keepRatio(false)
       tr.enabledAnchors([
         "top-left","top-right","bottom-left","bottom-right",
@@ -288,6 +312,8 @@ export default function EditorCanvas() {
 
       detachTextFix.current = () => { t.off(".textsnap"); t.off(".textnorm") }
     } else {
+      // не текст — включаем обычный трансформер
+      clearTransformerBoundBox() // FIX: сброс поведения текста
       tr.keepRatio(true)
       ;(n as any).on("transform.transformerSync", () => { if (ph.running) pushNodeToBody((n as any).id()) })
       ;(n as any).on("transformend.transformerSync", () => { if (ph.running) rebuildOne((n as any).id()) })
@@ -297,14 +323,6 @@ export default function EditorCanvas() {
   }
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
-
-  // дополнительный безопасный апдейт трансформера
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      trRef.current?.forceUpdate()
-      uiLayerRef.current?.batchDraw()
-    })
-  }, [selectedId, tool, side])
 
   // drag lock при brush/erase
   useEffect(() => {
@@ -654,7 +672,8 @@ export default function EditorCanvas() {
         if (found && found.side === side) select(found.id)
       }
       const lay = find(selectedId)
-      if (lay && !isStrokeGroup(lay.node) && !lay.meta.locked) {
+      // FIX: разрешаем жесты и для strokes-групп (раньше было запрещено)
+      if (lay && !lay.meta.locked) {
         gestureRef.current = {
           ...gestureRef.current,
           active: true, two: false, nodeId: lay.id,
@@ -672,7 +691,7 @@ export default function EditorCanvas() {
 
     if (touches && touches.length >= 2) {
       const lay = find(selectedId)
-      if (!lay || isStrokeGroup(lay.node) || lay.meta.locked) return
+      if (!lay || lay.meta.locked) return
       const t1 = touches[0], t2 = touches[1]
       const p1 = { x: t1.clientX, y: t1.clientY }
       const p2 = { x: t2.clientX, y: t2.clientY }
@@ -716,8 +735,20 @@ export default function EditorCanvas() {
       const prev = gestureRef.current.lastPointer || p
       const dx = p.x - prev.x
       const dy = p.y - prev.y
-      ;(lay.node as any).x(((lay.node as any).x?.() ?? 0) + dx)
-      ;(lay.node as any).y(((lay.node as any).y?.() ?? 0) + dy)
+
+      if (lay.type === "strokes") {
+        // FIX: тащим «верёвку» — смещаем все точки линии, затем синхронизируем тела
+        const g = lay.node as Konva.Group
+        const line = (g.getChildren().at(0) as Konva.Line | undefined)
+        if (line) {
+          const pts = [...line.points()]
+          for (let i=0;i<pts.length;i+=2) { pts[i] += dx; pts[i+1] += dy }
+          line.points(pts)
+        }
+      } else {
+        ;(lay.node as any).x(((lay.node as any).x?.() ?? 0) + dx)
+        ;(lay.node as any).y(((lay.node as any).y?.() ?? 0) + dy)
+      }
       gestureRef.current.lastPointer = p
       artLayerRef.current?.batchDraw()
       if (ph.running) pushNodeToBody(lay.id)
@@ -741,7 +772,7 @@ export default function EditorCanvas() {
 
       const c = gestureRef.current.centerCanvas
       const sp = { x: c.x * scale, y: c.y * scale }
-      applyAround(lay.node, sp, newScale, newRot)
+      applyAround(lay.node as any, sp, newScale, newRot)
       artLayerRef.current?.batchDraw()
       if (ph.running) pushNodeToBody(lay.id)
     }
@@ -928,7 +959,6 @@ export default function EditorCanvas() {
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       if (line) base.points = [...line.points()]
     }
-    // только сохраняем в state, без перерисовки физики
     setLayers(p => p.map(x => x.id===l.id ? ({ ...x, meta: { ...x.meta, baseline: base } }) : x))
   }
 
@@ -947,7 +977,7 @@ export default function EditorCanvas() {
     if (kinematic) return R.RigidBodyDesc.kinematicPositionBased()
     const d = dyn ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed()
     if (dyn) {
-      d.setCcdEnabled(true) // CCD против «пролёта»
+      d.setCcdEnabled(true)
       d.setLinearDamping(1.0)
       d.setAngularDamping(1.0)
     }
@@ -995,7 +1025,7 @@ export default function EditorCanvas() {
 
     if (role === "collider" || role === "rigid") {
       const dyn = role === "rigid"
-      const isKinematic = role === "collider" // двигаем руками, чтобы не «продрагивало»
+      const isKinematic = role === "collider"
 
       if (l.node instanceof Konva.Circle) {
         const rpx = (l.node as Konva.Circle).radius()
@@ -1005,7 +1035,6 @@ export default function EditorCanvas() {
         w.createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.RegularPolygon && (l.node as Konva.RegularPolygon).sides() === 3) {
-        // треугольник — выпуклый полигон
         const r = (l.node as Konva.RegularPolygon).radius()
         const verts:number[] = []
         for (let i=0;i<3;i++) {
@@ -1018,7 +1047,6 @@ export default function EditorCanvas() {
         w.createCollider(col, b)
         bodies.push(b)
       } else if (l.node instanceof Konva.Group && (l.node as any).getChildren()?.length===2) {
-        // cross (две перекрёстные балки)
         const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
         const children = (l.node as any).getChildren() as Konva.Node[]
         children.forEach(ch => {
@@ -1027,7 +1055,6 @@ export default function EditorCanvas() {
         })
         bodies.push(b)
       } else if (l.node instanceof Konva.Line && (l.node as Konva.Line).stroke()) {
-        // линия → сегменты-капсулы
         const ln = l.node as Konva.Line
         const pts = [...ln.points()]
         const sw = Math.max(1, ln.strokeWidth() || 1)
@@ -1051,7 +1078,6 @@ export default function EditorCanvas() {
           bodies.push(b)
         }
       } else {
-        // прямоугольник/картинка/текст/прочее
         const b = mkRB(dyn, cx, cy, angleDeg, isKinematic)
         addCuboidCollider(b, rect.width, rect.height)
         bodies.push(b)
@@ -1059,13 +1085,11 @@ export default function EditorCanvas() {
     }
 
     if (role === "rope" && l.type === "strokes") {
-      // цепочка прямоугольных сегментов + revolute стыки
       const line = (l.node as any).getChildren?.().at(0) as Konva.Line | undefined
       const pts = line ? [...line.points()] : []
       if (pts.length >= 4) {
-        const SEG_TARGET = 22 // px — целевая длина сегмента
+        const SEG_TARGET = 22
         const thickness = Math.max(6, (line?.strokeWidth()||12))
-        // выборка равномерными отрезками
         const samples: {x:number;y:number}[] = []
         let acc = 0
         let prev = { x: pts[0], y: pts[1] }
@@ -1187,7 +1211,6 @@ export default function EditorCanvas() {
       const rb = w.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(cx, cy))
       w.createCollider(R.ColliderDesc.cuboid(hx, hy).setFriction(0.9).setRestitution(0.01), rb)
     }
-    // bottom, top, left, right (вне экрана, чтобы не залипало о край)
     mk(px2m(BASE_W/2), px2m(BASE_H) + thick, halfW, thick)
     mk(px2m(BASE_W/2), -thick,             halfW, thick)
     mk(-thick,                px2m(BASE_H/2), thick, halfH)
@@ -1318,7 +1341,7 @@ export default function EditorCanvas() {
     ;(w as any).gravity = { x: gx, y: gy }
   }
 
-  // --- Gyro (опционально)
+  // --- Gyro
   const gyroOffRef = useRef<null | (() => void)>(null)
   const enableGyro = async () => {
     if (gyroOffRef.current) return
@@ -1414,6 +1437,9 @@ export default function EditorCanvas() {
 
     deleteLayer(l.id)
     setLayers(prev => [...prev, ...newLayers])
+    // Выделим первый символ для удобства + починим трансформер прямо сейчас
+    if (newLayers[0]) select(newLayers[0].id)
+    requestAnimationFrame(attachTransformer)
     artLayerRef.current?.batchDraw()
     if (ph.running) { newLayers.forEach(nl => buildOne(nl.id)) }
   }
@@ -1588,52 +1614,50 @@ export default function EditorCanvas() {
         </div>
       )}
 
-      {/* ===== Physics (mobile) */}
+      {/* ===== Physics (mobile) — Play/Pause внутри панели, ничего не перекрывает */}
       {isMobile && (
-        <>
-          <button
-            className="fixed right-3 bottom-[148px] z-50 h-10 px-3 border border-black bg-white rounded-none"
-            onClick={()=> ph.running ? pausePhysics() : startPhysics()}
-          >
-            {ph.running ? "■ Pause" : "▸ Play"}
-          </button>
-          <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w/[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
-            <div className="flex items-center gap-2 text-[12px]">
-              <label className="flex items-center gap-1">
-                <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
-                Auto roles
-              </label>
-              <label className="flex items-center gap-1 ml-3">
-                <input type="checkbox" checked={ph.gyro} onChange={(e)=>setPh(s=>({...s, gyro:e.target.checked}))} />
-                Gyro
-              </label>
-              <button className="h-8 px-3 border border-black bg-white ml-auto" onClick={resetPhysics}>⟲ Reset</button>
-              <button
-                className="h-8 px-3 border border-black bg-white"
-                disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
-                onClick={explodeSelectedText}
-              >
-                ✷ Explode
-              </button>
-            </div>
-            <div className="mt-2">
-              <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Dir</span><span className="flex-1" /></div>
-              <input type="range" min={0} max={360} step={1}
-                value={ph.angleDeg}
-                onChange={(e)=>{ const v=parseInt(e.target.value,10); setPh(s=>({...s, angleDeg:v})); applyNewGravity() }}
-                className="w-full"
-              />
-            </div>
-            <div className="mt-2">
-              <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Str</span><span className="flex-1" /></div>
-              <input type="range" min={0} max={30} step={0.1}
-                value={ph.strength}
-                onChange={(e)=>{ const v=parseFloat(e.target.value); setPh(s=>({...s, strength:v})); applyNewGravity() }}
-                className="w-full"
-              />
-            </div>
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-40 w-[92%] max-w-[520px] border border-black bg-white/95 rounded-none shadow-xl p-2">
+          <div className="flex items-center gap-2 text-[12px]">
+            <button
+              className="h-8 px-3 border border-black bg-white"
+              onClick={()=> ph.running ? pausePhysics() : startPhysics()}
+            >
+              {ph.running ? "■ Pause" : "▸ Play"}
+            </button>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={ph.autoRoles} onChange={(e)=>setPh(s=>({...s, autoRoles:e.target.checked}))} />
+              Auto roles
+            </label>
+            <label className="flex items-center gap-1 ml-1">
+              <input type="checkbox" checked={ph.gyro} onChange={(e)=>setPh(s=>({...s, gyro:e.target.checked}))} />
+              Gyro
+            </label>
+            <button className="h-8 px-3 border border-black bg-white ml-auto" onClick={resetPhysics}>⟲ Reset</button>
+            <button
+              className="h-8 px-3 border border-black bg-white"
+              disabled={!sel || sel.type!=="text" || !(sel.node instanceof Konva.Text)}
+              onClick={explodeSelectedText}
+            >
+              ✷ Explode
+            </button>
           </div>
-        </>
+          <div className="mt-2">
+            <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Dir</span><span className="flex-1" /></div>
+            <input type="range" min={0} max={360} step={1}
+              value={ph.angleDeg}
+              onChange={(e)=>{ const v=parseInt(e.target.value,10); setPh(s=>({...s, angleDeg:v})); applyNewGravity() }}
+              className="w-full"
+            />
+          </div>
+          <div className="mt-2">
+            <div className="flex items-center gap-2 text-[12px] mb-1"><span className="w-10">Str</span><span className="flex-1" /></div>
+            <input type="range" min={0} max={30} step={0.1}
+              value={ph.strength}
+              onChange={(e)=>{ const v=parseFloat(e.target.value); setPh(s=>({...s, strength:v})); applyNewGravity() }}
+              className="w-full"
+            />
+          </div>
+        </div>
       )}
     </div>
   )
