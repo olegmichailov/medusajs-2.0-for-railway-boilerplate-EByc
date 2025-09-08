@@ -1,18 +1,14 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
-import dynamic from "next/dynamic"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, Layers, AlignLeft, AlignCenter, AlignRight,
-  Wand2
+  Trash2, Layers, AlignLeft, AlignCenter, AlignRight, Wand2
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
-
-const RasterLabPanel = dynamic(() => import("./RasterLabPanel"), { ssr: false })
 
 type MobileLayersItem = {
   id: string
@@ -33,6 +29,24 @@ type MobileLayersProps = {
   onDuplicate: (id: string) => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
+}
+
+export type FXMethod = "mono" | "dither" | "diffusion" | "duotone"
+export type FXShape = "dot" | "square" | "line"
+
+export type FXState = {
+  method: FXMethod
+  shape: FXShape
+  cell: number
+  gamma: number
+  minDot: number
+  maxDot: number
+  angle: number
+  ditherSize: 4 | 8
+  diffusion: "floyd" | "atkinson"
+  duoA: string
+  duoB: string
+  angleB: number
 }
 
 type ToolbarProps = {
@@ -86,11 +100,9 @@ type ToolbarProps = {
   setSelectedLetterSpacing: (n: number) => void
   setSelectedAlign: (a: "left" | "center" | "right") => void
 
-  // FX интеграция — EditorCanvas передаёт эти колбэки:
-  onFXLoadSelected: () => Promise<HTMLImageElement | null>
-  onFXLoadCanvas: () => Promise<HTMLImageElement | null>
-  onFXBakeToSelected: (blob: Blob) => Promise<void>
-  onFXBakeToNewLayer: (blob: Blob) => Promise<void>
+  // === FX: состояние хранится в EditorCanvas; здесь — только управление ===
+  fx: FXState
+  setFX: (patch: Partial<FXState>) => void
 
   mobileLayers: MobileLayersProps
   mobileTopOffset?: number
@@ -115,10 +127,11 @@ const inputStop = {
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
 
-// Квадратный «ползунок»
+// Квадратный чёрный «ползунок»
 const Slider = ({
   value, onChange, min=0, max=1, step=0.01, title
 }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; title?: string }) => {
+  const pct = ((value - min) / (max - min)) * 100
   return (
     <div className="w-full" {...inputStop}>
       <div className="h-[2px] bg-black relative">
@@ -134,7 +147,7 @@ const Slider = ({
         />
         <div
           className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-black"
-          style={{ left: `${((value - min) / (max - min)) * 100}%`, transform: "translate(-50%,-50%)" }}
+          style={{ left: `${pct}%`, transform: "translate(-50%,-50%)" }}
         />
       </div>
     </div>
@@ -165,7 +178,7 @@ export default function Toolbar(props: ToolbarProps) {
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
     setSelectedLineHeight, setSelectedLetterSpacing, setSelectedAlign,
-    onFXLoadSelected, onFXLoadCanvas, onFXBakeToSelected, onFXBakeToNewLayer,
+    fx, setFX,
     mobileLayers, mobileTopOffset
   } = props
 
@@ -204,24 +217,6 @@ export default function Toolbar(props: ToolbarProps) {
     useEffect(() => setTextValue(selectedProps?.text ?? ""), [selectedProps?.text, selectedKind])
 
     const isText = selectedKind === "text"
-
-    // FX: локальный стейт
-    const [fxImg, setFxImg] = useState<HTMLImageElement | null>(null)
-    const [fxBake, setFxBake] = useState<"selected"|"new">("selected")
-    const [fxBusy, setFxBusy] = useState(false)
-
-    const loadFromSelected = async () => {
-      setFxBusy(true)
-      const img = await onFXLoadSelected()
-      setFxImg(img)
-      setFxBusy(false)
-    }
-    const loadFromCanvas = async () => {
-      setFxBusy(true)
-      const img = await onFXLoadCanvas()
-      setFxImg(img)
-      setFxBusy(false)
-    }
 
     return (
       <div
@@ -295,41 +290,114 @@ export default function Toolbar(props: ToolbarProps) {
               ))}
             </div>
 
-            {/* ===== FX MODE ===== */}
+            {/* ===== FX MODE (реал-тайм, без bake) ===== */}
             {tool === "fx" && (
               <div className="pt-1 space-y-2">
-                <div className="text-[10px] mb-1">Raster / Effects</div>
+                <div className="text-[10px] mb-1">Raster / Effects (real-time)</div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button className="h-9 border border-black bg-white text-xs" onClick={loadFromSelected} disabled={fxBusy}>
-                    Из выделения
-                  </button>
-                  <button className="h-9 border border-black bg-white text-xs" onClick={loadFromCanvas} disabled={fxBusy}>
-                    Весь канвас
-                  </button>
-                </div>
+                <label className="text-xs block">Method
+                  <select
+                    className="w-full border border-black p-1 bg-white text-sm"
+                    value={fx.method}
+                    onChange={(e)=>props.setFX({ method: e.target.value as FXMethod })}
+                    {...inputStop}
+                  >
+                    <option value="mono">Mono Halftone</option>
+                    <option value="duotone">Duotone Halftone</option>
+                    <option value="dither">Ordered Dither</option>
+                    <option value="diffusion">Error Diffusion</option>
+                  </select>
+                </label>
 
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="opacity-70">Bake:</span>
-                  <label className="flex items-center gap-1">
-                    <input type="radio" name="bake" checked={fxBake==="selected"} onChange={()=>setFxBake("selected")} />
-                    <span>в выбранный слой</span>
+                {(fx.method==="mono" || fx.method==="duotone") && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="text-[10px]">Cell
+                        <Slider value={fx.cell} min={3} max={40} step={1} onChange={(v)=>props.setFX({ cell: v })}/>
+                      </label>
+                      <label className="text-[10px]">Gamma
+                        <Slider value={fx.gamma} min={0.3} max={2.2} step={0.05} onChange={(v)=>props.setFX({ gamma: v })}/>
+                      </label>
+                      <label className="text-[10px]">Min
+                        <Slider value={fx.minDot} min={0} max={0.5} step={0.01} onChange={(v)=>props.setFX({ minDot: v })}/>
+                      </label>
+                      <label className="text-[10px]">Max
+                        <Slider value={fx.maxDot} min={0.5} max={1} step={0.01} onChange={(v)=>props.setFX({ maxDot: v })}/>
+                      </label>
+                    </div>
+
+                    <label className="text-[10px] block">Angle
+                      <Slider value={fx.angle} min={-90} max={90} step={1} onChange={(v)=>props.setFX({ angle: v })}/>
+                    </label>
+
+                    <label className="text-[10px] block">Shape
+                      <select
+                        className="w-full border border-black p-1 bg-white text-sm"
+                        value={fx.shape}
+                        onChange={(e)=>props.setFX({ shape: e.target.value as any })}
+                        {...inputStop}
+                      >
+                        <option value="dot">Dot</option>
+                        <option value="square">Square</option>
+                        <option value="line">Line</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+
+                {fx.method==="duotone" && (
+                  <div className="grid grid-cols-2 gap-2" {...inputStop}>
+                    <label className="text-[10px]">Angle B
+                      <Slider value={fx.angleB} min={-90} max={90} step={1} onChange={(v)=>props.setFX({ angleB: v })}/>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="text-[10px] w-10">A</div>
+                      <div className="w-6 h-6 border border-black" style={{background: fx.duoA}}/>
+                      <div className="grid grid-cols-6 gap-1">
+                        {PALETTE.slice(0,18).map(c=>(
+                          <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}} onClick={()=>props.setFX({ duoA: c })}/>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 col-span-2">
+                      <div className="text-[10px] w-10">B</div>
+                      <div className="w-6 h-6 border border-black" style={{background: fx.duoB}}/>
+                      <div className="grid grid-cols-12 gap-1">
+                        {PALETTE.slice(0,24).map(c=>(
+                          <button key={c} className="w-4 h-4 border border-black/40" style={{background:c}} onClick={()=>props.setFX({ duoB: c })}/>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {fx.method==="dither" && (
+                  <label className="text-[10px] block">Matrix
+                    <select
+                      className="w-full border border-black p-1 bg-white text-sm"
+                      value={String(fx.ditherSize)}
+                      onChange={(e)=>props.setFX({ ditherSize: parseInt(e.target.value) as 4|8 })}
+                      {...inputStop}
+                    >
+                      <option value="4">4×4 Bayer</option>
+                      <option value="8">8×8 Bayer</option>
+                    </select>
                   </label>
-                  <label className="flex items-center gap-1">
-                    <input type="radio" name="bake" checked={fxBake==="new"} onChange={()=>setFxBake("new")} />
-                    <span>в новый слой</span>
-                  </label>
-                </div>
+                )}
 
-                <div className="border border-black/10">
-                  <RasterLabPanel
-                    externalImage={fxImg ?? undefined}
-                    onBakeBlob={async (blob: Blob) => {
-                      if (fxBake === "selected") await onFXBakeToSelected(blob)
-                      else await onFXBakeToNewLayer(blob)
-                    }}
-                  />
-                </div>
+                {fx.method==="diffusion" && (
+                  <label className="text-[10px] block">Type
+                    <select
+                      className="w-full border border-black p-1 bg-white text-sm"
+                      value={fx.diffusion}
+                      onChange={(e)=>props.setFX({ diffusion: e.target.value as "floyd"|"atkinson" })}
+                      {...inputStop}
+                    >
+                      <option value="floyd">Floyd–Steinberg</option>
+                      <option value="atkinson">Atkinson</option>
+                    </select>
+                  </label>
+                )}
               </div>
             )}
 
@@ -400,12 +468,7 @@ export default function Toolbar(props: ToolbarProps) {
   }
 
   // =================== MOBILE ===================
-  // На мобиле показываем кнопку FX и открываем ту же панель в шторке
   const [layersOpenM, setLayersOpenM] = useState(false)
-  const [fxOpenM, setFxOpenM] = useState(false)
-  const [fxImg, setFxImg] = useState<HTMLImageElement | null>(null)
-  const [fxBake, setFxBake] = useState<"selected"|"new">("selected")
-  const [fxBusy, setFxBusy] = useState(false)
 
   const mobileButton = (t: Tool | "image" | "shape" | "text" | "fx", icon: React.ReactNode, onPress?: ()=>void) => (
     <button
@@ -416,7 +479,6 @@ export default function Toolbar(props: ToolbarProps) {
         if (t==="image") fileRef.current?.click()
         else if (t==="text") onAddText()
         else if (t==="shape") props.setTool("shape" as Tool)
-        else if (t==="fx") { setTool("fx" as Tool); setFxOpenM(true) }
         else setTool(t as Tool)
       }}
     >
@@ -434,45 +496,6 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* FX шторка */}
-      {fxOpenM && (
-        <div className="fixed inset-x-0" style={{ bottom: (mobileTopOffset ?? 0) + 36, zIndex: 40 }}>
-          <div className={clx(wrap, "p-2 mx-3")}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] tracking-widest">RASTER / EFFECTS</div>
-              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setFxOpenM(false)}>Close</button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <button className="h-9 border border-black bg-white text-xs" onClick={async()=>{ setFxBusy(true); setFxImg(await props.onFXLoadSelected()); setFxBusy(false) }} disabled={fxBusy}>Из выделения</button>
-              <button className="h-9 border border-black bg-white text-xs" onClick={async()=>{ setFxBusy(true); setFxImg(await props.onFXLoadCanvas()); setFxBusy(false) }} disabled={fxBusy}>Весь канвас</button>
-            </div>
-
-            <div className="flex items-center gap-3 text-xs mb-2">
-              <span className="opacity-70">Bake:</span>
-              <label className="flex items-center gap-1">
-                <input type="radio" name="bake-m" checked={fxBake==="selected"} onChange={()=>setFxBake("selected")} />
-                <span>в выбранный</span>
-              </label>
-              <label className="flex items-center gap-1">
-                <input type="radio" name="bake-m" checked={fxBake==="new"} onChange={()=>setFxBake("new")} />
-                <span>в новый</span>
-              </label>
-            </div>
-
-            <div className="border border-black/10">
-              <RasterLabPanel
-                externalImage={fxImg ?? undefined}
-                onBakeBlob={async (blob: Blob) => {
-                  if (fxBake === "selected") await props.onFXBakeToSelected(blob)
-                  else await props.onFXBakeToNewLayer(blob)
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
         {/* row 1 — инструменты + layers */}
@@ -490,7 +513,7 @@ export default function Toolbar(props: ToolbarProps) {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
 
-        {/* row 2 — настройки */}
+        {/* row 2 — настройки кисти / быстрые цвета */}
         <div className="px-2 py-1 flex items-center gap-2">
           <div className="flex items-center gap-2">
             <div className="text-[10px]">Color</div>
@@ -504,7 +527,29 @@ export default function Toolbar(props: ToolbarProps) {
           </div>
         </div>
 
-        {/* row 3 — FRONT/BACK + downloads */}
+        {/* row 3 — FX (компактный блок, если активен) */}
+        {props.tool === "fx" && (
+          <div className="px-2 py-2 border-t border-black/10 space-y-2">
+            <div className="text-[10px]">FX (real-time)</div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[10px]">Method
+                <select className="w-full border border-black p-1 bg-white text-sm" value={fx.method} onChange={(e)=>props.setFX({ method: e.target.value as FXMethod })}>
+                  <option value="mono">Mono</option>
+                  <option value="duotone">Duotone</option>
+                  <option value="dither">Dither</option>
+                  <option value="diffusion">Diffusion</option>
+                </select>
+              </label>
+              {(fx.method==="mono"||fx.method==="duotone") && (
+                <label className="text-[10px]">Cell
+                  <Slider value={fx.cell} min={3} max={40} step={1} onChange={(v)=>props.setFX({ cell: v })}/>
+                </label>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* row 4 — FRONT/BACK + DL */}
         <div className="px-2 py-1 grid grid-cols-2 gap-2">
           <div className="flex gap-2">
             <button className={clx("flex-1 h-10 border border-black", side==="front"?activeBtn:"bg-white")} onClick={()=>setSide("front")}>FRONT</button>
