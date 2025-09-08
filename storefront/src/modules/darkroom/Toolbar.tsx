@@ -1,14 +1,18 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, Layers, AlignLeft, AlignCenter, AlignRight, Wand2
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, Layers, AlignLeft, AlignCenter, AlignRight,
+  Wand2
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
+
+const RasterLabPanel = dynamic(() => import("./RasterLabPanel"), { ssr: false })
 
 type MobileLayersItem = {
   id: string
@@ -82,12 +86,14 @@ type ToolbarProps = {
   setSelectedLetterSpacing: (n: number) => void
   setSelectedAlign: (a: "left" | "center" | "right") => void
 
+  // FX интеграция — EditorCanvas передаёт эти колбэки:
+  onFXLoadSelected: () => Promise<HTMLImageElement | null>
+  onFXLoadCanvas: () => Promise<HTMLImageElement | null>
+  onFXBakeToSelected: (blob: Blob) => Promise<void>
+  onFXBakeToNewLayer: (blob: Blob) => Promise<void>
+
   mobileLayers: MobileLayersProps
   mobileTopOffset?: number
-
-  // NEW — управление панелью FX
-  toggleRaster: () => void
-  rasterOpen: boolean
 }
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
@@ -109,7 +115,7 @@ const inputStop = {
   onMouseUp:     (e: any) => e.stopPropagation(),
 }
 
-// Квадратный «ползунок» и чёрная линия-трек
+// Квадратный «ползунок»
 const Slider = ({
   value, onChange, min=0, max=1, step=0.01, title
 }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; title?: string }) => {
@@ -159,9 +165,8 @@ export default function Toolbar(props: ToolbarProps) {
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
     setSelectedLineHeight, setSelectedLetterSpacing, setSelectedAlign,
-    mobileLayers, mobileTopOffset,
-    // NEW:
-    toggleRaster, rasterOpen
+    onFXLoadSelected, onFXLoadCanvas, onFXBakeToSelected, onFXBakeToNewLayer,
+    mobileLayers, mobileTopOffset
   } = props
 
   // =================== DESKTOP ===================
@@ -200,10 +205,28 @@ export default function Toolbar(props: ToolbarProps) {
 
     const isText = selectedKind === "text"
 
+    // FX: локальный стейт
+    const [fxImg, setFxImg] = useState<HTMLImageElement | null>(null)
+    const [fxBake, setFxBake] = useState<"selected"|"new">("selected")
+    const [fxBusy, setFxBusy] = useState(false)
+
+    const loadFromSelected = async () => {
+      setFxBusy(true)
+      const img = await onFXLoadSelected()
+      setFxImg(img)
+      setFxBusy(false)
+    }
+    const loadFromCanvas = async () => {
+      setFxBusy(true)
+      const img = await onFXLoadCanvas()
+      setFxImg(img)
+      setFxBusy(false)
+    }
+
     return (
       <div
         className={clx("fixed", wrap)}
-        style={{ left: pos.x, top: pos.y, width: 260 }}
+        style={{ left: pos.x, top: pos.y, width: 320 }}
         onMouseDown={(e)=>e.stopPropagation()}
       >
         {/* header */}
@@ -219,8 +242,8 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers + clear + FX */}
-            <div className="flex">
+            {/* row 1 — инструменты + layers + clear */}
+            <div className="flex flex-wrap">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
                 {t:"brush",  icon:<Brush className={ico}/>},
@@ -228,12 +251,19 @@ export default function Toolbar(props: ToolbarProps) {
                 {t:"text",   icon:<TypeIcon className={ico}/>},
                 {t:"image",  icon:<ImageIcon className={ico}/>},
                 {t:"shape",  icon:<Shapes className={ico}/>},
+                {t:"fx",     icon:<Wand2 className={ico}/>},
               ].map((b)=>(
                 <button
                   key={b.t}
-                  className={clx(btn, tool===b.t ? activeBtn : "bg-white")}
-                  onClick={(e)=>{ e.stopPropagation(); if (b.t==="image") fileRef.current?.click(); else if(b.t==="text") onAddText(); else if(b.t==="shape") props.setShapeKind("square"); else setTool(b.t as Tool) }}
-                  title={b.t}
+                  className={clx(btn, (tool===b.t) ? activeBtn : "bg-white")}
+                  onClick={(e)=>{ 
+                    e.stopPropagation()
+                    if (b.t==="image") fileRef.current?.click()
+                    else if (b.t==="text") onAddText()
+                    else if (b.t==="shape") props.setShapeKind("square")
+                    else setTool(b.t as Tool)
+                  }}
+                  title={b.t.toString()}
                 >{b.icon}</button>
               ))}
               <button className={clx(btn, "ml-2 bg-white")} onClick={(e)=>{e.stopPropagation(); onClear()}} title="Clear all">
@@ -242,14 +272,10 @@ export default function Toolbar(props: ToolbarProps) {
               <button className={clx(btn, layersOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}} title="Layers">
                 <Layers className={ico}/>
               </button>
-              {/* NEW — FX */}
-              <button className={clx(btn, rasterOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleRaster()}} title="Raster / FX">
-                <Wand2 className={ico}/>
-              </button>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
             </div>
 
-            {/* row 2 — кисть */}
+            {/* row 2 — кисть + палитра (оставляем видимыми всегда) */}
             <div className="flex items-center gap-3">
               <div className="text-[10px] w-8">Color</div>
               <div className="w-6 h-6 border border-black cursor-pointer" style={{ background: brushColor }} />
@@ -258,7 +284,6 @@ export default function Toolbar(props: ToolbarProps) {
               </div>
             </div>
 
-            {/* палитра */}
             <div className="grid grid-cols-12 gap-1" {...inputStop}>
               {PALETTE.map((c)=>(
                 <button
@@ -270,51 +295,92 @@ export default function Toolbar(props: ToolbarProps) {
               ))}
             </div>
 
-            {/* shapes */}
-            <div className="pt-1">
-              <div className="text-[10px] mb-1">Shapes</div>
-              <div className="flex">
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
-                <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
+            {/* ===== FX MODE ===== */}
+            {tool === "fx" && (
+              <div className="pt-1 space-y-2">
+                <div className="text-[10px] mb-1">Raster / Effects</div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="h-9 border border-black bg-white text-xs" onClick={loadFromSelected} disabled={fxBusy}>
+                    Из выделения
+                  </button>
+                  <button className="h-9 border border-black bg-white text-xs" onClick={loadFromCanvas} disabled={fxBusy}>
+                    Весь канвас
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="opacity-70">Bake:</span>
+                  <label className="flex items-center gap-1">
+                    <input type="radio" name="bake" checked={fxBake==="selected"} onChange={()=>setFxBake("selected")} />
+                    <span>в выбранный слой</span>
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <input type="radio" name="bake" checked={fxBake==="new"} onChange={()=>setFxBake("new")} />
+                    <span>в новый слой</span>
+                  </label>
+                </div>
+
+                <div className="border border-black/10">
+                  <RasterLabPanel
+                    externalImage={fxImg ?? undefined}
+                    onBakeBlob={async (blob: Blob) => {
+                      if (fxBake === "selected") await onFXBakeToSelected(blob)
+                      else await onFXBakeToNewLayer(blob)
+                    }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* text props */}
-            <div className="pt-1 space-y-2">
-              <div className="text-[10px]">Text</div>
+            {/* ===== обычные режимы: SHAPES + TEXT (прячем при FX) ===== */}
+            {tool !== "fx" && (
+              <>
+                <div className="pt-1">
+                  <div className="text-[10px] mb-1">Shapes</div>
+                  <div className="flex">
+                    <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("square")}}><Square className={ico}/></button>
+                    <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("circle")}}><Circle className={ico}/></button>
+                    <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("triangle")}}><Triangle className={ico}/></button>
+                    <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("cross")}}><Plus className={ico}/></button>
+                    <button className={btn} onClick={(e)=>{e.stopPropagation(); onAddShape("line")}}><Slash className={ico}/></button>
+                  </div>
+                </div>
 
-              <textarea
-                value={textValue}
-                onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
-                className="w-full h-16 border border-black p-1 text-sm"
-                placeholder="Enter text"
-                {...inputStop}
-              />
+                <div className="pt-1 space-y-2">
+                  <div className="text-[10px]">Text</div>
 
-              <div className="flex items-center gap-2">
-                <div className="text-[10px] w-16">Font size</div>
-                <Slider value={Math.round(selectedProps.fontSize ?? 96)} min={8} max={800} step={1} onChange={setSelectedFontSize} />
-              </div>
+                  <textarea
+                    value={textValue}
+                    onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
+                    className="w-full h-16 border border-black p-1 text-sm"
+                    placeholder="Enter text"
+                    {...inputStop}
+                  />
 
-              <div className="flex items-center gap-2">
-                <div className="text-[10px] w-16">Line height</div>
-                <Slider value={Number(selectedProps.lineHeight ?? 1)} min={0.6} max={3} step={0.01} onChange={setSelectedLineHeight} />
-              </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[10px] w-16">Font size</div>
+                    <Slider value={Math.round(selectedProps.fontSize ?? 96)} min={8} max={800} step={1} onChange={setSelectedFontSize} />
+                  </div>
 
-              <div className="flex items-center gap-2">
-                <div className="text-[10px] w-16">Letter space</div>
-                <Slider value={Number(selectedProps.letterSpacing ?? 0)} min={-5} max={30} step={0.1} onChange={setSelectedLetterSpacing} />
-              </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[10px] w-16">Line height</div>
+                    <Slider value={Number(selectedProps.lineHeight ?? 1)} min={0.6} max={3} step={0.01} onChange={setSelectedLineHeight} />
+                  </div>
 
-              <div className="flex gap-1">
-                <button className={clx(btn, (isText && selectedProps.align==="left") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("left")}><AlignLeft className={ico}/></button>
-                <button className={clx(btn, (isText && selectedProps.align==="center") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("center")}><AlignCenter className={ico}/></button>
-                <button className={clx(btn, (isText && selectedProps.align==="right") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("right")}><AlignRight className={ico}/></button>
-              </div>
-            </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[10px] w-16">Letter space</div>
+                    <Slider value={Number(selectedProps.letterSpacing ?? 0)} min={-5} max={30} step={0.1} onChange={setSelectedLetterSpacing} />
+                  </div>
+
+                  <div className="flex gap-1">
+                    <button className={clx(btn, (isText && selectedProps.align==="left") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("left")}><AlignLeft className={ico}/></button>
+                    <button className={clx(btn, (isText && selectedProps.align==="center") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("center")}><AlignCenter className={ico}/></button>
+                    <button className={clx(btn, (isText && selectedProps.align==="right") ? activeBtn : "bg-white")} onClick={()=>setSelectedAlign("right")}><AlignRight className={ico}/></button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* FRONT/BACK + downloads */}
             <div className="grid grid-cols-2 gap-2">
@@ -334,12 +400,25 @@ export default function Toolbar(props: ToolbarProps) {
   }
 
   // =================== MOBILE ===================
+  // На мобиле показываем кнопку FX и открываем ту же панель в шторке
   const [layersOpenM, setLayersOpenM] = useState(false)
+  const [fxOpenM, setFxOpenM] = useState(false)
+  const [fxImg, setFxImg] = useState<HTMLImageElement | null>(null)
+  const [fxBake, setFxBake] = useState<"selected"|"new">("selected")
+  const [fxBusy, setFxBusy] = useState(false)
 
-  const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
+  const mobileButton = (t: Tool | "image" | "shape" | "text" | "fx", icon: React.ReactNode, onPress?: ()=>void) => (
     <button
       className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? props.onAddText() : t==="shape" ? props.setTool("shape" as Tool) : props.setTool(t as Tool)}}
+      onClick={(e)=>{ 
+        e.stopPropagation(); 
+        if (onPress) return onPress()
+        if (t==="image") fileRef.current?.click()
+        else if (t==="text") onAddText()
+        else if (t==="shape") props.setTool("shape" as Tool)
+        else if (t==="fx") { setTool("fx" as Tool); setFxOpenM(true) }
+        else setTool(t as Tool)
+      }}
     >
       {icon}
     </button>
@@ -355,27 +434,40 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <>
-      {/* Шторка LAYERS */}
-      {layersOpenM && (
+      {/* FX шторка */}
+      {fxOpenM && (
         <div className="fixed inset-x-0" style={{ bottom: (mobileTopOffset ?? 0) + 36, zIndex: 40 }}>
           <div className={clx(wrap, "p-2 mx-3")}>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] tracking-widest">LAYERS</div>
-              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
+              <div className="text-[10px] tracking-widest">RASTER / EFFECTS</div>
+              <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setFxOpenM(false)}>Close</button>
             </div>
-            <div className="space-y-2 max-h-64 overflow-auto">
-              {props.mobileLayers.items.map((l)=>(
-                <div key={l.id} className={clx("flex items-center gap-2 border border-black px-2 py-1", l.id===props.mobileLayers.selectedId ? "bg-black text-white" : "bg-white")}>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-white text-black" onClick={()=>props.mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
-                  <div className="text-xs flex-1 truncate">{l.name}</div>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveUp(l.id)}>&uarr;</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveDown(l.id)}>&darr;</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>props.mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
-                </div>
-              ))}
+
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <button className="h-9 border border-black bg-white text-xs" onClick={async()=>{ setFxBusy(true); setFxImg(await props.onFXLoadSelected()); setFxBusy(false) }} disabled={fxBusy}>Из выделения</button>
+              <button className="h-9 border border-black bg-white text-xs" onClick={async()=>{ setFxBusy(true); setFxImg(await props.onFXLoadCanvas()); setFxBusy(false) }} disabled={fxBusy}>Весь канвас</button>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs mb-2">
+              <span className="opacity-70">Bake:</span>
+              <label className="flex items-center gap-1">
+                <input type="radio" name="bake-m" checked={fxBake==="selected"} onChange={()=>setFxBake("selected")} />
+                <span>в выбранный</span>
+              </label>
+              <label className="flex items-center gap-1">
+                <input type="radio" name="bake-m" checked={fxBake==="new"} onChange={()=>setFxBake("new")} />
+                <span>в новый</span>
+              </label>
+            </div>
+
+            <div className="border border-black/10">
+              <RasterLabPanel
+                externalImage={fxImg ?? undefined}
+                onBakeBlob={async (blob: Blob) => {
+                  if (fxBake === "selected") await props.onFXBakeToSelected(blob)
+                  else await props.onFXBakeToNewLayer(blob)
+                }}
+              />
             </div>
           </div>
         </div>
@@ -383,7 +475,7 @@ export default function Toolbar(props: ToolbarProps) {
 
       {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers + FX */}
+        {/* row 1 — инструменты + layers */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -391,16 +483,9 @@ export default function Toolbar(props: ToolbarProps) {
           {mobileButton("text", <TypeIcon className={ico}/>, onAddText)}
           {mobileButton("image", <ImageIcon className={ico}/>)}
           {mobileButton("shape", <Shapes className={ico}/>)}
+          {mobileButton("fx", <Wand2 className={ico}/>)}
           <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
             <Layers className={ico}/>
-          </button>
-          {/* NEW — FX */}
-          <button
-            className={clx("h-12 px-3 border border-black", props.rasterOpen ? activeBtn : "bg-white")}
-            onClick={()=>props.toggleRaster()}
-            title="Raster / FX"
-          >
-            <Wand2 className={ico}/>
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
@@ -426,8 +511,8 @@ export default function Toolbar(props: ToolbarProps) {
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
           </div>
           <div className="flex gap-2">
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadFront}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadBack}><Download className={ico}/>DL</button>
           </div>
         </div>
       </div>
