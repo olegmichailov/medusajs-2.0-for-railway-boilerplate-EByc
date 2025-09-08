@@ -5,7 +5,7 @@ import { clx } from "@medusajs/ui"
 import {
   Move, Brush, Eraser, Type as TypeIcon, Shapes, Image as ImageIcon,
   Download, PanelRightOpen, PanelRightClose, Circle, Square, Triangle, Plus, Slash,
-  Eye, EyeOff, Lock, Unlock, Copy, Trash2, Layers, AlignLeft, AlignCenter, AlignRight
+  Eye, EyeOff, Lock, Unlock, Copy, Trash2, Layers, AlignLeft, AlignCenter, AlignRight, Wand2
 } from "lucide-react"
 import type { ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
@@ -84,6 +84,10 @@ type ToolbarProps = {
 
   mobileLayers: MobileLayersProps
   mobileTopOffset?: number
+
+  // NEW — управление панелью FX
+  toggleRaster: () => void
+  rasterOpen: boolean
 }
 
 const wrap = "backdrop-blur bg-white/90 border border-black/10 shadow-xl"
@@ -155,7 +159,9 @@ export default function Toolbar(props: ToolbarProps) {
     selectedKind, selectedProps,
     setSelectedText, setSelectedFontSize, setSelectedFontFamily, setSelectedColor,
     setSelectedLineHeight, setSelectedLetterSpacing, setSelectedAlign,
-    mobileLayers, mobileTopOffset
+    mobileLayers, mobileTopOffset,
+    // NEW:
+    toggleRaster, rasterOpen
   } = props
 
   // =================== DESKTOP ===================
@@ -213,7 +219,7 @@ export default function Toolbar(props: ToolbarProps) {
 
         {open && (
           <div className="p-2 space-y-2">
-            {/* row 1 — инструменты + layers + clear */}
+            {/* row 1 — инструменты + layers + clear + FX */}
             <div className="flex">
               {[
                 {t:"move",   icon:<Move className={ico}/>},
@@ -235,6 +241,10 @@ export default function Toolbar(props: ToolbarProps) {
               </button>
               <button className={clx(btn, layersOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleLayers()}} title="Layers">
                 <Layers className={ico}/>
+              </button>
+              {/* NEW — FX */}
+              <button className={clx(btn, rasterOpen ? activeBtn : "bg-white")} onClick={(e)=>{e.stopPropagation(); toggleRaster()}} title="Raster / FX">
+                <Wand2 className={ico}/>
               </button>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
             </div>
@@ -276,7 +286,6 @@ export default function Toolbar(props: ToolbarProps) {
             <div className="pt-1 space-y-2">
               <div className="text-[10px]">Text</div>
 
-              {/* Текст вводим В КАНВАСЕ. Это поле — просто дублирующая область, чтобы можно было быстро печатать, если надо. */}
               <textarea
                 value={textValue}
                 onChange={(e)=>{ setTextValue(e.target.value); setSelectedText(e.target.value) }}
@@ -330,7 +339,7 @@ export default function Toolbar(props: ToolbarProps) {
   const mobileButton = (t: Tool | "image" | "shape" | "text", icon: React.ReactNode, onPress?: ()=>void) => (
     <button
       className={clx("h-12 w-12 grid place-items-center border border-black rounded-none", tool===t ? activeBtn : "bg-white")}
-      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? onAddText() : t==="shape" ? props.setTool("shape" as Tool) : setTool(t as Tool)}}
+      onClick={(e)=>{ e.stopPropagation(); onPress ? onPress() : t==="image" ? fileRef.current?.click() : t==="text" ? props.onAddText() : t==="shape" ? props.setTool("shape" as Tool) : props.setTool(t as Tool)}}
     >
       {icon}
     </button>
@@ -355,16 +364,16 @@ export default function Toolbar(props: ToolbarProps) {
               <button className={clx("px-2 py-1 border border-black", activeBtn)} onClick={() => setLayersOpenM(false)}>Close</button>
             </div>
             <div className="space-y-2 max-h-64 overflow-auto">
-              {mobileLayers.items.map((l)=>(
-                <div key={l.id} className={clx("flex items-center gap-2 border border-black px-2 py-1", l.id===mobileLayers.selectedId ? "bg-black text-white" : "bg-white")}>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-white text-black" onClick={()=>mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
+              {props.mobileLayers.items.map((l)=>(
+                <div key={l.id} className={clx("flex items-center gap-2 border border-black px-2 py-1", l.id===props.mobileLayers.selectedId ? "bg-black text-white" : "bg-white")}>
+                  <button className="border border-black w-6 h-6 grid place-items-center bg-white text-black" onClick={()=>props.mobileLayers.onSelect(l.id)}>{l.type[0].toUpperCase()}</button>
                   <div className="text-xs flex-1 truncate">{l.name}</div>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveUp(l.id)}>&uarr;</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onMoveDown(l.id)}>&darr;</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
-                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveUp(l.id)}>&uarr;</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onMoveDown(l.id)}>&darr;</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onDuplicate(l.id)}><Copy className="w-3 h-3"/></button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleLock(l.id)}>{l.locked?<Lock className="w-3 h-3"/>:<Unlock className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center" onClick={()=>props.mobileLayers.onToggleVisible(l.id)}>{l.visible?<Eye className="w-3 h-3"/>:<EyeOff className="w-3 h-3"/>}</button>
+                  <button className="border border-black w-6 h-6 grid place-items-center bg-black text-white" onClick={()=>props.mobileLayers.onDelete(l.id)}><Trash2 className="w-3 h-3"/></button>
                 </div>
               ))}
             </div>
@@ -374,7 +383,7 @@ export default function Toolbar(props: ToolbarProps) {
 
       {/* Нижняя панель */}
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white/95 border-t border-black/10">
-        {/* row 1 — инструменты + layers */}
+        {/* row 1 — инструменты + layers + FX */}
         <div className="px-2 py-1 flex items-center gap-1">
           {mobileButton("move", <Move className={ico}/>)}
           {mobileButton("brush", <Brush className={ico}/>)}
@@ -384,6 +393,14 @@ export default function Toolbar(props: ToolbarProps) {
           {mobileButton("shape", <Shapes className={ico}/>)}
           <button className={clx("h-12 px-3 border border-black ml-2", layersOpenM ? activeBtn : "bg-white")} onClick={()=>setLayersOpenM(v=>!v)}>
             <Layers className={ico}/>
+          </button>
+          {/* NEW — FX */}
+          <button
+            className={clx("h-12 px-3 border border-black", props.rasterOpen ? activeBtn : "bg-white")}
+            onClick={()=>props.toggleRaster()}
+            title="Raster / FX"
+          >
+            <Wand2 className={ico}/>
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} {...inputStop}/>
         </div>
@@ -409,8 +426,8 @@ export default function Toolbar(props: ToolbarProps) {
             <button className={clx("flex-1 h-10 border border-black", side==="back"?activeBtn:"bg-white")} onClick={()=>setSide("back")}>BACK</button>
           </div>
           <div className="flex gap-2">
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadFront}><Download className={ico}/>DL</button>
-            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={props.onDownloadBack}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadFront}><Download className={ico}/>DL</button>
+            <button className="flex-1 h-10 border border-black bg-white flex items-center justify-center gap-2" onClick={onDownloadBack}><Download className={ico}/>DL</button>
           </div>
         </div>
       </div>
