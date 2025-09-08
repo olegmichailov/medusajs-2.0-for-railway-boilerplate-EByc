@@ -5,8 +5,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { Stage, Layer, Image as KImage, Transformer, Group as KGroup } from "react-konva"
 import Konva from "konva"
 import useImage from "use-image"
-import Toolbar, { FXState, FXMethod, FXShape } from "./Toolbar"
-import LayersPanel, { LayerItem } from "./LayersPanel"
+import Toolbar from "./Toolbar"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
@@ -16,120 +15,132 @@ const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// клампы текста
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
-// uid
 const uid = () => Math.random().toString(36).slice(2)
 const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
 
-// ==== ТИПЫ ====
-type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
-type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
-type AnyNode =
-  | Konva.Image
-  | Konva.Line
-  | Konva.Text
-  | Konva.Group
-  | Konva.Rect
-  | Konva.Circle
-  | Konva.RegularPolygon
-type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
-
-const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
-const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
-const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
-
-// ==== УТИЛИТЫ РАСТРОВОГО FX ====
+// ==== FX helpers (локальные, без сторонних пакетов) ====
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x))
-const luminance = (r: number, g: number, b: number) => clamp01(0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255))
-const createCanvas = (w: number, h: number) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c }
+const luminance = (r: number, g: number, b: number) => clamp01(0.2126*(r/255)+0.7152*(g/255)+0.0722*(b/255))
+const createCanvas = (w: number, h: number) => { const c=document.createElement("canvas"); c.width=w; c.height=h; return c }
 const mapTone = (t: number, gamma: number, invert: boolean) => { let d = 1 - t; d = Math.pow(d, gamma); if (invert) d = 1 - d; return clamp01(d) }
+
+type FXMethod = "mono" | "dither" | "diffusion" | "duotone"
+type FXShape  = "dot" | "square" | "diamond" | "hex" | "line"
+type FXState = {
+  method: FXMethod
+  shape: FXShape
+  cell: number
+  gamma: number
+  minDot: number
+  maxDot: number
+  angle: number
+  ditherSize: 4 | 8
+  diffusion: "floyd" | "atkinson"
+  duoA: string
+  duoB: string
+  angleB: number
+}
+const FX_DEFAULT: FXState = {
+  method: "diffusion",
+  shape: "dot",
+  cell: 8,
+  gamma: 1,
+  minDot: 0.05,
+  maxDot: 0.95,
+  angle: 45,
+  ditherSize: 8,
+  diffusion: "floyd",
+  duoA: "#111111",
+  duoB: "#FF2A6D",
+  angleB: 30,
+}
+
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: FXShape,
+  cx: number, cy: number, cell: number, frac: number, angleRad: number,
+  minDot: number, maxDot: number, fill = "#000"
+) {
+  const a = Math.max(0, Math.min(1, minDot + (maxDot - minDot) * frac))
+  if (a <= 0) return
+  ctx.save()
+  ctx.translate(cx, cy)
+  if (shape === "line") ctx.rotate(angleRad)
+  ctx.beginPath()
+  if (shape === "dot") {
+    const r = 0.5 * cell * Math.sqrt(a); ctx.arc(0,0,r,0,Math.PI*2)
+  } else if (shape === "square" || shape === "diamond") {
+    const s = cell * Math.sqrt(a); if (shape === "diamond") ctx.rotate(Math.PI/4); ctx.rect(-s/2,-s/2,s,s)
+  } else if (shape === "hex") {
+    const r = 0.55 * cell * Math.sqrt(a)
+    for (let i=0;i<6;i++){ const th=(Math.PI/3)*i; const x=r*Math.cos(th), y=r*Math.sin(th); i?ctx.lineTo(x,y):ctx.moveTo(x,y) }
+    ctx.closePath()
+  } else if (shape === "line") {
+    const thickness = Math.max(1, cell * a * 0.8); ctx.rect(-cell/2, -thickness/2, cell, thickness)
+  }
+  ctx.fillStyle = fill; ctx.fill(); ctx.restore()
+}
+
+function halftoneMono(
+  dest: CanvasRenderingContext2D,
+  srcData: ImageData,
+  opt: { cell:number; gamma:number; minDot:number; maxDot:number; angle:number; invert:boolean; shape:FXShape; color?:string }
+) {
+  const { cell, gamma, minDot, maxDot, angle, invert, shape, color } = opt
+  const { width, height, data } = srcData
+  const angleRad = (angle * Math.PI) / 180
+  dest.clearRect(0, 0, width, height)
+  if (color) dest.fillStyle = color
+
+  const lum = new Float32Array(width * height)
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) lum[p] = luminance(data[i], data[i + 1], data[i + 2])
+
+  const cx = width / 2, cy = height / 2
+  const cosA = Math.cos(-angleRad), sinA = Math.sin(-angleRad)
+
+  for (let y = 0; y < height; y += cell) {
+    for (let x = 0; x < width; x += cell) {
+      const rx = x + cell * 0.5, ry = y + cell * 0.5
+      const dx = rx - cx, dy = ry - cy
+      const sx = cx + dx * cosA - dy * sinA, sy = cy + dx * sinA + dy * cosA
+      const ix = Math.max(0, Math.min(width - 1, sx | 0)), iy = Math.max(0, Math.min(height - 1, sy | 0))
+      const t = lum[iy * width + ix]; const frac = mapTone(t, gamma, invert)
+      drawShape(dest, shape, rx, ry, cell, frac, angleRad, minDot, maxDot, color || "#000")
+    }
+  }
+}
+
+function duotoneHalftone(
+  dest: CanvasRenderingContext2D,
+  src: ImageData,
+  p: { cell:number; gamma:number; minDot:number; maxDot:number; angle:number; angleB:number; shape:FXShape; colorA:string; colorB:string }
+) {
+  const A = createCanvas(src.width, src.height)
+  const B = createCanvas(src.width, src.height)
+  const ctxA = A.getContext("2d", { willReadFrequently: true })!
+  const ctxB = B.getContext("2d", { willReadFrequently: true })!
+  halftoneMono(ctxA, src, { cell:p.cell, gamma:p.gamma, minDot:p.minDot, maxDot:p.maxDot, angle:p.angle, invert:false, shape:p.shape, color:p.colorA })
+  halftoneMono(ctxB, src, { cell:p.cell, gamma:p.gamma, minDot:0, maxDot:p.maxDot*0.85, angle:p.angle + p.angleB, invert:true, shape:p.shape, color:p.colorB })
+  dest.clearRect(0,0,src.width,src.height)
+  dest.drawImage(A,0,0); dest.drawImage(B,0,0)
+}
 
 const BAYER_4 = [ [0,8,2,10], [12,4,14,6], [3,11,1,9], [15,7,13,5] ]
 const BAYER_8 = [
   [0,32,8,40,2,34,10,42], [48,16,56,24,50,18,58,26], [12,44,4,36,14,46,6,38], [60,28,52,20,62,30,54,22],
   [3,35,11,43,1,33,9,41], [51,19,59,27,49,17,57,25], [15,47,7,39,13,45,5,37], [63,31,55,23,61,29,53,21]
 ]
-
-// Рисуем "ячейку" растра
-function drawShape(
-  ctx: CanvasRenderingContext2D,
-  shape: FXShape,
-  cx: number,
-  cy: number,
-  cell: number,
-  frac: number,
-  angleRad: number,
-  minDot: number,
-  maxDot: number,
-  fill: string = "#000"
-) {
-  const minA = Math.max(0, minDot)
-  const maxA = clamp01(Math.max(minA, maxDot))
-  const a = minA + (maxA - minA) * frac
-  if (a <= 0) return
-
-  ctx.beginPath()
-  if (shape === "dot") {
-    const r = 0.5 * cell * Math.sqrt(a)
-    ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  } else if (shape === "square") {
-    const s = cell * Math.sqrt(a)
-    ctx.rect(cx - s / 2, cy - s / 2, s, s)
-  } else if (shape === "line") {
-    const thickness = Math.max(1, cell * a * 0.8)
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angleRad)
-    ctx.rect(-cell / 2, -thickness / 2, cell, thickness)
-    ctx.restore()
-  }
-  ctx.fillStyle = fill
-  ctx.fill()
-}
-
-function halftoneMono(dest: CanvasRenderingContext2D, srcData: ImageData, opt: { cell:number; gamma:number; minDot:number; maxDot:number; angle:number; invert:boolean; shape:FXShape; color?:string }) {
-  const { cell, gamma, minDot, maxDot, angle, invert, shape, color } = opt
-  const { width, height, data } = srcData
-  const angleRad = (angle * Math.PI) / 180
-  dest.clearRect(0, 0, width, height)
-  const lum = new Float32Array(width * height)
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) lum[p] = luminance(data[i], data[i + 1], data[i + 2])
-  const cx = width / 2, cy = height / 2
-  dest.save(); dest.translate(cx, cy); dest.rotate(angleRad); dest.translate(-cx, -cy)
-  const cosA = Math.cos(-angleRad), sinA = Math.sin(-angleRad)
-  for (let y = 0; y < height; y += cell) {
-    for (let x = 0; x < width; x += cell) {
-      const rx = x + cell * 0.5, ry = y + cell * 0.5
-      const dx = rx - cx, dy = ry - cy
-      const sx = cx + dx * cosA - dy * sinA
-      const sy = cy + dx * sinA + dy * cosA
-      const ix = Math.max(0, Math.min(width - 1, sx | 0))
-      const iy = Math.max(0, Math.min(height - 1, sy | 0))
-      const t = lum[iy * width + ix]
-      const frac = mapTone(t, gamma, invert)
-      drawShape(dest, shape, rx, ry, cell, frac, angleRad, minDot, maxDot, color ?? "#000")
-    }
-  }
-  dest.restore()
-}
-
 function orderedDither(dest: CanvasRenderingContext2D, src: ImageData, size: 4 | 8) {
-  const { width, height, data } = src; const out = dest.getImageData(0, 0, width, height); const odata = out.data
-  const M = size === 4 ? BAYER_4 : BAYER_8; const N = size; const N2 = N * N
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = (y * width + x) * 4
-    const L = luminance(data[i], data[i + 1], data[i + 2])
-    const threshold = (M[y % N][x % N] + 0.5) / N2
-    const v = L < threshold ? 0 : 255
-    odata[i] = odata[i + 1] = odata[i + 2] = v; odata[i + 3] = 255
-  }
+  const { width, height, data } = src; const out = dest.getImageData(0, 0, width, height); const odata = out.data; const M = size === 4 ? BAYER_4 : BAYER_8; const N = size; const N2 = N * N
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) { const i = (y * width + x) * 4; const L = luminance(data[i], data[i + 1], data[i + 2]); const threshold = (M[y % N][x % N] + 0.5) / N2; const v = L < threshold ? 0 : 255; odata[i] = odata[i + 1] = odata[i + 2] = v; odata[i + 3] = 255 }
   dest.putImageData(out, 0, 0)
 }
-
 function errorDiffusion(dest: CanvasRenderingContext2D, src: ImageData, method: "floyd" | "atkinson") {
   const { width, height, data } = src; const out = dest.getImageData(0, 0, width, height); const buf = new Float32Array(width * height)
   for (let p = 0, i = 0; p < buf.length; p++, i += 4) buf[p] = luminance(data[i], data[i + 1], data[i + 2]) * 255
@@ -152,19 +163,23 @@ function errorDiffusion(dest: CanvasRenderingContext2D, src: ImageData, method: 
   dest.putImageData(out, 0, 0)
 }
 
-function duotoneHalftone(dest: CanvasRenderingContext2D, src: ImageData, p: { cell:number; gamma:number; minDot:number; maxDot:number; angle:number; angleB:number; shape:FXShape; colorA:string; colorB:string }) {
-  const A = createCanvas(src.width, src.height)
-  const B = createCanvas(src.width, src.height)
-  const ctxA = A.getContext("2d", { willReadFrequently: true })!
-  const ctxB = B.getContext("2d", { willReadFrequently: true })!
-  halftoneMono(ctxA, src, { cell:p.cell, gamma:p.gamma, minDot:p.minDot, maxDot:p.maxDot, angle:p.angle, invert:false, shape:p.shape, color:p.colorA })
-  halftoneMono(ctxB, src, { cell:p.cell, gamma:p.gamma, minDot:0, maxDot:p.maxDot*0.85, angle:p.angle + p.angleB, invert:true, shape:p.shape, color:p.colorB })
-  dest.clearRect(0,0,src.width,src.height)
-  dest.drawImage(A,0,0)
-  dest.drawImage(B,0,0)
-}
+// ==== ТИПЫ СЛОЁВ ====
+type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
+type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
+type AnyNode =
+  | Konva.Image
+  | Konva.Line
+  | Konva.Text
+  | Konva.Group
+  | Konva.Rect
+  | Konva.Circle
+  | Konva.RegularPolygon
+type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
-// ==== КОМПОНЕНТ ====
+const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
+const isEraseGroup  = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isErase   === true
+const isTextNode    = (n: AnyNode): n is Konva.Text  => n instanceof Konva.Text
+
 export default function EditorCanvas() {
   const {
     side, set, tool, brushColor, brushSize, shapeKind,
@@ -188,9 +203,11 @@ export default function EditorCanvas() {
   const backBgRef   = useRef<Konva.Image>(null)
   const frontArtRef = useRef<Konva.Group>(null)
   const backArtRef  = useRef<Konva.Group>(null)
+  const fxImgRef    = useRef<Konva.Image>(null)
 
-  // FX overlay объект
-  const fxImageRef  = useRef<Konva.Image>(null)
+  // FX offscreen
+  const fxSrcCanvas = useRef<HTMLCanvasElement | null>(null)
+  const fxOutCanvas = useRef<HTMLCanvasElement | null>(null)
 
   // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
@@ -199,30 +216,12 @@ export default function EditorCanvas() {
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
+  const [fx, setFx] = useState<FXState>(FX_DEFAULT)
+
   // маркер «идёт трансформирование», чтобы не конфликтовать с нашими жестями
   const isTransformingRef = useRef(false)
 
-  // FX state (контролируется через Toolbar)
-  const [fx, setFX] = useState<FXState>({
-    method: "mono",
-    shape: "dot",
-    cell: 8,
-    gamma: 1.0,
-    minDot: 0.05,
-    maxDot: 0.95,
-    angle: 45,
-    ditherSize: 8,
-    diffusion: "floyd",
-    duoA: "#111111",
-    duoB: "#FF2A6D",
-    angleB: 30,
-  })
-
-  // оффскрин канвасы для FX
-  const fxSrcCanvas = useRef<HTMLCanvasElement | null>(null)
-  const fxOutCanvas = useRef<HTMLCanvasElement | null>(null)
-
-  // вёрстка/масштаб
+  // адаптивная вёрстка
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -270,7 +269,6 @@ export default function EditorCanvas() {
     bgLayerRef.current?.batchDraw()
     artLayerRef.current?.batchDraw()
     attachTransformer()
-    scheduleFxUpdate() // переключение стороны — обновим FX
   }, [side, layers])
 
   // ===== Transformer / ТЕКСТ — углы=fontSize, бока=wrap =====
@@ -305,12 +303,10 @@ export default function EditorCanvas() {
     tr.rotateEnabled(true)
 
     // guard на время трансформации
-    const onStart = () => { isTransformingRef.current = true; scheduleFxUpdate() }
-    const onEndT  = () => { isTransformingRef.current = false; scheduleFxUpdate() }
+    const onStart = () => { isTransformingRef.current = true }
+    const onEndT  = () => { isTransformingRef.current = false }
     n.on("transformstart.guard", onStart)
     n.on("transformend.guard", onEndT)
-    n.on("dragmove.guard", () => scheduleFxUpdate())
-    n.on("dragend.guard", () => scheduleFxUpdate())
     detachGuard.current = () => n.off(".guard")
 
     if (isTextNode(n)) {
@@ -322,7 +318,7 @@ export default function EditorCanvas() {
       ])
 
       const onTextStart = () => captureTextSnap(t)
-      const onTextEnd   = () => { textSnapRef.current = null; scheduleFxUpdate() }
+      const onTextEnd   = () => { textSnapRef.current = null }
 
       t.on("transformstart.textsnap", onTextStart)
       t.on("transformend.textsnap",   onTextEnd)
@@ -334,7 +330,6 @@ export default function EditorCanvas() {
 
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // БОКОВЫЕ — меняем только width (wrap)
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -349,11 +344,10 @@ export default function EditorCanvas() {
 
           t.scaleX(1); t.scaleY(1)
           t.getLayer()?.batchDraw()
-          requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); scheduleFxUpdate() })
+          requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw() })
           return oldBox
         }
 
-        // УГЛЫ/ВЕРТИКАЛЬ — меняем только fontSize
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -370,14 +364,14 @@ export default function EditorCanvas() {
         }
         t.scaleX(1); t.scaleY(1)
         t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); scheduleFxUpdate() })
+        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw() })
         return oldBox
       })
 
       const onTextNormalizeEnd = () => {
         t.scaleX(1); t.scaleY(1)
         t.getLayer()?.batchDraw()
-        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); scheduleFxUpdate() })
+        requestAnimationFrame(() => { trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw() })
       }
       t.on("transformend.textnorm", onTextNormalizeEnd)
 
@@ -391,15 +385,15 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // во время brush/erase — отключаем драг
+  // ===== во время brush/erase — отключаем драг =====
   useEffect(() => {
-    const enable = tool === "move" || tool === "fx"
+    const enable = tool === "move"
     layers.forEach((l) => {
       if (l.side !== side) return
       if (isStrokeGroup(l.node) || isEraseGroup(l.node)) return
       ;(l.node as any).draggable?.(enable && !l.meta.locked)
     })
-    if (!(tool === "move" || tool === "fx")) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
+    if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
   }, [tool, layers, side])
 
   // ===== хоткеи =====
@@ -410,7 +404,7 @@ export default function EditorCanvas() {
 
       const n = node(selectedId); if (!n) return
       const lay = find(selectedId); if (!lay) return
-      if (!(tool === "move" || tool === "fx")) return
+      if (tool !== "move") return
 
       if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="d") { e.preventDefault(); duplicateLayer(lay.id); return }
       if (e.key==="Backspace"||e.key==="Delete") { e.preventDefault(); deleteLayer(lay.id); return }
@@ -425,7 +419,6 @@ export default function EditorCanvas() {
         (e.key === "ArrowDown"  && (n as any).y((n as any).y()+step))
       )
       n.getLayer()?.batchDraw()
-      scheduleFxUpdate()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -471,14 +464,13 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // утилита: шрифт сайта из body
   const siteFont = () =>
     (typeof window !== "undefined"
       ? window.getComputedStyle(document.body).fontFamily
       : "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif")
 
   const attachCommonHandlers = (k: AnyNode, id: string) => {
-    ;(k as any).on("click tap", () => { select(id); scheduleFxUpdate() })
+    ;(k as any).on("click tap", () => select(id))
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
   }
 
@@ -502,7 +494,6 @@ export default function EditorCanvas() {
         select(id)
         artLayerRef.current?.batchDraw()
         set({ tool: "move" })
-        scheduleFxUpdate()
       }
       img.src = r.result as string
     }
@@ -531,7 +522,6 @@ export default function EditorCanvas() {
     select(id)
     artLayerRef.current?.batchDraw()
     set({ tool: "move" })
-    scheduleFxUpdate()
   }
 
   // ===== Добавление: Shape =====
@@ -547,13 +537,12 @@ export default function EditorCanvas() {
     const meta = baseMeta(`shape ${seqs.shape}`)
     currentArt().add(n as any)
     ;(n as any).zIndex?.(nextTopZ())
-    ;(n as any).on("click tap", () => { select(id); scheduleFxUpdate() })
+    ;(n as any).on("click tap", () => select(id))
     setLayers(p => [...p, { id, side, node: n, meta, type: "shape" }])
     setSeqs(s => ({ ...s, shape: s.shape + 1 }))
     select(id)
     artLayerRef.current?.batchDraw()
     set({ tool: "move" })
-    scheduleFxUpdate()
   }
 
   // ===== Overlay-редактор текста =====
@@ -610,7 +599,7 @@ export default function EditorCanvas() {
     const onInput = () => {
       t.text(ta.value)
       t.getLayer()?.batchDraw()
-      requestAnimationFrame(() => { place(); trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw(); scheduleFxUpdate() })
+      requestAnimationFrame(() => { place(); trRef.current?.forceUpdate(); uiLayerRef.current?.batchDraw() })
     }
     const commit = (apply: boolean) => {
       window.removeEventListener("resize", place)
@@ -627,7 +616,6 @@ export default function EditorCanvas() {
         trRef.current?.nodes([t])
         trRef.current?.forceUpdate()
         uiLayerRef.current?.batchDraw()
-        scheduleFxUpdate()
       })
     }
     const onKey = (ev: KeyboardEvent) => {
@@ -671,23 +659,6 @@ export default function EditorCanvas() {
     return false
   }
 
-  const applyAround = (node: Konva.Node, stagePoint: { x:number; y:number }, newScale: number, newRotation: number) => {
-    const tr = node.getAbsoluteTransform().copy()
-    const inv = tr.invert()
-    const local = inv.point(stagePoint)
-
-    ;(node as any).scaleX?.(newScale)
-    ;(node as any).scaleY?.(newScale)
-    ;(node as any).rotation?.(newRotation)
-
-    const tr2 = node.getAbsoluteTransform().copy()
-    const p2 = tr2.point(local)
-    const dx = stagePoint.x - p2.x
-    const dy = stagePoint.y - p2.y
-    ;(node as any).x?.(((node as any).x?.() ?? 0) + dx)
-    ;(node as any).y?.(((node as any).y?.() ?? 0) + dy)
-  }
-
   const onDown = (e: any) => {
     e.evt?.preventDefault?.()
     const touches: TouchList | undefined = e.evt.touches
@@ -708,13 +679,12 @@ export default function EditorCanvas() {
         select(null)
         trRef.current?.nodes([])
         uiLayerRef.current?.batchDraw()
-        scheduleFxUpdate()
         return
       }
 
       if (tgt && tgt !== st && tgt.getParent()) {
         const found = layers.find(l => l.node === tgt || l.node === (tgt.getParent() as any))
-        if (found && found.side === side) { select(found.id); scheduleFxUpdate() }
+        if (found && found.side === side) select(found.id)
       }
       const lay = find(selectedId)
       if (lay && !isStrokeGroup(lay.node) && !lay.meta.locked) {
@@ -788,7 +758,7 @@ export default function EditorCanvas() {
       ;(lay.node as any).y(((lay.node as any).y?.() ?? 0) + dy)
       gestureRef.current.lastPointer = p
       artLayerRef.current?.batchDraw()
-      scheduleFxUpdate()
+      if (tool === "fx") scheduleFxRender()
       return
     }
 
@@ -799,19 +769,16 @@ export default function EditorCanvas() {
       const dy = t2.clientY - t1.clientY
       const dist = Math.hypot(dx, dy)
       const ang  = Math.atan2(dy, dx)
-
       let s = dist / gestureRef.current.startDist
       s = Math.min(Math.max(s, 0.1), 10)
-
       const baseScale = gestureRef.current.startScaleX
       const newScale = baseScale * s
       const newRot = gestureRef.current.startRot + (ang - gestureRef.current.startAngle) * (180 / Math.PI)
-
-      const c = gestureRef.current.centerCanvas
-      const sp = { x: c.x * scale, y: c.y * scale }
-      applyAround(lay.node, sp, newScale, newRot)
+      ;(lay.node as any).scaleX?.(newScale)
+      ;(lay.node as any).scaleY?.(newScale)
+      ;(lay.node as any).rotation?.(newRot)
       artLayerRef.current?.batchDraw()
-      scheduleFxUpdate()
+      if (tool === "fx") scheduleFxRender()
     }
   }
 
@@ -820,11 +787,11 @@ export default function EditorCanvas() {
     gestureRef.current.active = false
     gestureRef.current.two = false
     isTransformingRef.current = false
-    requestAnimationFrame(() => { attachTransformer(); scheduleFxUpdate() })
+    requestAnimationFrame(attachTransformer)
   }
 
-  // ===== Данные для панелей/toolbar =====
-  const layerItems: LayerItem[] = useMemo(() => {
+  // ===== Layers panel API =====
+  const layerItems = useMemo(() => {
     void uiTick
     return layers
       .filter(l => l.side === side)
@@ -846,7 +813,7 @@ export default function EditorCanvas() {
     if (selectedId === id) select(null)
     artLayerRef.current?.batchDraw()
     bump()
-    scheduleFxUpdate()
+    if (tool === "fx") scheduleFxRender()
   }
   const duplicateLayer = (id: string) => {
     const src = layers.find(l => l.id===id); if (!src) return
@@ -861,7 +828,7 @@ export default function EditorCanvas() {
     ;(clone as any).zIndex?.(nextTopZ())
     artLayerRef.current?.batchDraw()
     bump()
-    scheduleFxUpdate()
+    if (tool === "fx") scheduleFxRender()
   }
   const reorder = (srcId: string, destId: string, place: "before" | "after") => {
     setLayers((prev) => {
@@ -884,7 +851,7 @@ export default function EditorCanvas() {
       return [...others, ...sortedCurrent]
     })
     select(srcId)
-    requestAnimationFrame(() => { attachTransformer(); bump(); scheduleFxUpdate() })
+    requestAnimationFrame(() => { attachTransformer(); bump(); if (tool==="fx") scheduleFxRender() })
   }
 
   const updateMeta = (id: string, patch: Partial<BaseMeta>) => {
@@ -897,13 +864,12 @@ export default function EditorCanvas() {
     }))
     artLayerRef.current?.batchDraw()
     bump()
-    scheduleFxUpdate()
+    if (tool === "fx") scheduleFxRender()
   }
 
   const onLayerSelect = (id: string) => {
     select(id)
-    if (tool !== "move" && tool !== "fx") set({ tool: "move" })
-    scheduleFxUpdate()
+    if (tool !== "move") set({ tool: "move" })
   }
 
   // ===== Снимки свойств выбранного узла для Toolbar =====
@@ -926,15 +892,107 @@ export default function EditorCanvas() {
     }
     : {}
 
-  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedLineHeight = (lh:number)   => { const n = sel?.node as Konva.Text; if (!n) return; n.lineHeight(clamp(lh, 0.5, 3)); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
-  const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump(); scheduleFxUpdate() }
+  const setSelectedFill       = (hex:string) => { const n = sel?.node as any; if (!n?.fill) return; n.fill(hex); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedStroke     = (hex:string) => { const n = sel?.node as any; if (!n?.stroke) return; n.stroke(hex); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedStrokeW    = (w:number)    => { const n = sel?.node as any; if (!n?.strokeWidth) return; n.strokeWidth(w); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedText       = (tstr:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.text(tstr); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedFontSize   = (nsize:number)=> { const n = sel?.node as Konva.Text; if (!n) return; n.fontSize(clamp(Math.round(nsize), TEXT_MIN_FS, TEXT_MAX_FS)); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedFontFamily = (name:string) => { const n = sel?.node as Konva.Text; if (!n) return; n.fontFamily(name); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedLineHeight = (lh:number)   => { const n = sel?.node as Konva.Text; if (!n) return; n.lineHeight(clamp(lh, 0.5, 3)); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+  const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump(); if (tool==="fx") scheduleFxRender() }
+
+  // ===== FX: таргет + рендер =====
+  const fxNeedsHidden = () => tool !== "fx"
+
+  const getFxTarget = () => {
+    const st = stageRef.current
+    if (!st) return null
+    const useSelected = !!sel && sel.side === side && sel.meta.visible
+    const tgtNode: Konva.Node = useSelected ? sel!.node : currentArt()
+    // axis-aligned bbox в координатах stage (без масштабирования Stage)
+    const rect = tgtNode.getClientRect({ relativeTo: st, skipShadow: true, skipStroke: true })
+    if (!rect || !isFinite(rect.width) || rect.width <= 0 || !isFinite(rect.height) || rect.height <= 0) return null
+    return { node: tgtNode, rect }
+  }
+
+  const fxRAF = useRef<number | null>(null)
+  const scheduleFxRender = () => {
+    if (fxNeedsHidden()) { fxLayerRef.current?.visible(false); fxLayerRef.current?.batchDraw(); return }
+    if (fxRAF.current) cancelAnimationFrame(fxRAF.current)
+    fxRAF.current = requestAnimationFrame(() => renderFxPreview().catch(()=>{}))
+  }
+
+  const renderFxPreview = async () => {
+    const st = stageRef.current
+    const fxImg = fxImgRef.current
+    const fxLayer = fxLayerRef.current
+    if (!st || !fxImg || !fxLayer) return
+
+    const target = getFxTarget()
+    if (!target) { fxLayer.visible(false); fxLayer.batchDraw(); return }
+
+    const { node: tgtNode, rect } = target
+
+    // ограничим размер оффскрина, чтобы не грузить CPU/GPU
+    const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1))
+    const maxPreview = 1800
+    const w = Math.max(1, Math.min(maxPreview, Math.round(rect.width)))
+    const h = Math.max(1, Math.round(rect.height * (w / Math.max(1, rect.width))))
+
+    fxSrcCanvas.current ||= createCanvas(w, h)
+    fxOutCanvas.current ||= createCanvas(w, h)
+    const src = fxSrcCanvas.current, out = fxOutCanvas.current
+    if (src.width !== w || src.height !== h) { src.width = w; src.height = h }
+    if (out.width !== w || out.height !== h) { out.width = w; out.height = h }
+
+    // снимок таргета с его текущими трансформами (они "запекаются" внутрь картинки)
+    const pixelRatio = Math.max(0.5, (w / Math.max(1, rect.width)) * DPR)
+    const imgEl: HTMLImageElement = await new Promise((resolve) => (tgtNode as any).toImage({ pixelRatio, callback: resolve }))
+
+    const sctx = src.getContext("2d", { willReadFrequently: true })!
+    sctx.clearRect(0,0,w,h)
+    sctx.drawImage(imgEl, 0, 0, w, h)
+    const imgData = sctx.getImageData(0, 0, w, h)
+
+    // FX -> out (никаких доп. поворотов! угол — как задан в UI)
+    const dctx = out.getContext("2d", { willReadFrequently: true })!
+    dctx.clearRect(0,0,w,h)
+    if (fx.method === "mono") {
+      halftoneMono(dctx, imgData, { cell: fx.cell, gamma: fx.gamma, minDot: fx.minDot, maxDot: fx.maxDot, angle: fx.angle, invert: false, shape: fx.shape })
+    } else if (fx.method === "duotone") {
+      duotoneHalftone(dctx, imgData, { cell: fx.cell, gamma: fx.gamma, minDot: fx.minDot, maxDot: fx.maxDot, angle: fx.angle, angleB: fx.angleB, shape: fx.shape, colorA: fx.duoA, colorB: fx.duoB })
+    } else if (fx.method === "dither") {
+      dctx.putImageData(imgData,0,0); orderedDither(dctx, imgData, fx.ditherSize)
+    } else if (fx.method === "diffusion") {
+      dctx.putImageData(imgData,0,0); errorDiffusion(dctx, imgData, fx.diffusion)
+    }
+
+    // позиционирование превью: точное совпадение axis-aligned bbox узла
+    fxImg.setAttrs({
+      image: out,
+      x: rect.x, y: rect.y,
+      width: w, height: h,
+      offsetX: 0, offsetY: 0,
+      rotation: 0,
+      scaleX: 1, scaleY: 1,
+      listening: false,
+    })
+
+    fxLayer.visible(true)
+    fxLayer.batchDraw()
+  }
+
+  // Перерисовываем FX при любом изменении параметров / tool / выборов
+  useEffect(() => { scheduleFxRender() }, [fx, tool, side, selectedId, uiTick])
+  // Подписки на движуху выбранного узла — чтобы превью следовало «в ногу»
+  useEffect(() => {
+    const lay = find(selectedId); if (!lay) { scheduleFxRender(); return }
+    const n = lay.node as Konva.Node
+    const cb = () => scheduleFxRender()
+    n.on("dragmove.fx transform.fx rotate.fx scaleXChange.fx scaleYChange.fx", cb)
+    return () => { n.off(".fx") }
+  }, [selectedId])
 
   // ===== Clear All =====
   const clearArt = () => {
@@ -944,15 +1002,17 @@ export default function EditorCanvas() {
     select(null)
     artLayerRef.current?.batchDraw()
     bump()
-    scheduleFxUpdate()
+    scheduleFxRender()
   }
 
   // ===== Скачивание (mockup + art) =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
-    uiLayerRef.current?.visible(false)
+    // временно скрываем FX/Transformer для чистого экспорта
+    const oldFxVis = fxLayerRef.current?.visible()
     fxLayerRef.current?.visible(false)
+    uiLayerRef.current?.visible(false)
 
     const showFront = s === "front"
     frontBgRef.current?.visible(showFront)
@@ -965,12 +1025,13 @@ export default function EditorCanvas() {
     const artOnly = st.toDataURL({ pixelRatio: pr, mimeType: "image/png" })
     bgLayerRef.current?.visible(true)
 
+    // вернуть видимость
     frontBgRef.current?.visible(side === "front")
     backBgRef.current?.visible(side === "back")
     frontArtRef.current?.visible(side === "front")
     backArtRef.current?.visible(side === "back")
+    if (oldFxVis !== undefined) fxLayerRef.current?.visible(oldFxVis)
     uiLayerRef.current?.visible(true)
-    fxLayerRef.current?.visible(true)
     st.draw()
 
     const a1 = document.createElement("a"); a1.href = withMock; a1.download = `darkroom-${s}_mockup.png`; a1.click()
@@ -978,138 +1039,16 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ======== REAL-TIME FX PREVIEW (как Adjustment) ========
-  // Кому применяем: если есть выбранный слой — к нему, иначе — к целому art (front/back)
-  const getFxTarget = (): { node: Konva.Node; rect: { x:number; y:number; width:number; height:number } } | null => {
-    const st = stageRef.current
-    if (!st) return null
-    if (sel?.node) {
-      const r = (sel.node as any).getClientRect?.({ relativeTo: st, skipStroke: true }) || { x:0,y:0,width:0,height:0 }
-      return { node: sel.node as Konva.Node, rect: r }
-    }
-    const grp = currentArt()
-    const r = (grp as any).getClientRect?.({ relativeTo: st, skipStroke: true }) || { x:0,y:0,width:BASE_W,height:BASE_H }
-    return { node: grp as unknown as Konva.Node, rect: r }
-  }
-
-  // Планировщик перерисовки FX (throttle до animation frame)
-  const fxRaf = useRef<number | null>(null)
-  const scheduleFxUpdate = () => {
-    if (tool !== "fx") { // В других режимах FX overlay скрыт
-      fxLayerRef.current?.visible(false)
-      fxLayerRef.current?.batchDraw()
-      return
-    }
-    if (fxRaf.current) return
-    fxRaf.current = requestAnimationFrame(() => {
-      fxRaf.current = null
-      renderFxPreview()
-    })
-  }
-
-  // Основной рендер FX
-  const renderFxPreview = async () => {
-    const st = stageRef.current
-    const fxImg = fxImageRef.current
-    const fxLayer = fxLayerRef.current
-    if (!st || !fxImg || !fxLayer) return
-
-    const target = getFxTarget()
-    if (!target) { fxLayer.visible(false); fxLayer.batchDraw(); return }
-
-    const { node: tgtNode, rect } = target
-
-    // Ограничим превью для скорости
-    const maxPreview = 1600 // ширина превью
-    const w = Math.max(1, Math.min(maxPreview, Math.round(rect.width)))
-    const h = Math.max(1, Math.round(rect.height * (w / Math.max(1, rect.width))))
-
-    // Готовим оффскрины
-    fxSrcCanvas.current ||= createCanvas(w, h)
-    fxOutCanvas.current ||= createCanvas(w, h)
-    const src = fxSrcCanvas.current
-    const out = fxOutCanvas.current
-    if (src.width !== w || src.height !== h) { src.width = w; src.height = h }
-    if (out.width !== w || out.height !== h) { out.width = w; out.height = h }
-
-    // Снимок таргета в картинку заданного размера
-    const pixelRatio = Math.max(0.1, w / Math.max(1, rect.width))
-    const imgEl: HTMLImageElement = await new Promise((resolve) => (tgtNode as any).toImage({ pixelRatio, callback: resolve }))
-    const sctx = src.getContext("2d", { willReadFrequently: true })!
-    sctx.clearRect(0,0,w,h)
-    sctx.drawImage(imgEl, 0, 0, w, h)
-    const imgData = sctx.getImageData(0, 0, w, h)
-
-    // FX
-    const dctx = out.getContext("2d", { willReadFrequently: true })!
-    if (fx.method === "mono") {
-      halftoneMono(dctx, imgData, { cell: fx.cell, gamma: fx.gamma, minDot: fx.minDot, maxDot: fx.maxDot, angle: fx.angle, invert: false, shape: fx.shape })
-    } else if (fx.method === "duotone") {
-      duotoneHalftone(dctx, imgData, { cell: fx.cell, gamma: fx.gamma, minDot: fx.minDot, maxDot: fx.maxDot, angle: fx.angle, angleB: fx.angleB, shape: fx.shape, colorA: fx.duoA, colorB: fx.duoB })
-    } else if (fx.method === "dither") {
-      dctx.clearRect(0,0,w,h); dctx.putImageData(imgData,0,0); orderedDither(dctx, imgData, fx.ditherSize)
-    } else if (fx.method === "diffusion") {
-      dctx.clearRect(0,0,w,h); dctx.putImageData(imgData,0,0); errorDiffusion(dctx, imgData, fx.diffusion)
-    }
-
-    // Применяем как overlay-Image поверх сцены, точно в bbox таргета
-    fxImg.setAttrs({
-      image: out,
-      x: rect.x,
-      y: rect.y,
-      width: w,
-      height: h,
-      listening: false,
-    })
-    fxLayer.visible(true)
-    fxLayer.batchDraw()
-  }
-
-  // Обновления FX по изменениям
-  useEffect(() => { scheduleFxUpdate() }, [tool, fx, selectedId, side])
-  // Когда холст ресайзится/скроллится — тоже обновим
-  useEffect(() => {
-    const onWin = () => scheduleFxUpdate()
-    window.addEventListener("resize", onWin, { passive: true })
-    window.addEventListener("scroll", onWin, { passive: true, capture: true })
-    return () => {
-      window.removeEventListener("resize", onWin)
-      window.removeEventListener("scroll", onWin, true as any)
-    }
-  }, [])
-  // Скрываем FX, если не в FX tool
-  useEffect(() => {
-    if (tool !== "fx") {
-      fxLayerRef.current?.visible(false)
-      fxLayerRef.current?.batchDraw()
-    }
-  }, [tool])
-
   // ===== Render =====
   return (
     <div
       className="fixed inset-0 bg-white"
-      style={{
-        paddingTop: padTop,
-        paddingBottom: padBottom,
-        overscrollBehavior: "none",
-        WebkitUserSelect: "none",
-        userSelect: "none",
-      }}
+      style={{ paddingTop: padTop, paddingBottom: padBottom, overscrollBehavior: "none", WebkitUserSelect:"none", userSelect:"none" }}
     >
-      {/* Desktop-панель слоёв — только на десктопе */}
+      {/* Слои — на десктопе */}
       {!isMobile && showLayers && (
-        <LayersPanel
-          items={layerItems}
-          selectId={selectedId}
-          onSelect={onLayerSelect}
-          onToggleVisible={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { visible: !l.meta.visible }) }}
-          onToggleLock={(id)=>{ const l=layers.find(x=>x.id===id)!; updateMeta(id, { locked: !l.meta.locked }); attachTransformer() }}
-          onDelete={deleteLayer}
-          onDuplicate={duplicateLayer}
-          onReorder={reorder}
-          onChangeBlend={(id, b)=>updateMeta(id,{ blend: b as Blend })}
-          onChangeOpacity={(id, o)=>updateMeta(id,{ opacity: o })}
+        <Toolbar.MobileLayersPanel // если у тебя отдельный компонент — оставь твой
+          // заглушка: убери, если используешь свой готовый LayersPanel
         />
       )}
 
@@ -1134,9 +1073,9 @@ export default function EditorCanvas() {
               <KGroup ref={backArtRef}  visible={side==="back"}  />
             </Layer>
 
-            {/* FX overlay поверх арта, но под рамкой трансформера */}
+            {/* FX-слой поверх арта (live preview) */}
             <Layer ref={fxLayerRef} listening={false} visible={false}>
-              <KImage ref={fxImageRef} listening={false}/>
+              <KImage ref={fxImgRef} listening={false}/>
             </Layer>
 
             {/* UI-слой для рамки трансформера */}
@@ -1157,8 +1096,8 @@ export default function EditorCanvas() {
       {/* Toolbar */}
       <Toolbar
         side={side} setSide={(s: Side)=>set({ side: s })}
-        tool={tool} setTool={(t: Tool)=>{ set({ tool: t }); scheduleFxUpdate() }}
-        brushColor={brushColor} setBrushColor={(v:string)=>{ set({ brushColor: v }); if (selectedKind) setSelectedFill(v) }}
+        tool={tool} setTool={(t: Tool)=>{ set({ tool: t }); scheduleFxRender() }}
+        brushColor={brushColor} setBrushColor={(v:string)=>set({ brushColor: v })}
         brushSize={brushSize} setBrushSize={(n:number)=>set({ brushSize: n })}
         shapeKind={shapeKind} setShapeKind={()=>{}}
         onUploadImage={onUploadImage}
@@ -1183,13 +1122,14 @@ export default function EditorCanvas() {
           else if ((sel.node as any).fill) (sel.node as any).fill(hex)
           artLayerRef.current?.batchDraw(); 
           bump()
-          scheduleFxUpdate()
+          if (tool==="fx") scheduleFxRender()
         }}
         setSelectedLineHeight={setSelectedLineHeight}
         setSelectedLetterSpacing={setSelectedLetterSpacing}
         setSelectedAlign={setSelectedAlign}
+        // FX состояние — напрямую из EditorCanvas
         fx={fx}
-        setFX={(patch)=>{ setFX(prev=>({ ...prev, ...patch })); scheduleFxUpdate() }}
+        setFX={(patch)=>setFx(prev=>({ ...prev, ...patch }))}
         mobileLayers={{
           items: layerItems,
           selectedId: selectedId ?? undefined,
