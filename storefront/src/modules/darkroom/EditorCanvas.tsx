@@ -9,26 +9,30 @@ import LayersPanel, { LayerItem } from "./LayersPanel"
 import { useDarkroom, Blend, ShapeKind, Side, Tool } from "./store"
 import { isMobile } from "react-device-detect"
 
-// ==== БАЗОВЫЕ ПАРАМЕТРЫ МАКЕТА ====
+// === Растровый блок (готовые модули из твоего проекта) ===
+import RasterLabPanel from "./RasterLabPanel"
+import type { RasterDoc } from "./RasterDoc"
+
+// ==== БАЗА МАКЕТА ====
 const BASE_W = 2400
 const BASE_H = 3200
 const FRONT_SRC = "/mockups/MOCAP_FRONT.png"
 const BACK_SRC  = "/mockups/MOCAP_BACK.png"
 
-// Ограничения для текста
+// клампы текста
 const TEXT_MIN_FS = 8
 const TEXT_MAX_FS = 800
 const TEXT_MAX_W  = BASE_W
 
-// Утилиты
+// утилиты
 const uid = () => Math.random().toString(36).slice(2)
-const clamp = (value:number, min:number, max:number) => Math.max(min, Math.min(max, value))
+const clamp = (v:number, a:number, b:number) => Math.max(a, Math.min(b, v))
 const EPS = 0.25
 const DEAD = 0.006
 
 // ==== ТИПЫ ====
 type BaseMeta = { blend: Blend; opacity: number; name: string; visible: boolean; locked: boolean }
-type LayerType = "image" | "shape" | "text" | "strokes" | "erase"
+type LayerType = "image" | "shape" | "text" | "strokes" | "erase" | "fxPreview"
 type AnyNode =
   | Konva.Image
   | Konva.Line
@@ -37,6 +41,7 @@ type AnyNode =
   | Konva.Rect
   | Konva.Circle
   | Konva.RegularPolygon
+
 type AnyLayer = { id: string; side: Side; node: AnyNode; meta: BaseMeta; type: LayerType }
 
 const isStrokeGroup = (n: AnyNode) => n instanceof Konva.Group && (n as any)._isStrokes === true
@@ -51,11 +56,11 @@ export default function EditorCanvas() {
 
   useEffect(() => { ;(Konva as any).hitOnDragEnabled = true }, [])
 
-  // Мокапы
+  // мокапы
   const [frontMock] = useImage(FRONT_SRC, "anonymous")
   const [backMock]  = useImage(BACK_SRC,  "anonymous")
 
-  // Ссылки на узлы Konva
+  // refs
   const stageRef    = useRef<Konva.Stage>(null)
   const bgLayerRef  = useRef<Konva.Layer>(null)
   const artLayerRef = useRef<Konva.Layer>(null)
@@ -66,17 +71,23 @@ export default function EditorCanvas() {
   const frontArtRef = useRef<Konva.Group>(null)
   const backArtRef  = useRef<Konva.Group>(null)
 
-  // Состояние
+  // state
   const [layers, setLayers] = useState<AnyLayer[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
-  const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1 })
+  const [seqs, setSeqs] = useState({ image: 1, shape: 1, text: 1, strokes: 1, erase: 1, fx: 1 })
   const [uiTick, setUiTick] = useState(0)
   const bump = () => setUiTick(v => (v + 1) | 0)
 
-  // Маркер «идёт трансформирование»
+  // === RasterLab: состояние панели и документа эффектов ===
+  const [fxOpen, setFxOpen] = useState(false)
+  const [rasterDoc, setRasterDoc] = useState<RasterDoc | null>(null)
+  const fxPreviewNodeRef = useRef<Konva.Image | null>(null)
+  const fxPreviewLayerIdRef = useRef<string | null>(null)
+
+  // маркер «идёт трансформирование», чтобы не конфликтовать с нашими жестями
   const isTransformingRef = useRef(false)
 
-  // Верстка/масштаб
+  // вёрстка/масштаб
   const [headerH, setHeaderH] = useState(64)
   useLayoutEffect(() => {
     const el = (document.querySelector("header") || document.getElementById("site-header")) as HTMLElement | null
@@ -94,15 +105,15 @@ export default function EditorCanvas() {
     return { viewW: BASE_W * s, viewH: BASE_H * s, scale: s, padTop, padBottom }
   }, [showLayers, headerH])
 
-  // Фиксация скролла страницы на время работы редактора
+  // фикс скролла
   useEffect(() => {
-    const previous = document.body.style.overflow
+    const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
     if (isMobile) set({ showLayers: false })
-    return () => { document.body.style.overflow = previous }
+    return () => { document.body.style.overflow = prev }
   }, [set])
 
-  // Вспомогательные функции
+  // helpers
   const baseMeta = (name: string): BaseMeta => ({ blend: "source-over", opacity: 1, name, visible: true, locked: false })
   const find = (id: string | null) => (id ? layers.find(l => l.id === id) || null : null)
   const node = (id: string | null) => find(id)?.node || null
@@ -114,7 +125,7 @@ export default function EditorCanvas() {
   const currentArt = () => artGroup(side)
   const nextTopZ   = () => (currentArt().children?.length ?? 0)
 
-  // Отображаем только активную сторону
+  // показываем только активную сторону
   useEffect(() => {
     layers.forEach((l) => l.node.visible(l.side === side && l.meta.visible))
     frontBgRef.current?.visible(side === "front")
@@ -126,7 +137,7 @@ export default function EditorCanvas() {
     attachTransformer()
   }, [side, layers])
 
-  // ===== Transformer / Текст: углы изменяют fontSize, боковые якоря — ширину (wrap) =====
+  // ===== Transformer / ТЕКСТ — углы=fontSize, бока=wrap =====
   const detachTextFix = useRef<(() => void) | null>(null)
   const detachGuard   = useRef<(() => void) | null>(null)
   const textSnapRef   = useRef<{ fs0:number; wrap0:number; cx0:number; cy0:number }|null>(null)
@@ -157,7 +168,7 @@ export default function EditorCanvas() {
     tr.nodes([n])
     tr.rotateEnabled(true)
 
-    // Ограничиваем наши жесты на время трансформации
+    // guard на время трансформирования
     const onStart = () => { isTransformingRef.current = true }
     const onEndT  = () => { isTransformingRef.current = false }
     n.on("transformstart.guard", onStart)
@@ -185,7 +196,7 @@ export default function EditorCanvas() {
 
         const getActive = (trRef.current as any)?.getActiveAnchor?.() as string | undefined
 
-        // Боковые якоря — меняем только ширину, центр сохраняем
+        // БОКОВЫЕ — меняем только ширину wrap, центр сохраняем
         if (getActive === "middle-left" || getActive === "middle-right") {
           const ratioW = newBox.width / Math.max(1e-6, oldBox.width)
           if (Math.abs(ratioW - 1) < DEAD) return oldBox
@@ -204,7 +215,7 @@ export default function EditorCanvas() {
           return oldBox
         }
 
-        // Угловые/вертикальные — меняем только fontSize относительно исходного, центр сохраняем
+        // УГЛЫ/ВЕРТИКАЛЬ — меняем только fontSize от стартового, центр сохраняем
         const ratioW = newBox.width  / Math.max(1e-6, oldBox.width)
         const ratioH = newBox.height / Math.max(1e-6, oldBox.height)
         const scaleK = Math.max(ratioW, ratioH)
@@ -242,7 +253,7 @@ export default function EditorCanvas() {
   useEffect(() => { attachTransformer() }, [selectedId, side])
   useEffect(() => { attachTransformer() }, [tool])
 
-  // Во время кисти/ластика — отключаем drag у объектов
+  // во время brush/erase — отключаем драг
   useEffect(() => {
     const enable = tool === "move"
     layers.forEach((l) => {
@@ -253,11 +264,11 @@ export default function EditorCanvas() {
     if (!enable) { trRef.current?.nodes([]); uiLayerRef.current?.batchDraw() }
   }, [tool, layers, side])
 
-  // ===== Горячие клавиши =====
+  // ===== хоткеи =====
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement as HTMLElement | null
-      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable)) return
+      const ae = document.activeElement as HTMLElement | null
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) return
 
       const n = node(selectedId); if (!n) return
       const lay = find(selectedId); if (!lay) return
@@ -281,19 +292,19 @@ export default function EditorCanvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [selectedId, tool])
 
-  // ===== Кисть / Ластик (каждый DOWN — новый слой) =====
+  // ===== Brush / Erase (каждый DOWN — новый слой) =====
   const startStroke = (x: number, y: number) => {
     if (tool !== "brush" && tool !== "erase") return
 
-    const group = new Konva.Group({ x: 0, y: 0 })
-    if (tool === "brush") (group as any)._isStrokes = true
-    if (tool === "erase") (group as any)._isErase = true
-    ;(group as any).id(uid())
-    const id = (group as any).id()
+    const g = new Konva.Group({ x: 0, y: 0 })
+    if (tool === "brush") (g as any)._isStrokes = true
+    if (tool === "erase") (g as any)._isErase = true
+    ;(g as any).id(uid())
+    const id = (g as any).id()
     const meta = baseMeta(tool === "brush" ? `strokes ${seqs.strokes}` : `erase ${seqs.erase}`)
-    currentArt().add(group); group.zIndex(nextTopZ())
-    const newLayer: AnyLayer = { id, side, node: group, meta, type: tool === "brush" ? "strokes" : "erase" }
-    setLayers(p => [...p, newLayer])
+    currentArt().add(g); g.zIndex(nextTopZ())
+    const newLay: AnyLayer = { id, side, node: g, meta, type: tool === "brush" ? "strokes" : "erase" }
+    setLayers(p => [...p, newLay])
     setSeqs(s => tool === "brush" ? ({ ...s, strokes: s.strokes + 1 }) : ({ ...s, erase: s.erase + 1 }))
     select(id)
 
@@ -305,15 +316,15 @@ export default function EditorCanvas() {
       lineJoin: "round",
       globalCompositeOperation: tool === "brush" ? "source-over" : ("destination-out" as any),
     })
-    group.add(line)
+    g.add(line)
     setIsDrawing(true)
     artLayerRef.current?.batchDraw()
   }
   const appendStroke = (x: number, y: number) => {
     if (!isDrawing) return
     const lay = find(selectedId)
-    const group = lay?.node as Konva.Group
-    const last = group?.getChildren().at(-1)
+    const g = lay?.node as Konva.Group
+    const last = g?.getChildren().at(-1)
     const line = last instanceof Konva.Line ? last : (last as Konva.Group)?.getChildren().at(-1)
     if (!(line instanceof Konva.Line)) return
     line.points(line.points().concat([x, y]))
@@ -321,7 +332,7 @@ export default function EditorCanvas() {
   }
   const finishStroke = () => setIsDrawing(false)
 
-  // Получить шрифт сайта из body
+  // утилита: шрифт сайта из body
   const siteFont = () =>
     (typeof window !== "undefined"
       ? window.getComputedStyle(document.body).fontFamily
@@ -332,7 +343,7 @@ export default function EditorCanvas() {
     if (k instanceof Konva.Text) k.on("dblclick dbltap", () => startTextOverlayEdit(k))
   }
 
-  // ===== Добавление: изображение =====
+  // ===== Добавление: Image =====
   const onUploadImage = (file: File) => {
     const r = new FileReader()
     r.onload = () => {
@@ -358,7 +369,7 @@ export default function EditorCanvas() {
     r.readAsDataURL(file)
   }
 
-  // ===== Добавление: текст =====
+  // ===== Добавление: Text =====
   const onAddText = () => {
     const t = new Konva.Text({
       text: "GMORKL",
@@ -382,7 +393,7 @@ export default function EditorCanvas() {
     set({ tool: "move" })
   }
 
-  // ===== Добавление: фигура =====
+  // ===== Добавление: Shape =====
   const onAddShape = (kind: ShapeKind) => {
     let n: AnyNode
     if (kind === "circle")        n = new Konva.Circle({ x: BASE_W/2, y: BASE_H/2, radius: 160, fill: brushColor })
@@ -408,7 +419,7 @@ export default function EditorCanvas() {
     const stage = stageRef.current!
     const stBox = stage.container().getBoundingClientRect()
 
-    // Временно скрываем текст (оставляем bbox)
+    // скрыть текст (но оставить bbox)
     const prevOpacity = t.opacity()
     t.opacity(0.01)
     t.getLayer()?.batchDraw()
@@ -417,7 +428,6 @@ export default function EditorCanvas() {
     ta.value = t.text()
 
     const place = () => {
-      // По клиентскому bbox
       const r = (t as any).getClientRect({ relativeTo: stage, skipStroke: true })
       const left = stBox.left + r.x * scale
       const top  = stBox.top  + r.y * scale
@@ -471,7 +481,6 @@ export default function EditorCanvas() {
       t.opacity(prevOpacity)
       t.getLayer()?.batchDraw()
       requestAnimationFrame(() => {
-        // Остаёмся на тексте
         select((t as any).id())
         attachTransformer()
         trRef.current?.nodes([t])
@@ -491,7 +500,7 @@ export default function EditorCanvas() {
     window.addEventListener("scroll", place, true)
   }
 
-  // ===== Жесты (мобилка): 1 палец — перетаскивание, 2 пальца — масштаб + поворот =====
+  // ===== Жесты (мобилка): 1 палец — drag, 2 пальца — scale+rotate =====
   type G = {
     active: boolean
     two: boolean
@@ -543,19 +552,19 @@ export default function EditorCanvas() {
 
     if (isTransformerChild(e.target)) return
 
-    // Кисть/ластик — создаем новый слой и начинаем рисовать
+    // brush/erase — новый слой и сразу рисуем
     if (tool === "brush" || tool === "erase") {
       const p = toCanvas(getStagePointer())
       startStroke(p.x, p.y)
       return
     }
 
-    // Move, один палец — выбор/перетаскивание
+    // move, 1 палец — выбор/перетаскивание
     if (!touches || touches.length === 1) {
       const st = stageRef.current!
       const tgt = e.target as Konva.Node
 
-      // Клик по пустому месту или по мокапу — снять выделение
+      // клик по пустому месту или по мокапу — снять выделение
       if (tgt === st || isBgTarget(tgt)) {
         select(null)
         trRef.current?.nodes([])
@@ -586,7 +595,7 @@ export default function EditorCanvas() {
       return
     }
 
-    // Два пальца — масштаб/поворот
+    // 2 пальца — масштаб/поворот
     if (touches && touches.length >= 2) {
       const lay = find(selectedId)
       if (!lay || isStrokeGroup(lay.node) || lay.meta.locked) return
@@ -673,7 +682,7 @@ export default function EditorCanvas() {
     requestAnimationFrame(attachTransformer)
   }
 
-  // ===== Данные для панелей/Toolbar =====
+  // ===== Данные для панелей/toolbar =====
   const layerItems: LayerItem[] = useMemo(() => {
     void uiTick
     return layers
@@ -681,7 +690,7 @@ export default function EditorCanvas() {
       .sort((a,b) => a.node.zIndex() - b.node.zIndex())
       .reverse()
       .map(l => ({
-        id: l.id, name: l.meta.name, type: l.type,
+        id: l.id, name: l.meta.name, type: l.type === "fxPreview" ? "image" : l.type,
         visible: l.meta.visible, locked: l.meta.locked,
         blend: l.meta.blend, opacity: l.meta.opacity,
       }))
@@ -694,6 +703,10 @@ export default function EditorCanvas() {
       return p.filter(x => x.id!==id)
     })
     if (selectedId === id) select(null)
+    if (fxPreviewLayerIdRef.current === id) {
+      fxPreviewLayerIdRef.current = null
+      fxPreviewNodeRef.current = null
+    }
     artLayerRef.current?.batchDraw()
     bump()
   }
@@ -752,7 +765,7 @@ export default function EditorCanvas() {
     if (tool !== "move") set({ tool: "move" })
   }
 
-  // ===== Свойства выбранного узла для Toolbar =====
+  // ===== Снимки свойств выбранного узла для Toolbar =====
   const sel = find(selectedId)
   const selectedKind: LayerType | null = sel?.type ?? null
   const selectedProps =
@@ -782,7 +795,7 @@ export default function EditorCanvas() {
   const setSelectedLetterSpacing = (ls:number)=> { const n = sel?.node as any; if (!n || typeof n.letterSpacing !== "function") return; n.letterSpacing(ls); artLayerRef.current?.batchDraw(); bump() }
   const setSelectedAlign = (a:"left"|"center"|"right") => { const n = sel?.node as Konva.Text; if (!n) return; n.align(a); artLayerRef.current?.batchDraw(); bump() }
 
-  // ===== Очистка текущей стороны =====
+  // ===== Clear All =====
   const clearArt = () => {
     const g = currentArt(); if (!g) return
     g.removeChildren()
@@ -792,7 +805,7 @@ export default function EditorCanvas() {
     bump()
   }
 
-  // ===== Скачивание (макет + арт) =====
+  // ===== Скачивание (mockup + art) =====
   const downloadBoth = async (s: Side) => {
     const st = stageRef.current; if (!st) return
     const pr = Math.max(2, Math.round(1/scale))
@@ -821,7 +834,159 @@ export default function EditorCanvas() {
     const a2 = document.createElement("a"); a2.href = artOnly; a2.download = `darkroom-${s}_art.png`; a2.click()
   }
 
-  // ===== Рендер =====
+  // ===== РАСТРОВАЯ ИНТЕГРАЦИЯ (RasterLab) =====
+
+  // Получить «плоский» арт активной стороны в базовом размере
+  const captureArtAsImage = async (): Promise<HTMLImageElement | null> => {
+    const st = stageRef.current; if (!st) return null
+
+    // выключаем UI и выбираем сторону
+    uiLayerRef.current?.visible(false)
+
+    const showFront = side === "front"
+    frontBgRef.current?.visible(showFront)
+    backBgRef.current?.visible(!showFront)
+    frontArtRef.current?.visible(showFront)
+    backArtRef.current?.visible(!showFront)
+
+    // скрываем мокап, чтобы получить только арт
+    const bgWasVisible = bgLayerRef.current?.visible() ?? true
+    bgLayerRef.current?.visible(false)
+    st.draw()
+
+    // точный пиксель-рейшио для BASE_W/BASE_H
+    const pixelRatio = 1 / scale
+    const dataUrl = st.toDataURL({ pixelRatio, mimeType: "image/png" })
+
+    // откат состояния
+    bgLayerRef.current?.visible(bgWasVisible)
+    frontBgRef.current?.visible(side === "front")
+    backBgRef.current?.visible(side === "back")
+    frontArtRef.current?.visible(side === "front")
+    backArtRef.current?.visible(side === "back")
+    uiLayerRef.current?.visible(true)
+    st.draw()
+
+    // создаём HTMLImageElement
+    const img = new Image()
+    const done = new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = (err) => reject(err)
+    })
+    img.src = dataUrl
+    await done
+    return img
+  }
+
+  // Помощник: из HTMLImageElement делать картинку ровно BASE_W x BASE_H (на случай расхождений)
+  const drawToExactCanvas = (img: HTMLImageElement): HTMLCanvasElement => {
+    const c = document.createElement("canvas")
+    c.width = BASE_W
+    c.height = BASE_H
+    const ctx = c.getContext("2d")!
+    ctx.clearRect(0, 0, BASE_W, BASE_H)
+    ctx.drawImage(img, 0, 0, BASE_W, BASE_H)
+    return c
+  }
+
+  // Конвертация Canvas -> HTMLImageElement для Konva.Image
+  const canvasToHtmlImage = async (c: HTMLCanvasElement): Promise<HTMLImageElement> => {
+    const url = c.toDataURL("image/png")
+    const img = new Image()
+    const done = new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = (e) => reject(e)
+    })
+    img.src = url
+    await done
+    return img
+  }
+
+  // Создать/обновить превью-слой FX поверх арта
+  const showFxPreview = async (canvasOut: HTMLCanvasElement) => {
+    const img = await canvasToHtmlImage(canvasOut)
+    const group = currentArt()
+
+    // если превью-узел уже существует — просто обновляем картинку
+    if (fxPreviewNodeRef.current && fxPreviewLayerIdRef.current) {
+      fxPreviewNodeRef.current.image(img)
+      ;(fxPreviewNodeRef.current as any).width?.(BASE_W)
+      ;(fxPreviewNodeRef.current as any).height?.(BASE_H)
+      artLayerRef.current?.batchDraw()
+      bump()
+      return
+    }
+
+    // иначе создаём новый Konva.Image
+    const kimg = new Konva.Image({
+      image: img,
+      x: 0, y: 0,
+      width: BASE_W,
+      height: BASE_H,
+      listening: false,
+    })
+    ;(kimg as any).id(uid())
+    const id = (kimg as any).id() as string
+
+    group.add(kimg)
+    kimg.zIndex(nextTopZ())
+
+    fxPreviewNodeRef.current = kimg
+    fxPreviewLayerIdRef.current = id
+
+    const meta = baseMeta(`FX preview`)
+    const lay: AnyLayer = { id, side, node: kimg, meta, type: "fxPreview" }
+    setLayers(prev => [...prev, lay])
+    artLayerRef.current?.batchDraw()
+    bump()
+  }
+
+  // Очистить превью-слой
+  const clearFxPreview = () => {
+    const id = fxPreviewLayerIdRef.current
+    if (!id) return
+    deleteLayer(id)
+    fxPreviewLayerIdRef.current = null
+    fxPreviewNodeRef.current = null
+  }
+
+  // Применить результат как новый слой изображения
+  const applyFxAsNewLayer = async (canvasOut: HTMLCanvasElement) => {
+    const img = await canvasToHtmlImage(canvasOut)
+    const kimg = new Konva.Image({
+      image: img,
+      x: 0, y: 0,
+      width: BASE_W,
+      height: BASE_H,
+      listening: true,
+    })
+    ;(kimg as any).id(uid())
+    const id = (kimg as any).id()
+    const meta = baseMeta(`fx render ${seqs.fx}`)
+    currentArt().add(kimg); kimg.zIndex(nextTopZ())
+    attachCommonHandlers(kimg, id as string)
+    setLayers(p => [...p, { id, side, node: kimg, meta, type: "image" }])
+    setSeqs(s => ({ ...s, fx: s.fx + 1 }))
+    select(id as string)
+    artLayerRef.current?.batchDraw()
+    bump()
+  }
+
+  // Открыть панель FX: лениво создаём пустой документ, если ещё нет
+  const openFx = () => {
+    if (!rasterDoc) {
+      // Если твой RasterDoc создаётся фабрикой — подставь свой конструктор.
+      // Здесь сохраняем null-документ, панель сама может инициализировать.
+      setRasterDoc({} as RasterDoc)
+    }
+    setFxOpen(true)
+  }
+  const closeFx = () => {
+    setFxOpen(false)
+    clearFxPreview()
+  }
+
+  // ===== Render =====
   return (
     <div
       className="fixed inset-0 bg-white"
@@ -833,7 +998,7 @@ export default function EditorCanvas() {
         userSelect: "none",
       }}
     >
-      {/* Панель слоёв — только на десктопе */}
+      {/* Desktop-панель слоёв — только на десктопе */}
       {!isMobile && showLayers && (
         <LayersPanel
           items={layerItems}
@@ -882,6 +1047,15 @@ export default function EditorCanvas() {
               />
             </Layer>
           </Stage>
+
+          {/* Плавающая кнопка FX (не меняем Toolbar) */}
+          <button
+            onClick={openFx}
+            className="absolute top-3 right-3 z-40 h-10 px-4 border border-black bg-white hover:bg-black hover:text-white transition"
+            title="Raster FX"
+          >
+            FX
+          </button>
         </div>
       </div>
 
@@ -930,6 +1104,58 @@ export default function EditorCanvas() {
           onMoveDown: (id)=>{ const order = layerItems.map(x=>x.id); const i = order.indexOf(id); if (i>-1 && i<order.length-1) reorder(id, order[i+1], "after") },
         }}
         mobileTopOffset={padTop}
+      />
+
+      {/* Панель RasterLab: получает источник, отдаёт превью и итог */}
+      <RasterLabPanel
+        open={fxOpen}
+        onClose={closeFx}
+        side={side}
+        doc={rasterDoc}
+        setDoc={setRasterDoc}
+        requestSource={async () => {
+          const img = await captureArtAsImage()
+          if (!img) return null
+          // гарантируем точный размер
+          const c = drawToExactCanvas(img)
+          return c
+        }}
+        onPreview={async (canvasOut: HTMLCanvasElement | HTMLImageElement | ImageBitmap) => {
+          // поддержка нескольких типов: приведём к canvas
+          let c: HTMLCanvasElement
+          if (canvasOut instanceof HTMLCanvasElement) {
+            c = canvasOut
+          } else if (canvasOut instanceof HTMLImageElement) {
+            c = drawToExactCanvas(canvasOut)
+          } else {
+            const tmp = document.createElement("canvas")
+            tmp.width = BASE_W; tmp.height = BASE_H
+            const ctx = tmp.getContext("2d")!
+            ctx.drawImage(canvasOut as any, 0, 0, BASE_W, BASE_H)
+            c = tmp
+          }
+          await showFxPreview(c)
+        }}
+        onApply={async (canvasOut: HTMLCanvasElement | HTMLImageElement | ImageBitmap) => {
+          let c: HTMLCanvasElement
+          if (canvasOut instanceof HTMLCanvasElement) {
+            c = canvasOut
+          } else if (canvasOut instanceof HTMLImageElement) {
+            c = drawToExactCanvas(canvasOut)
+          } else {
+            const tmp = document.createElement("canvas")
+            tmp.width = BASE_W; tmp.height = BASE_H
+            const ctx = tmp.getContext("2d")!
+            ctx.drawImage(canvasOut as any, 0, 0, BASE_W, BASE_H)
+            c = tmp
+          }
+          await applyFxAsNewLayer(c)
+          clearFxPreview()
+          setFxOpen(false)
+        }}
+        onCancelPreview={() => {
+          clearFxPreview()
+        }}
       />
     </div>
   )
