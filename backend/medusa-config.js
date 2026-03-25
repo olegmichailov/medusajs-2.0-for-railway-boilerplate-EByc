@@ -42,12 +42,10 @@ const medusaConfig = {
       cookieSecret: COOKIE_SECRET
     }
   },
-
   admin: {
     backendUrl: BACKEND_URL,
-    disable: true,
+    disable: SHOULD_DISABLE_ADMIN,
   },
-
   modules: [
     {
       key: Modules.FILE,
@@ -74,7 +72,6 @@ const medusaConfig = {
         ]
       }
     },
-
     ...(REDIS_URL ? [{
       key: Modules.EVENT_BUS,
       resolve: '@medusajs/event-bus-redis',
@@ -91,7 +88,6 @@ const medusaConfig = {
         }
       }
     }] : []),
-
     ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
       key: Modules.NOTIFICATION,
       resolve: '@medusajs/notification',
@@ -118,7 +114,6 @@ const medusaConfig = {
         ]
       }
     }] : []),
-
     ...(STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
       key: Modules.PAYMENT,
       resolve: '@medusajs/payment',
@@ -138,7 +133,6 @@ const medusaConfig = {
       },
     }] : [])
   ],
-
   plugins: [
     ...(MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
       resolve: '@rokmohar/medusa-plugin-meilisearch',
