@@ -32,16 +32,12 @@ const medusaConfig = {
     databaseLogging: false,
     redisUrl: REDIS_URL,
     workerMode: WORKER_MODE,
-    cors: "https://gmorkl.de",
-
-    // 💥 ВОТ ЭТО КРИТИЧЕСКИЙ ФИКС
     http: {
       host: "0.0.0.0",
       port: process.env.PORT || 9000,
-
-      adminCors: `${ADMIN_CORS},https://gmorkl.de`,
-      authCors: `${AUTH_CORS},https://gmorkl.de`,
-      storeCors: `${STORE_CORS},https://gmorkl.de`,
+      adminCors: ADMIN_CORS,
+      authCors: AUTH_CORS,
+      storeCors: STORE_CORS,
       jwtSecret: JWT_SECRET,
       cookieSecret: COOKIE_SECRET
     }
@@ -49,7 +45,7 @@ const medusaConfig = {
 
   admin: {
     backendUrl: BACKEND_URL,
-    disable: SHOULD_DISABLE_ADMIN,
+    disable: true,
   },
 
   modules: [
@@ -79,7 +75,6 @@ const medusaConfig = {
       }
     },
 
-    // 💥 SAFE REDIS (не ломает сервер если Redis кривой)
     ...(REDIS_URL ? [{
       key: Modules.EVENT_BUS,
       resolve: '@medusajs/event-bus-redis',
@@ -97,7 +92,6 @@ const medusaConfig = {
       }
     }] : []),
 
-    // 💥 EMAIL (оставляем как есть, он безопасен)
     ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
       key: Modules.NOTIFICATION,
       resolve: '@medusajs/notification',
@@ -125,8 +119,7 @@ const medusaConfig = {
       }
     }] : []),
 
-    // 💥 ВРЕМЕННО ОТКЛЮЧАЕМ STRIPE (он часто ломает старт)
-    ...(process.env.ENABLE_STRIPE === "true" && STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
+    ...(STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
       key: Modules.PAYMENT,
       resolve: '@medusajs/payment',
       options: {
@@ -147,8 +140,7 @@ const medusaConfig = {
   ],
 
   plugins: [
-    // 💥 ВРЕМЕННО ЧЕРЕЗ ФЛАГ
-    ...(process.env.ENABLE_SEARCH === "true" && MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
+    ...(MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
       resolve: '@rokmohar/medusa-plugin-meilisearch',
       options: {
         config: {
