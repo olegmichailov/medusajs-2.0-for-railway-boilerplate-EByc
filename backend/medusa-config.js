@@ -33,7 +33,12 @@ const medusaConfig = {
     redisUrl: REDIS_URL,
     workerMode: WORKER_MODE,
     cors: "https://gmorkl.de",
+
+    // 💥 ВОТ ЭТО КРИТИЧЕСКИЙ ФИКС
     http: {
+      host: "0.0.0.0",
+      port: process.env.PORT || 9000,
+
       adminCors: `${ADMIN_CORS},https://gmorkl.de`,
       authCors: `${AUTH_CORS},https://gmorkl.de`,
       storeCors: `${STORE_CORS},https://gmorkl.de`,
@@ -41,10 +46,12 @@ const medusaConfig = {
       cookieSecret: COOKIE_SECRET
     }
   },
+
   admin: {
     backendUrl: BACKEND_URL,
     disable: SHOULD_DISABLE_ADMIN,
   },
+
   modules: [
     {
       key: Modules.FILE,
@@ -71,6 +78,8 @@ const medusaConfig = {
         ]
       }
     },
+
+    // 💥 SAFE REDIS (не ломает сервер если Redis кривой)
     ...(REDIS_URL ? [{
       key: Modules.EVENT_BUS,
       resolve: '@medusajs/event-bus-redis',
@@ -87,6 +96,8 @@ const medusaConfig = {
         }
       }
     }] : []),
+
+    // 💥 EMAIL (оставляем как есть, он безопасен)
     ...(SENDGRID_API_KEY && SENDGRID_FROM_EMAIL || RESEND_API_KEY && RESEND_FROM_EMAIL ? [{
       key: Modules.NOTIFICATION,
       resolve: '@medusajs/notification',
@@ -113,7 +124,9 @@ const medusaConfig = {
         ]
       }
     }] : []),
-    ...(STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
+
+    // 💥 ВРЕМЕННО ОТКЛЮЧАЕМ STRIPE (он часто ломает старт)
+    ...(process.env.ENABLE_STRIPE === "true" && STRIPE_API_KEY && STRIPE_WEBHOOK_SECRET ? [{
       key: Modules.PAYMENT,
       resolve: '@medusajs/payment',
       options: {
@@ -125,15 +138,17 @@ const medusaConfig = {
               apiKey: STRIPE_API_KEY,
               webhookSecret: STRIPE_WEBHOOK_SECRET,
               payment_element: true,
-              automatic_payment_methods: true, // <------ ВОТ ЭТА СТРОКА!
+              automatic_payment_methods: true,
             },
           },
         ],
       },
     }] : [])
   ],
+
   plugins: [
-    ...(MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
+    // 💥 ВРЕМЕННО ЧЕРЕЗ ФЛАГ
+    ...(process.env.ENABLE_SEARCH === "true" && MEILISEARCH_HOST && MEILISEARCH_ADMIN_KEY ? [{
       resolve: '@rokmohar/medusa-plugin-meilisearch',
       options: {
         config: {
@@ -154,5 +169,4 @@ const medusaConfig = {
   ]
 };
 
-console.log(JSON.stringify(medusaConfig, null, 2));
 export default defineConfig(medusaConfig);
