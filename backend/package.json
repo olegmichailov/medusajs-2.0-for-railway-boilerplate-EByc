@@ -24,6 +24,7 @@
     "@medusajs/cli": "latest",
     "@medusajs/core-flows": "latest",
     "@medusajs/dashboard": "latest",
+    "@medusajs/draft-order": "latest",
     "@medusajs/framework": "latest",
     "@medusajs/medusa": "latest",
     "@medusajs/notification-sendgrid": "latest",
