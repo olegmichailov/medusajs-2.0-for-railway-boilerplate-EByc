@@ -31,7 +31,6 @@
     "@medusajs/medusa": "latest",
     "@medusajs/notification-sendgrid": "latest",
     "@medusajs/payment-stripe": "latest",
-    "@medusajs/sales-channel": "latest",
     "@medusajs/types": "latest",
     "@medusajs/ui": "latest",
     "@medusajs/utils": "latest",
