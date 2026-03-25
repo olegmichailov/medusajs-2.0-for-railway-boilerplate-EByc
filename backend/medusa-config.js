@@ -11,7 +11,6 @@ import {
   RESEND_FROM_EMAIL,
   SENDGRID_API_KEY,
   SENDGRID_FROM_EMAIL,
-  SHOULD_DISABLE_ADMIN,
   STORE_CORS,
   STRIPE_API_KEY,
   STRIPE_WEBHOOK_SECRET,
@@ -44,7 +43,7 @@ const medusaConfig = {
   },
   admin: {
     backendUrl: BACKEND_URL,
-    disable: SHOULD_DISABLE_ADMIN,
+    disable: true,
   },
   modules: [
     {
