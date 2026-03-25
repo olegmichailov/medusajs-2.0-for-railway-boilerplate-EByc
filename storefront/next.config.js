@@ -1,6 +1,5 @@
 const checkEnvVariables = require("./check-env-variables")
 checkEnvVariables()
-
 const getCleanHostname = (url) => {
   if (!url) return null
   try {
@@ -9,30 +8,25 @@ const getCleanHostname = (url) => {
     return url.replace(/^https?:\/\//, "").replace(/\/$/, "")
   }
 }
-
 const backendHost = getCleanHostname(process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL)
 const minioHost = getCleanHostname(process.env.NEXT_PUBLIC_MINIO_ENDPOINT)
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-
   eslint: {
     ignoreDuringBuilds: true,
   },
-
   typescript: {
     ignoreBuildErrors: true,
   },
-
+  // Увеличиваем таймаут сборки страниц с 60 до 300 секунд
+  // Это фиксит ошибку: "Collecting page data for /[countryCode]/categories/[...category] is still timing out"
+  staticPageGenerationTimeout: 300,
   images: {
-    // 💥 КРИТИЧНО: отключает Next.js-оптимизацию, чтобы избежать ошибок
     unoptimized: true,
-
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 600,
     deviceSizes: [360, 640, 768, 1024, 1280, 1440, 1920],
-
     remotePatterns: [
       {
         protocol: "http",
@@ -72,11 +66,9 @@ const nextConfig = {
       },
     ],
   },
-
   serverRuntimeConfig: {
     port: process.env.PORT || 3000,
   },
-
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.resolve.fallback = {
@@ -87,5 +79,4 @@ const nextConfig = {
     return config
   },
 }
-
 module.exports = nextConfig
