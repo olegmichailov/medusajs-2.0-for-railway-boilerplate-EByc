@@ -161,7 +161,7 @@ class MinioFileProviderService extends AbstractFileProviderService {
     try {
       const parsedFilename = path.parse(file.filename)
       const fileKey = `${parsedFilename.name}-${ulid()}${parsedFilename.ext}`
-      const content = Buffer.from(file.content, 'binary')
+      const content = Buffer.from(file.content, 'base64')
 
       // Upload file with public-read access
       await this.client.putObject(
