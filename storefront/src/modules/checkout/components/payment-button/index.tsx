@@ -27,6 +27,14 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     !cart.email ||
     (cart.shipping_methods?.length ?? 0) < 1
 
+  // TODO: Add this once gift cards are implemented
+  // const paidByGiftcard =
+  //   cart?.gift_cards && cart?.gift_cards?.length > 0 && cart?.total === 0
+
+  // if (paidByGiftcard) {
+  //   return <GiftCardPaymentButton />
+  // }
+
   const paymentSession = cart.payment_collection?.payment_sessions?.[0]
 
   switch (true) {
@@ -53,6 +61,25 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     default:
       return <Button disabled>Select a payment method</Button>
   }
+}
+
+const GiftCardPaymentButton = () => {
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleOrder = async () => {
+    setSubmitting(true)
+    await placeOrder()
+  }
+
+  return (
+    <Button
+      onClick={handleOrder}
+      isLoading={submitting}
+      data-testid="submit-order-button"
+    >
+      Place order
+    </Button>
+  )
 }
 
 const StripePaymentButton = ({
