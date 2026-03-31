@@ -39,11 +39,6 @@ const medusaConfig = {
       storeCors: STORE_CORS,
       jwtSecret: JWT_SECRET,
       cookieSecret: COOKIE_SECRET
-    },
-    build: {
-      rollupOptions: {
-        external: ["@medusajs/dashboard", "@medusajs/admin-shared"]
-      }
     }
   },
   admin: {
@@ -129,8 +124,6 @@ const medusaConfig = {
             options: {
               apiKey: STRIPE_API_KEY,
               webhookSecret: STRIPE_WEBHOOK_SECRET,
-              payment_element: true,
-              automatic_payment_methods: true,
             },
           },
         ],
