@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useCallback, useContext, useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RadioGroup } from "@headlessui/react"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -148,7 +148,7 @@ const Payment = ({
               {isStripe && stripeReady && (
                 <div className="mt-5 transition-all duration-150 ease-in-out">
                   <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                    Enter your card details:
+                    Введите данные карты:
                   </Text>
 
                   <PaymentElement
@@ -196,8 +196,8 @@ const Payment = ({
             data-testid="submit-payment-button"
           >
             {!activeSession && isStripeFunc(selectedPaymentMethod)
-              ? "Enter card details"
-              : "Continue to review"}
+              ? "Введите данные карты"
+              : "Продолжить к обзору"}
           </Button>
         </div>
 
@@ -231,7 +231,7 @@ const Payment = ({
                   </Container>
                   <Text>
                     {isStripeFunc(selectedPaymentMethod)
-                      ? "Ready to pay"
+                      ? "Готово к оплате"
                       : "Another step will appear"}
                   </Text>
                 </div>
