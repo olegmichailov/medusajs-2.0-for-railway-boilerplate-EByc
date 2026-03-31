@@ -39,6 +39,11 @@ const medusaConfig = {
       storeCors: STORE_CORS,
       jwtSecret: JWT_SECRET,
       cookieSecret: COOKIE_SECRET
+    },
+    build: {
+      rollupOptions: {
+        external: ["@medusajs/dashboard", "@medusajs/admin-shared"]
+      }
     }
   },
   admin: {
