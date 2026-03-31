@@ -1,3 +1,0 @@
-[phases.setup]
-nixPkgs = ["nodejs_22", "npm-9_x"]
-cmds = ["npm install -g pnpm@9.10.0"]
