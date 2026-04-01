@@ -177,7 +177,8 @@ const Payment = ({
 
         if (
           paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "processing"
+          paymentIntent.status === "processing" ||
+          paymentIntent.status === "requires_capture"
         ) {
           try {
             await placeOrder()

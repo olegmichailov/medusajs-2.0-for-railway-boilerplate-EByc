@@ -106,7 +106,8 @@ const StripePaymentButton = ({
 
       if (
         paymentIntent.status === "succeeded" ||
-        paymentIntent.status === "processing"
+        paymentIntent.status === "processing" ||
+        paymentIntent.status === "requires_capture"
       ) {
         await onPaymentCompleted()
         return true
@@ -147,7 +148,8 @@ const StripePaymentButton = ({
         if (cancelled || !paymentIntent) return
         if (
           paymentIntent.status === "succeeded" ||
-          paymentIntent.status === "processing"
+          paymentIntent.status === "processing" ||
+          paymentIntent.status === "requires_capture"
         ) {
           setSubmitting(true)
           await onPaymentCompleted()
@@ -206,7 +208,8 @@ const StripePaymentButton = ({
     if (
       paymentIntent &&
       (paymentIntent.status === "succeeded" ||
-        paymentIntent.status === "processing")
+        paymentIntent.status === "processing" ||
+        paymentIntent.status === "requires_capture")
     ) {
       await onPaymentCompleted()
       return
