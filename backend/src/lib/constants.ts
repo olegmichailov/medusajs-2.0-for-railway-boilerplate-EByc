@@ -64,13 +64,13 @@ export const COOKIE_SECRET = assertValue(
 export const MINIO_ENDPOINT = process.env.MINIO_ENDPOINT;
 export const MINIO_ACCESS_KEY = process.env.MINIO_ACCESS_KEY;
 export const MINIO_SECRET_KEY = process.env.MINIO_SECRET_KEY;
-export const MINIO_BUCKET = process.env.MINIO_BUCKET;
+export const MINIO_BUCKET = process.env.MINIO_BUCKET; // Optional, if not set bucket will be called: medusa-media
 
 /**
  * (optional) Resend API Key and from Email - do not set if using SendGrid
  */
 export const RESEND_API_KEY = process.env.RESEND_API_KEY;
-export const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || process.env.RESEND_FROM;
+export const RESEND_FROM_EMAIL = process.env.RESEND_FROM;
 
 /**
  * (optionl) SendGrid API Key and from Email - do not set if using Resend
