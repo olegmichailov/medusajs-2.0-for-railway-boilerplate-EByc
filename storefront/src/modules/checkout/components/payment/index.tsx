@@ -29,6 +29,7 @@ const Payment = ({
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cardComplete, setCardComplete] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
@@ -296,7 +297,13 @@ const Payment = ({
                         Enter your payment details:
                       </Text>
                       {/* Внутри — вкладки Card/Klarna/Revolut Pay */}
-                      <PaymentElement options={{ layout: "tabs" }} />
+                      <PaymentElement
+                        options={{ layout: "tabs" }}
+                        onChange={(e) => {
+                          setError(null)
+                          setCardComplete(e.complete)
+                        }}
+                      />
                     </div>
                   )}
                 </>
@@ -343,7 +350,7 @@ const Payment = ({
             className="mt-6"
             onClick={handleSubmit}
             isLoading={isLoading}
-            disabled={(!selectedPaymentMethod && !paidByGiftcard) || !methodsLoaded}
+            disabled={(!selectedPaymentMethod && !paidByGiftcard) || !methodsLoaded || (choseStripe && activeSession && !cardComplete)}
             data-testid="submit-payment-button"
           >
             {!activeSession && choseStripe
